@@ -1,4 +1,4 @@
-# EduPortal
+# The Elevated Beauty Method
 
 A free educational community portal where anyone can sign up, browse courses across 8 subject areas, track their learning progress, and connect with the community.
 

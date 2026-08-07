@@ -9,7 +9,7 @@ export default function LandingPage() {
       <nav className="h-20 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-50 px-6 md:px-12 flex items-center justify-between">
         <div className="flex items-center gap-3 text-primary">
           <BookType className="w-8 h-8" />
-          <span className="font-serif text-2xl font-bold tracking-wide">EduPortal</span>
+          <span className="font-serif text-2xl font-bold tracking-wide">The Elevated Beauty Method</span>
         </div>
         <div className="flex items-center gap-4">
           <Link href="/sign-in" className="text-muted-foreground hover:text-primary transition-colors text-sm font-medium">
@@ -135,9 +135,9 @@ export default function LandingPage() {
       <footer className="py-12 px-6 md:px-12 lg:px-24 bg-card/50 border-t border-border flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center gap-2 text-muted-foreground">
           <BookType className="w-5 h-5 text-primary" />
-          <span className="font-serif font-bold text-foreground">EduPortal</span>
+          <span className="font-serif font-bold text-foreground">The Elevated Beauty Method</span>
         </div>
-        <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} EduPortal. A place for curious minds.</p>
+        <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} The Elevated Beauty Method.</p>
       </footer>
     </div>
   );
