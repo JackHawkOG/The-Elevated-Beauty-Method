@@ -16,7 +16,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarHeader className="p-4">
             <Link href="/dashboard" className="flex items-center gap-3 text-primary transition-opacity hover:opacity-80">
               <BookType className="w-8 h-8" />
-              <span className="font-serif text-2xl font-bold tracking-wide">The Elevated Beauty Method</span>
+              <span className="font-serif text-lg font-bold tracking-wide leading-tight">The Elevated Beauty Method</span>
             </Link>
           </SidebarHeader>
           <SidebarContent className="px-2 py-4">

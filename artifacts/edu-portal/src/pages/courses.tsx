@@ -56,14 +56,14 @@ export default function CoursesPage() {
       <div className="space-y-8 pb-12 max-w-6xl mx-auto">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Library</h1>
-            <p className="text-muted-foreground text-lg">Browse our collection of thoughtfully crafted courses.</p>
+            <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">The Method</h1>
+            <p className="text-muted-foreground text-lg">Beauty mastery, confidence, and presence — explore every topic.</p>
           </div>
           <div className="relative w-full md:w-72">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input 
               type="search" 
-              placeholder="Search subjects..." 
+              placeholder="Search courses..." 
               className="pl-9 bg-input/50 border-border rounded-full"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -84,7 +84,7 @@ export default function CoursesPage() {
                 className={`cursor-pointer rounded-full px-4 py-1.5 text-sm ${selectedCategoryId === undefined ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'border-border text-muted-foreground hover:text-foreground'}`}
                 onClick={() => setSelectedCategoryId(undefined)}
               >
-                All Subjects
+                All Topics
               </Badge>
               {categories?.map(cat => (
                 <Badge 

@@ -29,8 +29,8 @@ export default function CommunityPage() {
       <div className="max-w-6xl mx-auto space-y-8 pb-12">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Community Board</h1>
-            <p className="text-muted-foreground text-lg">Announcements, updates, and recent activity from the portal.</p>
+            <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Community</h1>
+            <p className="text-muted-foreground text-lg">Announcements, updates, and conversations from The Elevated Beauty Method community.</p>
           </div>
           <CreateAnnouncementDialog />
         </div>

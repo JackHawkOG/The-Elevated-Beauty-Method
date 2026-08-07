@@ -23,16 +23,16 @@ export default function Dashboard() {
     <AppLayout>
       <div className="space-y-8 pb-12">
         <div>
-          <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Welcome back to the library.</h1>
-          <p className="text-muted-foreground text-lg">Here's what's happening around the portal today.</p>
+          <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Welcome back.</h1>
+          <p className="text-muted-foreground text-lg">Here's what's happening in The Elevated Beauty Method community today.</p>
         </div>
 
         {/* Stats Row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Courses" value={stats?.totalCourses} icon={<Library className="w-4 h-4 text-primary" />} loading={statsLoading} />
           <StatCard title="Lessons" value={stats?.totalLessons} icon={<BookOpen className="w-4 h-4 text-primary" />} loading={statsLoading} />
-          <StatCard title="Learners" value={stats?.totalEnrollments} icon={<Users className="w-4 h-4 text-primary" />} loading={statsLoading} />
-          <StatCard title="Categories" value={stats?.totalCategories} icon={<Award className="w-4 h-4 text-primary" />} loading={statsLoading} />
+          <StatCard title="Members" value={stats?.totalEnrollments} icon={<Users className="w-4 h-4 text-primary" />} loading={statsLoading} />
+          <StatCard title="Topics" value={stats?.totalCategories} icon={<Award className="w-4 h-4 text-primary" />} loading={statsLoading} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -80,9 +80,9 @@ export default function Dashboard() {
                   <CardContent className="p-8 text-center">
                     <Library className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
                     <h3 className="text-xl font-bold mb-2">No courses yet</h3>
-                    <p className="text-muted-foreground mb-6">Find something interesting to study.</p>
+                    <p className="text-muted-foreground mb-6">Explore the method and find your starting point.</p>
                     <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-6">
-                      <Link href="/courses">Browse Courses</Link>
+                      <Link href="/courses">Explore the Method</Link>
                     </Button>
                   </CardContent>
                 </Card>
