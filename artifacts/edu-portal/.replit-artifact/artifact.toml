@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "EduPortal"
+description = "A free educational community portal where anyone can sign up, browse and search courses, watch lessons, read articles, and participate in a learning community. Organized by subject with secure login, easy navigation, and a rich library of content."
+version = "1.0.0"
+id = "artifacts/edu-portal"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21120
+
+[services.development]
+run = "pnpm --filter @workspace/edu-portal run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/edu-portal", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/edu-portal/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21120"
+BASE_PATH = "/"

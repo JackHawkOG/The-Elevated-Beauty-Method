@@ -1,0 +1,229 @@
+import { useRoute, Link, useLocation } from "wouter";
+import { 
+  useGetLesson, 
+  getGetLessonQueryKey,
+  useListLessons,
+  getListLessonsQueryKey,
+  useUpdateProgress,
+  useGetCourse,
+  getGetCourseQueryKey
+} from "@workspace/api-client-react";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ArrowLeft, CheckCircle, Circle, ChevronLeft, ChevronRight, Menu, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+
+export default function LessonPage() {
+  const [, params] = useRoute("/courses/:courseId/lessons/:lessonId");
+  const courseId = Number(params?.courseId);
+  const lessonId = Number(params?.lessonId);
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data: course } = useGetCourse(courseId, { 
+    query: { queryKey: getGetCourseQueryKey(courseId), enabled: !!courseId } 
+  });
+  
+  const { data: lesson, isLoading } = useGetLesson(lessonId, {
+    query: { queryKey: getGetLessonQueryKey(lessonId), enabled: !!lessonId }
+  });
+
+  const { data: lessons, isLoading: lessonsLoading } = useListLessons(courseId, {
+    query: { queryKey: getListLessonsQueryKey(courseId), enabled: !!courseId }
+  });
+
+  const updateProgress = useUpdateProgress({
+    mutation: {
+      onSuccess: () => {
+        toast({ title: "Progress saved", description: "Lesson marked as complete." });
+        // Find next lesson and redirect if exists
+        const currentIndex = lessons?.findIndex(l => l.id === lessonId) ?? -1;
+        if (lessons && currentIndex >= 0 && currentIndex < lessons.length - 1) {
+          setLocation(`/courses/${courseId}/lessons/${lessons[currentIndex + 1].id}`);
+        } else {
+          setLocation(`/courses/${courseId}`);
+        }
+      },
+      onError: () => {
+        toast({ title: "Error", description: "Could not save progress.", variant: "destructive" });
+      }
+    }
+  });
+
+  const handleComplete = () => {
+    updateProgress.mutate({ courseId, data: { lessonId } });
+  };
+
+  const currentIndex = lessons?.findIndex(l => l.id === lessonId) ?? -1;
+  const prevLesson = currentIndex > 0 ? lessons?.[currentIndex - 1] : null;
+  const nextLesson = lessons && currentIndex < lessons.length - 1 ? lessons[currentIndex + 1] : null;
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen bg-background text-foreground">
+        <div className="w-80 border-r border-border hidden lg:block bg-sidebar">
+          <div className="p-6 border-b border-border space-y-4">
+            <Skeleton className="h-6 w-3/4 bg-muted" />
+            <Skeleton className="h-4 w-1/2 bg-muted" />
+          </div>
+          <div className="p-4 space-y-4">
+            {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-10 w-full bg-muted rounded-md" />)}
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col h-screen overflow-hidden">
+          <header className="h-16 border-b border-border flex items-center px-6 bg-card/50">
+            <Skeleton className="h-6 w-1/3 bg-muted" />
+          </header>
+          <main className="flex-1 overflow-auto p-8 md:p-12 animate-pulse">
+            <div className="max-w-3xl mx-auto space-y-8">
+              <Skeleton className="h-12 w-3/4 bg-muted" />
+              <Skeleton className="h-[400px] w-full bg-muted rounded-xl" />
+              <div className="space-y-4">
+                <Skeleton className="h-4 w-full bg-muted" />
+                <Skeleton className="h-4 w-full bg-muted" />
+                <Skeleton className="h-4 w-5/6 bg-muted" />
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (!lesson) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Lesson not found</h2>
+          <Button asChild><Link href={`/courses/${courseId}`}>Back to course</Link></Button>
+        </div>
+      </div>
+    );
+  }
+
+  const SidebarContent = () => (
+    <>
+      <div className="p-6 border-b border-border">
+        <Link href={`/courses/${courseId}`} className="inline-flex items-center text-sm text-muted-foreground hover:text-primary mb-4 transition-colors">
+          <ArrowLeft className="w-4 h-4 mr-1" /> Course Overview
+        </Link>
+        <h3 className="font-serif font-bold text-lg leading-tight line-clamp-2">{course?.title || 'Loading...'}</h3>
+      </div>
+      <div className="flex-1 overflow-auto p-4 space-y-1">
+        {lessonsLoading ? (
+          [1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full bg-muted mb-2" />)
+        ) : (
+          lessons?.map((l, i) => {
+            const isActive = l.id === lessonId;
+            return (
+              <Link key={l.id} href={`/courses/${courseId}/lessons/${l.id}`}>
+                <button className={`w-full text-left px-3 py-3 rounded-lg flex items-start gap-3 transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-muted-foreground hover:text-foreground'}`}>
+                  <div className="mt-0.5 shrink-0">
+                    {/* Assuming we don't have individual completion status in list, just using circles */}
+                    {isActive ? <Circle className="w-4 h-4 fill-primary/20" /> : <Circle className="w-4 h-4" />}
+                  </div>
+                  <div>
+                    <span className="text-xs font-medium opacity-70 block mb-0.5">Lesson {i + 1}</span>
+                    <span className={`text-sm font-medium leading-tight ${isActive ? 'text-foreground' : ''}`}>{l.title}</span>
+                  </div>
+                </button>
+              </Link>
+            )
+          })
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <div className="flex h-screen bg-background text-foreground overflow-hidden">
+      {/* Desktop Sidebar */}
+      <div className="w-80 border-r border-border hidden lg:flex flex-col bg-sidebar text-sidebar-foreground">
+        <SidebarContent />
+      </div>
+
+      <div className="flex-1 flex flex-col h-screen min-w-0">
+        <header className="h-16 border-b border-border flex items-center justify-between px-4 lg:px-8 bg-card/80 backdrop-blur sticky top-0 z-10">
+          <div className="flex items-center gap-4">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="lg:hidden text-muted-foreground">
+                  <Menu className="w-5 h-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-80 p-0 flex flex-col bg-sidebar border-border">
+                <SheetHeader className="sr-only">
+                  <SheetTitle>Course Lessons</SheetTitle>
+                </SheetHeader>
+                <SidebarContent />
+              </SheetContent>
+            </Sheet>
+            <h1 className="font-serif font-bold text-lg truncate hidden sm:block">{lesson.title}</h1>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="hidden sm:flex border-border text-foreground hover:bg-muted"
+              onClick={handleComplete}
+              disabled={updateProgress.isPending}
+            >
+              {updateProgress.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+              Mark Complete
+            </Button>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-auto bg-background">
+          <div className="max-w-3xl mx-auto px-6 py-12 md:py-20">
+            <h1 className="text-3xl md:text-5xl font-serif font-bold mb-8 leading-tight">{lesson.title}</h1>
+            
+            {lesson.videoUrl && (
+              <div className="aspect-video rounded-2xl overflow-hidden bg-black mb-12 border border-border shadow-2xl">
+                {/* Assuming videoUrl is an embed link for an iframe, or just a placeholder if not valid */}
+                <iframe 
+                  src={lesson.videoUrl.replace('watch?v=', 'embed/')} 
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                ></iframe>
+              </div>
+            )}
+
+            <div className="prose prose-invert prose-lg max-w-none text-muted-foreground">
+              {lesson.content ? (
+                <div dangerouslySetInnerHTML={{ __html: lesson.content.replace(/\n/g, '<br/>') }} />
+              ) : (
+                <p>This lesson doesn't have any text content yet.</p>
+              )}
+            </div>
+
+            <div className="mt-20 pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
+              {prevLesson ? (
+                <Button asChild variant="outline" className="w-full sm:w-auto border-border">
+                  <Link href={`/courses/${courseId}/lessons/${prevLesson.id}`}>
+                    <ChevronLeft className="w-4 h-4 mr-2" /> Previous Lesson
+                  </Link>
+                </Button>
+              ) : <div></div>}
+
+              <Button 
+                onClick={handleComplete}
+                disabled={updateProgress.isPending}
+                className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {updateProgress.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
+                {nextLesson ? 'Complete & Continue' : 'Finish Course'}
+                {nextLesson && <ChevronRight className="w-4 h-4 ml-1" />}
+              </Button>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}

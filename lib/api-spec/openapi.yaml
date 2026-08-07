@@ -3,20 +3,33 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Educational Community Portal API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: categories
+    description: Subject categories
+  - name: courses
+    description: Educational courses
+  - name: lessons
+    description: Course lessons
+  - name: enrollments
+    description: User course enrollments
+  - name: announcements
+    description: Community announcements
+  - name: users
+    description: User profile
+  - name: dashboard
+    description: Dashboard summary endpoints
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +37,336 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /categories:
+    get:
+      operationId: listCategories
+      tags: [categories]
+      summary: List all subject categories
+      responses:
+        "200":
+          description: List of categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+
+  /courses:
+    get:
+      operationId: listCourses
+      tags: [courses]
+      summary: List all courses with optional filters
+      parameters:
+        - in: query
+          name: categoryId
+          schema:
+            type: number
+          required: false
+        - in: query
+          name: search
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: difficulty
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: limit
+          schema:
+            type: number
+          required: false
+        - in: query
+          name: offset
+          schema:
+            type: number
+          required: false
+      responses:
+        "200":
+          description: List of courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Course"
+    post:
+      operationId: createCourse
+      tags: [courses]
+      summary: Create a new course (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CourseInput"
+      responses:
+        "201":
+          description: Course created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
+
+  /courses/{courseId}:
+    get:
+      operationId: getCourse
+      tags: [courses]
+      summary: Get a single course by ID
+      parameters:
+        - in: path
+          name: courseId
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Course detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CourseDetail"
+        "404":
+          description: Not found
+
+  /courses/{courseId}/lessons:
+    get:
+      operationId: listLessons
+      tags: [lessons]
+      summary: List lessons for a course
+      parameters:
+        - in: path
+          name: courseId
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Lessons list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Lesson"
+    post:
+      operationId: createLesson
+      tags: [lessons]
+      summary: Add a lesson to a course (admin)
+      parameters:
+        - in: path
+          name: courseId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LessonInput"
+      responses:
+        "201":
+          description: Lesson created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lesson"
+
+  /lessons/{lessonId}:
+    get:
+      operationId: getLesson
+      tags: [lessons]
+      summary: Get a single lesson
+      parameters:
+        - in: path
+          name: lessonId
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Lesson detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lesson"
+        "404":
+          description: Not found
+
+  /enrollments:
+    get:
+      operationId: listEnrollments
+      tags: [enrollments]
+      summary: List the current user's enrollments
+      responses:
+        "200":
+          description: User's enrolled courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Enrollment"
+    post:
+      operationId: enrollInCourse
+      tags: [enrollments]
+      summary: Enroll in a course
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnrollmentInput"
+      responses:
+        "201":
+          description: Enrollment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrollment"
+
+  /enrollments/{courseId}/progress:
+    patch:
+      operationId: updateProgress
+      tags: [enrollments]
+      summary: Update lesson progress for a course
+      parameters:
+        - in: path
+          name: courseId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProgressUpdate"
+      responses:
+        "200":
+          description: Progress updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrollment"
+
+  /announcements:
+    get:
+      operationId: listAnnouncements
+      tags: [announcements]
+      summary: List community announcements
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: number
+          required: false
+      responses:
+        "200":
+          description: Announcements list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Announcement"
+    post:
+      operationId: createAnnouncement
+      tags: [announcements]
+      summary: Post a community announcement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnnouncementInput"
+      responses:
+        "201":
+          description: Announcement posted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Announcement"
+
+  /users/me:
+    get:
+      operationId: getMe
+      tags: [users]
+      summary: Get the current user's profile
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+    patch:
+      operationId: updateMe
+      tags: [users]
+      summary: Update the current user's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserProfileUpdate"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get summary stats for the portal home dashboard
+      responses:
+        "200":
+          description: Portal statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/featured:
+    get:
+      operationId: getFeaturedCourses
+      tags: [dashboard]
+      summary: Get featured and trending courses
+      responses:
+        "200":
+          description: Featured courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Course"
+
+  /dashboard/recent-activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent community activity feed
+      responses:
+        "200":
+          description: Activity feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +377,261 @@ components:
       required:
         - status
 
+    Category:
+      type: object
+      required: [id, name, slug, icon, courseCount]
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        slug:
+          type: string
+        icon:
+          type: string
+        description:
+          type: ["string", "null"]
+        courseCount:
+          type: number
+
+    Course:
+      type: object
+      required: [id, title, description, categoryId, categoryName, difficulty, instructorName, lessonCount, enrollmentCount, createdAt]
+      properties:
+        id:
+          type: number
+        title:
+          type: string
+        description:
+          type: string
+        categoryId:
+          type: number
+        categoryName:
+          type: string
+        difficulty:
+          type: string
+        instructorName:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        lessonCount:
+          type: number
+        enrollmentCount:
+          type: number
+        isFeatured:
+          type: boolean
+        createdAt:
+          type: string
+
+    CourseDetail:
+      type: object
+      required: [id, title, description, categoryId, categoryName, difficulty, instructorName, lessonCount, enrollmentCount, createdAt, lessons]
+      properties:
+        id:
+          type: number
+        title:
+          type: string
+        description:
+          type: string
+        categoryId:
+          type: number
+        categoryName:
+          type: string
+        difficulty:
+          type: string
+        instructorName:
+          type: string
+        thumbnailUrl:
+          type: ["string", "null"]
+        lessonCount:
+          type: number
+        enrollmentCount:
+          type: number
+        isFeatured:
+          type: boolean
+        createdAt:
+          type: string
+        lessons:
+          type: array
+          items:
+            $ref: "#/components/schemas/Lesson"
+
+    CourseInput:
+      type: object
+      required: [title, description, categoryId, difficulty, instructorName]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        categoryId:
+          type: number
+        difficulty:
+          type: string
+        instructorName:
+          type: string
+        thumbnailUrl:
+          type: string
+        isFeatured:
+          type: boolean
+
+    Lesson:
+      type: object
+      required: [id, courseId, title, sortOrder, durationMinutes, createdAt]
+      properties:
+        id:
+          type: number
+        courseId:
+          type: number
+        title:
+          type: string
+        content:
+          type: ["string", "null"]
+        videoUrl:
+          type: ["string", "null"]
+        sortOrder:
+          type: number
+        durationMinutes:
+          type: number
+        createdAt:
+          type: string
+
+    LessonInput:
+      type: object
+      required: [title, sortOrder, durationMinutes]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        content:
+          type: string
+        videoUrl:
+          type: string
+        sortOrder:
+          type: number
+        durationMinutes:
+          type: number
+
+    Enrollment:
+      type: object
+      required: [id, courseId, courseTitle, userId, completedLessons, totalLessons, enrolledAt]
+      properties:
+        id:
+          type: number
+        courseId:
+          type: number
+        courseTitle:
+          type: string
+        userId:
+          type: string
+        completedLessons:
+          type: number
+        totalLessons:
+          type: number
+        lastLessonId:
+          type: ["number", "null"]
+        enrolledAt:
+          type: string
+
+    EnrollmentInput:
+      type: object
+      required: [courseId]
+      properties:
+        courseId:
+          type: number
+
+    ProgressUpdate:
+      type: object
+      required: [lessonId]
+      properties:
+        lessonId:
+          type: number
+
+    Announcement:
+      type: object
+      required: [id, title, body, authorName, createdAt]
+      properties:
+        id:
+          type: number
+        title:
+          type: string
+        body:
+          type: string
+        authorName:
+          type: string
+        pinned:
+          type: boolean
+        createdAt:
+          type: string
+
+    AnnouncementInput:
+      type: object
+      required: [title, body]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+        pinned:
+          type: boolean
+
+    UserProfile:
+      type: object
+      required: [id, clerkId, displayName, email, createdAt]
+      properties:
+        id:
+          type: number
+        clerkId:
+          type: string
+        displayName:
+          type: string
+        email:
+          type: string
+        bio:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    UserProfileUpdate:
+      type: object
+      properties:
+        displayName:
+          type: string
+        bio:
+          type: string
+
+    DashboardStats:
+      type: object
+      required: [totalCourses, totalCategories, totalEnrollments, totalLessons, totalAnnouncements]
+      properties:
+        totalCourses:
+          type: number
+        totalCategories:
+          type: number
+        totalEnrollments:
+          type: number
+        totalLessons:
+          type: number
+        totalAnnouncements:
+          type: number
+
+    ActivityItem:
+      type: object
+      required: [id, type, description, createdAt]
+      properties:
+        id:
+          type: number
+        type:
+          type: string
+        description:
+          type: string
+        actorName:
+          type: string
+        entityTitle:
+          type: string
+        createdAt:
+          type: string
