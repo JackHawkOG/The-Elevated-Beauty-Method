@@ -2,14 +2,18 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Sparkles, ArrowRight, Crown, Eye, Star } from "lucide-react";
 import heroImage from "@assets/generated_images/hero-library.jpg";
+import ebmLogo from "@assets/generated_images/ebm-logo.svg";
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
       <nav className="h-20 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-50 px-6 md:px-12 flex items-center justify-between">
-        <div className="flex items-center gap-3 text-primary">
-          <Sparkles className="w-6 h-6" />
-          <span className="font-serif text-xl font-bold tracking-wide leading-tight">The Elevated Beauty Method</span>
+        <div className="flex items-center text-primary">
+          <img
+            src={ebmLogo}
+            alt="The Elevated Beauty Method"
+            className="h-14 w-auto object-contain"
+          />
         </div>
         <div className="flex items-center gap-4">
           <Link href="/sign-in" className="text-muted-foreground hover:text-primary transition-colors text-sm font-medium">
@@ -201,9 +205,12 @@ export default function LandingPage() {
       </main>
 
       <footer className="py-12 px-6 md:px-12 lg:px-24 bg-card/50 border-t border-border flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <span className="font-serif font-bold text-foreground">The Elevated Beauty Method</span>
+        <div className="flex items-center text-muted-foreground">
+          <img
+            src={ebmLogo}
+            alt="The Elevated Beauty Method"
+            className="h-12 w-auto object-contain"
+          />
         </div>
         <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} The Elevated Beauty Method™ by Blushing Beauty By Nikki.</p>
       </footer>

@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "OMpkCRBsVm1as9qL3A8Qd"
+uri = "file://attached_assets/generated_images/ebm-logo.svg"
+type = "image"
+title = "EBM luxury monogram logo"
+description = "A warm cream EBM monogram with The Elevated Beauty Method lockup, created to match the BBBN luxury beauty aesthetic."
+logical_id = "ee518bb5-578b-48d0-98e6-75a59780e168"
+content_hash = "sha256:a2e21bd13becc44618e88f54c88fdfa43e430112787a54373bf4b7805a0e4f1a"
+size = 3682
+mtime_ms = 1787338737984
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/ee518bb5-578b-48d0-98e6-75a59780e168/3a9a5aac-72b3-4fb4-b5c8-662801e089e9"
+storage_version_token = "1787338787367016"
+content_type = "image/svg+xml"

@@ -1,8 +1,9 @@
 import { Link, useLocation } from "wouter";
 import { useClerk, useUser } from "@clerk/react";
-import { BookType, LayoutDashboard, Library, Users, User, LogOut, MessageSquare } from "lucide-react";
+import { LayoutDashboard, Library, Users, User, LogOut, MessageSquare } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import ebmLogo from "@assets/generated_images/ebm-logo.svg";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -14,9 +15,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen bg-background text-foreground w-full">
         <Sidebar className="border-r border-border bg-sidebar text-sidebar-foreground">
           <SidebarHeader className="p-4">
-            <Link href="/dashboard" className="flex items-center gap-3 text-primary transition-opacity hover:opacity-80">
-              <BookType className="w-8 h-8" />
-              <span className="font-serif text-lg font-bold tracking-wide leading-tight">The Elevated Beauty Method</span>
+            <Link href="/dashboard" className="flex items-center text-primary transition-opacity hover:opacity-80">
+              <img
+                src={ebmLogo}
+                alt="The Elevated Beauty Method"
+                className="h-14 w-auto object-contain"
+              />
             </Link>
           </SidebarHeader>
           <SidebarContent className="px-2 py-4">
@@ -66,7 +70,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
           <header className="h-16 flex items-center px-6 border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10 md:hidden">
             <SidebarTrigger />
-            <div className="ml-4 font-serif text-xl text-primary font-bold">The Elevated Beauty Method</div>
+            <img
+              src={ebmLogo}
+              alt="The Elevated Beauty Method"
+              className="ml-4 h-10 w-auto object-contain"
+            />
           </header>
           <div className="flex-1 overflow-auto">
             {children}
