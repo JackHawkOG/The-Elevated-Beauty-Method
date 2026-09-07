@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/ebm-competitive-analysis/"
+title = "EBM Competitive Analysis"
+description = "A polished page-by-page web companion to the strategic competitive analysis of The Elevated Beauty Method and Natalie Setareh."
+version = "1.0.0"
+id = "artifacts/ebm-competitive-analysis"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/ebm-competitive-analysis/" ]
+localPort = 18575
+
+[services.development]
+run = "pnpm --filter @workspace/ebm-competitive-analysis run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ebm-competitive-analysis", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/ebm-competitive-analysis/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18575"
+BASE_PATH = "/ebm-competitive-analysis/"

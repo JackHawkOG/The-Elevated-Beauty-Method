@@ -14,3 +14,17 @@ mtime_ms = 1787338737984
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/ee518bb5-578b-48d0-98e6-75a59780e168/3a9a5aac-72b3-4fb4-b5c8-662801e089e9"
 storage_version_token = "1787338787367016"
 content_type = "image/svg+xml"
+
+[[outputs]]
+id = "HHz10Pl9-_VzGFfHY4H7l"
+uri = "file://reports/ebm-competitive-analysis/ebm-competitive-analysis.pdf"
+type = "pdf"
+title = "EBM Competitive Analysis"
+description = "A seven-page strategic comparison of The Elevated Beauty Method, Natalie Setareh, and the broader online makeup education alternatives."
+logical_id = "aca283fa-930d-4d68-9b8a-6918867c3d7f"
+content_hash = "sha256:97207366571503a72a61e81dff61fcc4b39b080f814b251689d713e0dd1bca40"
+size = 5162566
+mtime_ms = 1788750387245
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/aca283fa-930d-4d68-9b8a-6918867c3d7f/c7e49d2c-8353-420d-9672-7d27f333326b"
+storage_version_token = "1788750407313834"
+content_type = "application/pdf"
