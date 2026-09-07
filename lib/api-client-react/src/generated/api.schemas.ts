@@ -19,6 +19,15 @@ export interface Category {
   courseCount: number;
 }
 
+export type CourseAccessTier = typeof CourseAccessTier[keyof typeof CourseAccessTier];
+
+
+export const CourseAccessTier = {
+  Free: 'Free',
+  Elevated: 'Elevated',
+  Premium: 'Premium',
+} as const;
+
 export interface Course {
   id: number;
   title: string;
@@ -31,9 +40,21 @@ export interface Course {
   thumbnailUrl?: string | null;
   lessonCount: number;
   enrollmentCount: number;
+  accessTier: CourseAccessTier;
+  /** @nullable */
+  transformationStory?: string | null;
   isFeatured?: boolean;
   createdAt: string;
 }
+
+export type CourseDetailAccessTier = typeof CourseDetailAccessTier[keyof typeof CourseDetailAccessTier];
+
+
+export const CourseDetailAccessTier = {
+  Free: 'Free',
+  Elevated: 'Elevated',
+  Premium: 'Premium',
+} as const;
 
 export interface Lesson {
   id: number;
@@ -60,10 +81,22 @@ export interface CourseDetail {
   thumbnailUrl?: string | null;
   lessonCount: number;
   enrollmentCount: number;
+  accessTier: CourseDetailAccessTier;
+  /** @nullable */
+  transformationStory?: string | null;
   isFeatured?: boolean;
   createdAt: string;
   lessons: Lesson[];
 }
+
+export type CourseInputAccessTier = typeof CourseInputAccessTier[keyof typeof CourseInputAccessTier];
+
+
+export const CourseInputAccessTier = {
+  Free: 'Free',
+  Elevated: 'Elevated',
+  Premium: 'Premium',
+} as const;
 
 export interface CourseInput {
   /** @minLength 1 */
@@ -74,6 +107,8 @@ export interface CourseInput {
   instructorName: string;
   thumbnailUrl?: string;
   isFeatured?: boolean;
+  accessTier?: CourseInputAccessTier;
+  transformationStory?: string;
 }
 
 export interface LessonInput {
@@ -121,6 +156,15 @@ export interface AnnouncementInput {
   pinned?: boolean;
 }
 
+export type UserProfileMembershipTier = typeof UserProfileMembershipTier[keyof typeof UserProfileMembershipTier];
+
+
+export const UserProfileMembershipTier = {
+  Free: 'Free',
+  Elevated: 'Elevated',
+  Premium: 'Premium',
+} as const;
+
 export interface UserProfile {
   id: number;
   clerkId: string;
@@ -130,12 +174,101 @@ export interface UserProfile {
   bio?: string | null;
   /** @nullable */
   avatarUrl?: string | null;
+  membershipTier: UserProfileMembershipTier;
   createdAt: string;
 }
 
 export interface UserProfileUpdate {
   displayName?: string;
   bio?: string;
+}
+
+export type BeautyDiagnosticInputSkinType = typeof BeautyDiagnosticInputSkinType[keyof typeof BeautyDiagnosticInputSkinType];
+
+
+export const BeautyDiagnosticInputSkinType = {
+  Dry: 'Dry',
+  Balanced: 'Balanced',
+  Combination: 'Combination',
+  Oily: 'Oily',
+  Sensitive: 'Sensitive',
+} as const;
+
+export type BeautyDiagnosticInputUndertone = typeof BeautyDiagnosticInputUndertone[keyof typeof BeautyDiagnosticInputUndertone];
+
+
+export const BeautyDiagnosticInputUndertone = {
+  Cool: 'Cool',
+  Neutral: 'Neutral',
+  Warm: 'Warm',
+  Unsure: 'Unsure',
+} as const;
+
+export type BeautyDiagnosticInputFeatureNeedsItem = typeof BeautyDiagnosticInputFeatureNeedsItem[keyof typeof BeautyDiagnosticInputFeatureNeedsItem];
+
+
+export const BeautyDiagnosticInputFeatureNeedsItem = {
+  Complexion: 'Complexion',
+  Eyes: 'Eyes',
+  Brows: 'Brows',
+  Lips: 'Lips',
+  Sculpting: 'Sculpting',
+} as const;
+
+export type BeautyDiagnosticInputLifeStage = typeof BeautyDiagnosticInputLifeStage[keyof typeof BeautyDiagnosticInputLifeStage];
+
+
+export const BeautyDiagnosticInputLifeStage = {
+  Starting_fresh: 'Starting fresh',
+  Career_growth: 'Career growth',
+  Entrepreneurship: 'Entrepreneurship',
+  Reinvention: 'Reinvention',
+  Midlife_evolution: 'Midlife evolution',
+} as const;
+
+export type BeautyDiagnosticInputVisibilityGoal = typeof BeautyDiagnosticInputVisibilityGoal[keyof typeof BeautyDiagnosticInputVisibilityGoal];
+
+
+export const BeautyDiagnosticInputVisibilityGoal = {
+  Everyday_confidence: 'Everyday confidence',
+  Camera_ready: 'Camera ready',
+  Executive_presence: 'Executive presence',
+  Personal_brand: 'Personal brand',
+  Special_occasions: 'Special occasions',
+} as const;
+
+export interface BeautyDiagnosticInput {
+  skinType: BeautyDiagnosticInputSkinType;
+  undertone: BeautyDiagnosticInputUndertone;
+  /** @minItems 1 */
+  featureNeeds: BeautyDiagnosticInputFeatureNeedsItem[];
+  lifeStage: BeautyDiagnosticInputLifeStage;
+  visibilityGoal: BeautyDiagnosticInputVisibilityGoal;
+}
+
+export type MethodStepAccessTier = typeof MethodStepAccessTier[keyof typeof MethodStepAccessTier];
+
+
+export const MethodStepAccessTier = {
+  Free: 'Free',
+  Elevated: 'Elevated',
+  Premium: 'Premium',
+} as const;
+
+export interface MethodStep {
+  number: number;
+  title: string;
+  description: string;
+  accessTier: MethodStepAccessTier;
+}
+
+export interface BeautyMethod {
+  completed: boolean;
+  diagnostic?: BeautyDiagnosticInput | null;
+  methodName: string;
+  methodSummary: string;
+  focusAreas: string[];
+  sequence: MethodStep[];
 }
 
 export interface DashboardStats {

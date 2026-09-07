@@ -52,6 +52,8 @@ export const ListCoursesResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "lessonCount": zod.number(),
   "enrollmentCount": zod.number(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "transformationStory": zod.string().nullish(),
   "isFeatured": zod.boolean().optional(),
   "createdAt": zod.string()
 })
@@ -71,7 +73,9 @@ export const CreateCourseBody = zod.object({
   "difficulty": zod.string(),
   "instructorName": zod.string(),
   "thumbnailUrl": zod.string().optional(),
-  "isFeatured": zod.boolean().optional()
+  "isFeatured": zod.boolean().optional(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']).optional(),
+  "transformationStory": zod.string().optional()
 })
 
 export const CreateCourseResponse = zod.object({
@@ -85,6 +89,8 @@ export const CreateCourseResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "lessonCount": zod.number(),
   "enrollmentCount": zod.number(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "transformationStory": zod.string().nullish(),
   "isFeatured": zod.boolean().optional(),
   "createdAt": zod.string()
 })
@@ -108,6 +114,8 @@ export const GetCourseResponse = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "lessonCount": zod.number(),
   "enrollmentCount": zod.number(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "transformationStory": zod.string().nullish(),
   "isFeatured": zod.boolean().optional(),
   "createdAt": zod.string(),
   "lessons": zod.array(zod.object({
@@ -300,6 +308,7 @@ export const GetMeResponse = zod.object({
   "email": zod.string(),
   "bio": zod.string().nullish(),
   "avatarUrl": zod.string().nullish(),
+  "membershipTier": zod.enum(['Free', 'Elevated', 'Premium']),
   "createdAt": zod.string()
 })
 
@@ -319,7 +328,73 @@ export const UpdateMeResponse = zod.object({
   "email": zod.string(),
   "bio": zod.string().nullish(),
   "avatarUrl": zod.string().nullish(),
+  "membershipTier": zod.enum(['Free', 'Elevated', 'Premium']),
   "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Get the current member's beauty diagnostic and recommended method
+ */
+
+
+
+export const GetBeautyMethodResponse = zod.object({
+  "completed": zod.boolean(),
+  "diagnostic": zod.union([zod.object({
+  "skinType": zod.enum(['Dry', 'Balanced', 'Combination', 'Oily', 'Sensitive']),
+  "undertone": zod.enum(['Cool', 'Neutral', 'Warm', 'Unsure']),
+  "featureNeeds": zod.array(zod.enum(['Complexion', 'Eyes', 'Brows', 'Lips', 'Sculpting'])).min(1),
+  "lifeStage": zod.enum(['Starting fresh', 'Career growth', 'Entrepreneurship', 'Reinvention', 'Midlife evolution']),
+  "visibilityGoal": zod.enum(['Everyday confidence', 'Camera ready', 'Executive presence', 'Personal brand', 'Special occasions'])
+}),zod.null()]).optional(),
+  "methodName": zod.string(),
+  "methodSummary": zod.string(),
+  "focusAreas": zod.array(zod.string()),
+  "sequence": zod.array(zod.object({
+  "number": zod.number(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium'])
+}))
+})
+
+
+/**
+ * @summary Save the beauty diagnostic and return the recommended method
+ */
+
+
+
+export const SaveBeautyDiagnosticBody = zod.object({
+  "skinType": zod.enum(['Dry', 'Balanced', 'Combination', 'Oily', 'Sensitive']),
+  "undertone": zod.enum(['Cool', 'Neutral', 'Warm', 'Unsure']),
+  "featureNeeds": zod.array(zod.enum(['Complexion', 'Eyes', 'Brows', 'Lips', 'Sculpting'])).min(1),
+  "lifeStage": zod.enum(['Starting fresh', 'Career growth', 'Entrepreneurship', 'Reinvention', 'Midlife evolution']),
+  "visibilityGoal": zod.enum(['Everyday confidence', 'Camera ready', 'Executive presence', 'Personal brand', 'Special occasions'])
+})
+
+
+
+
+export const SaveBeautyDiagnosticResponse = zod.object({
+  "completed": zod.boolean(),
+  "diagnostic": zod.union([zod.object({
+  "skinType": zod.enum(['Dry', 'Balanced', 'Combination', 'Oily', 'Sensitive']),
+  "undertone": zod.enum(['Cool', 'Neutral', 'Warm', 'Unsure']),
+  "featureNeeds": zod.array(zod.enum(['Complexion', 'Eyes', 'Brows', 'Lips', 'Sculpting'])).min(1),
+  "lifeStage": zod.enum(['Starting fresh', 'Career growth', 'Entrepreneurship', 'Reinvention', 'Midlife evolution']),
+  "visibilityGoal": zod.enum(['Everyday confidence', 'Camera ready', 'Executive presence', 'Personal brand', 'Special occasions'])
+}),zod.null()]).optional(),
+  "methodName": zod.string(),
+  "methodSummary": zod.string(),
+  "focusAreas": zod.array(zod.string()),
+  "sequence": zod.array(zod.object({
+  "number": zod.number(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium'])
+}))
 })
 
 
@@ -349,6 +424,8 @@ export const GetFeaturedCoursesResponseItem = zod.object({
   "thumbnailUrl": zod.string().nullish(),
   "lessonCount": zod.number(),
   "enrollmentCount": zod.number(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "transformationStory": zod.string().nullish(),
   "isFeatured": zod.boolean().optional(),
   "createdAt": zod.string()
 })

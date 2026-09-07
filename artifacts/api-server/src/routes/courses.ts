@@ -16,7 +16,9 @@ import {
   GetLessonParams,
   GetLessonResponse,
 } from "@workspace/api-zod";
-import { requireAuth } from "../middlewares/requireAuth";
+import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
+import { usersTable } from "@workspace/db";
+import { canAccessTier } from "../lib/beauty-method";
 
 const router = Router();
 
@@ -33,6 +35,8 @@ async function buildCourseRow(courseId: number) {
       instructorName: coursesTable.instructorName,
       thumbnailUrl: coursesTable.thumbnailUrl,
       isFeatured: coursesTable.isFeatured,
+      accessTier: coursesTable.accessTier,
+      transformationStory: coursesTable.transformationStory,
       createdAt: coursesTable.createdAt,
       lessonCount: sql<number>`(select count(*) from ${lessonsTable} where ${lessonsTable.courseId} = ${coursesTable.id})::int`,
       enrollmentCount: sql<number>`(select count(*) from ${enrollmentsTable} where ${enrollmentsTable.courseId} = ${coursesTable.id})::int`,
@@ -68,6 +72,8 @@ router.get("/courses", async (req, res): Promise<void> => {
       instructorName: coursesTable.instructorName,
       thumbnailUrl: coursesTable.thumbnailUrl,
       isFeatured: coursesTable.isFeatured,
+      accessTier: coursesTable.accessTier,
+      transformationStory: coursesTable.transformationStory,
       createdAt: coursesTable.createdAt,
       lessonCount: sql<number>`(select count(*) from ${lessonsTable} where ${lessonsTable.courseId} = ${coursesTable.id})::int`,
       enrollmentCount: sql<number>`(select count(*) from ${enrollmentsTable} where ${enrollmentsTable.courseId} = ${coursesTable.id})::int`,
@@ -111,21 +117,30 @@ router.get("/courses/:courseId", async (req, res): Promise<void> => {
   res.json(GetCourseResponse.parse({
     ...row,
     createdAt: row.createdAt?.toISOString(),
-    lessons: lessons.map(l => ({ ...l, createdAt: l.createdAt?.toISOString() })),
+    lessons: lessons.map(l => ({ ...l, content: null, videoUrl: null, createdAt: l.createdAt?.toISOString() })),
   }));
 });
 
 // GET /courses/:courseId/lessons
-router.get("/courses/:courseId/lessons", async (req, res): Promise<void> => {
+router.get("/courses/:courseId/lessons", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
   const rawId = Array.isArray(req.params.courseId) ? req.params.courseId[0] : req.params.courseId;
   const courseId = parseInt(rawId, 10);
   if (isNaN(courseId)) { res.status(400).json({ error: "Invalid courseId" }); return; }
 
   const parsed = ListLessonsParams.safeParse({ courseId });
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  const [[course], [member]] = await Promise.all([
+    db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1),
+    db.select().from(usersTable).where(eq(usersTable.clerkId, req.userId!)).limit(1),
+  ]);
+  if (!course) { res.status(404).json({ error: "Not found" }); return; }
+  if (!member || !canAccessTier(member.membershipTier, course.accessTier)) {
+    res.status(403).json({ error: `${course.accessTier} membership required` });
+    return;
+  }
 
   const lessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, courseId)).orderBy(lessonsTable.sortOrder);
-  res.json(ListLessonsResponse.parse(lessons.map(l => ({ ...l, createdAt: l.createdAt?.toISOString() }))));
+  res.json(ListLessonsResponse.parse(lessons.map(l => ({ ...l, content: null, videoUrl: null, createdAt: l.createdAt?.toISOString() }))));
 });
 
 // POST /courses/:courseId/lessons
@@ -145,7 +160,7 @@ router.post("/courses/:courseId/lessons", requireAuth, async (req, res): Promise
 });
 
 // GET /lessons/:lessonId
-router.get("/lessons/:lessonId", async (req, res): Promise<void> => {
+router.get("/lessons/:lessonId", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
   const rawId = Array.isArray(req.params.lessonId) ? req.params.lessonId[0] : req.params.lessonId;
   const lessonId = parseInt(rawId, 10);
   if (isNaN(lessonId)) { res.status(400).json({ error: "Invalid lessonId" }); return; }
@@ -155,6 +170,14 @@ router.get("/lessons/:lessonId", async (req, res): Promise<void> => {
 
   const [lesson] = await db.select().from(lessonsTable).where(eq(lessonsTable.id, lessonId)).limit(1);
   if (!lesson) { res.status(404).json({ error: "Not found" }); return; }
+  const [[course], [member]] = await Promise.all([
+    db.select().from(coursesTable).where(eq(coursesTable.id, lesson.courseId)).limit(1),
+    db.select().from(usersTable).where(eq(usersTable.clerkId, req.userId!)).limit(1),
+  ]);
+  if (!course || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
+    res.status(403).json({ error: `${course?.accessTier ?? "Required"} membership required` });
+    return;
+  }
 
   res.json(GetLessonResponse.parse({ ...lesson, createdAt: lesson.createdAt?.toISOString() }));
 });

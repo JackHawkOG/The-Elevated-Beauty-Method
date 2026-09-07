@@ -23,6 +23,8 @@ import type {
   ActivityItem,
   Announcement,
   AnnouncementInput,
+  BeautyDiagnosticInput,
+  BeautyMethod,
   Category,
   Course,
   CourseDetail,
@@ -1200,6 +1202,154 @@ export const useUpdateMe = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateMeMutationOptions(options));
+    }
+
+export const getGetBeautyMethodUrl = () => {
+
+
+
+
+  return `/api/users/me/beauty-method`
+}
+
+/**
+ * @summary Get the current member's beauty diagnostic and recommended method
+ */
+export const getBeautyMethod = async ( options?: Parameters<typeof customFetch>[1]): Promise<BeautyMethod> => {
+
+  return customFetch<BeautyMethod>(getGetBeautyMethodUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetBeautyMethodQueryKey = () => {
+    return [
+    `/api/users/me/beauty-method`
+    ] as const;
+    }
+
+
+export const getGetBeautyMethodQueryOptions = <TData = Awaited<ReturnType<typeof getBeautyMethod>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBeautyMethod>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetBeautyMethodQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getBeautyMethod>>> = ({ signal }) => getBeautyMethod({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getBeautyMethod>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetBeautyMethodQueryResult = NonNullable<Awaited<ReturnType<typeof getBeautyMethod>>>
+export type GetBeautyMethodQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get the current member's beauty diagnostic and recommended method
+ */
+
+export function useGetBeautyMethod<TData = Awaited<ReturnType<typeof getBeautyMethod>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getBeautyMethod>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetBeautyMethodQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveBeautyDiagnosticUrl = () => {
+
+
+
+
+  return `/api/users/me/beauty-method`
+}
+
+/**
+ * @summary Save the beauty diagnostic and return the recommended method
+ */
+export const saveBeautyDiagnostic = async (beautyDiagnosticInput: BeautyDiagnosticInput, options?: Parameters<typeof customFetch>[1]): Promise<BeautyMethod> => {
+
+  return customFetch<BeautyMethod>(getSaveBeautyDiagnosticUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(beautyDiagnosticInput)
+  }
+);}
+
+
+
+
+
+export const getSaveBeautyDiagnosticMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveBeautyDiagnostic>>, TError,{data: BodyType<BeautyDiagnosticInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveBeautyDiagnostic>>, TError,{data: BodyType<BeautyDiagnosticInput>}, TContext> => {
+
+const mutationKey = ['saveBeautyDiagnostic'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveBeautyDiagnostic>>, {data: BodyType<BeautyDiagnosticInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveBeautyDiagnostic(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveBeautyDiagnosticMutationResult = NonNullable<Awaited<ReturnType<typeof saveBeautyDiagnostic>>>
+    export type SaveBeautyDiagnosticMutationBody = BodyType<BeautyDiagnosticInput>
+    export type SaveBeautyDiagnosticMutationError = ErrorType<void>
+
+    /**
+ * @summary Save the beauty diagnostic and return the recommended method
+ */
+export const useSaveBeautyDiagnostic = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveBeautyDiagnostic>>, TError,{data: BodyType<BeautyDiagnosticInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveBeautyDiagnostic>>,
+        TError,
+        {data: BodyType<BeautyDiagnosticInput>},
+        TContext
+      > => {
+      return useMutation(getSaveBeautyDiagnosticMutationOptions(options));
     }
 
 export const getGetDashboardStatsUrl = () => {

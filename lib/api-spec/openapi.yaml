@@ -24,6 +24,8 @@ tags:
     description: User profile
   - name: dashboard
     description: Dashboard summary endpoints
+  - name: method
+    description: Personalized beauty method
 paths:
   /healthz:
     get:
@@ -324,6 +326,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/UserProfile"
 
+  /users/me/beauty-method:
+    get:
+      operationId: getBeautyMethod
+      tags: [method]
+      summary: Get the current member's beauty diagnostic and recommended method
+      responses:
+        "200":
+          description: Personalized method, or an incomplete diagnostic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeautyMethod"
+    put:
+      operationId: saveBeautyDiagnostic
+      tags: [method]
+      summary: Save the beauty diagnostic and return the recommended method
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BeautyDiagnosticInput"
+      responses:
+        "200":
+          description: Personalized method
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeautyMethod"
+        "401":
+          description: Unauthorized
+
   /dashboard/stats:
     get:
       operationId: getDashboardStats
@@ -396,7 +430,7 @@ components:
 
     Course:
       type: object
-      required: [id, title, description, categoryId, categoryName, difficulty, instructorName, lessonCount, enrollmentCount, createdAt]
+      required: [id, title, description, categoryId, categoryName, difficulty, instructorName, lessonCount, enrollmentCount, accessTier, createdAt]
       properties:
         id:
           type: number
@@ -418,6 +452,11 @@ components:
           type: number
         enrollmentCount:
           type: number
+        accessTier:
+          type: string
+          enum: [Free, Elevated, Premium]
+        transformationStory:
+          type: ["string", "null"]
         isFeatured:
           type: boolean
         createdAt:
@@ -425,7 +464,7 @@ components:
 
     CourseDetail:
       type: object
-      required: [id, title, description, categoryId, categoryName, difficulty, instructorName, lessonCount, enrollmentCount, createdAt, lessons]
+      required: [id, title, description, categoryId, categoryName, difficulty, instructorName, lessonCount, enrollmentCount, accessTier, createdAt, lessons]
       properties:
         id:
           type: number
@@ -447,6 +486,11 @@ components:
           type: number
         enrollmentCount:
           type: number
+        accessTier:
+          type: string
+          enum: [Free, Elevated, Premium]
+        transformationStory:
+          type: ["string", "null"]
         isFeatured:
           type: boolean
         createdAt:
@@ -475,6 +519,11 @@ components:
           type: string
         isFeatured:
           type: boolean
+        accessTier:
+          type: string
+          enum: [Free, Elevated, Premium]
+        transformationStory:
+          type: string
 
     Lesson:
       type: object
@@ -579,7 +628,7 @@ components:
 
     UserProfile:
       type: object
-      required: [id, clerkId, displayName, email, createdAt]
+      required: [id, clerkId, displayName, email, membershipTier, createdAt]
       properties:
         id:
           type: number
@@ -593,6 +642,9 @@ components:
           type: ["string", "null"]
         avatarUrl:
           type: ["string", "null"]
+        membershipTier:
+          type: string
+          enum: [Free, Elevated, Premium]
         createdAt:
           type: string
 
@@ -603,6 +655,66 @@ components:
           type: string
         bio:
           type: string
+
+    BeautyDiagnosticInput:
+      type: object
+      required: [skinType, undertone, featureNeeds, lifeStage, visibilityGoal]
+      properties:
+        skinType:
+          type: string
+          enum: [Dry, Balanced, Combination, Oily, Sensitive]
+        undertone:
+          type: string
+          enum: [Cool, Neutral, Warm, Unsure]
+        featureNeeds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [Complexion, Eyes, Brows, Lips, Sculpting]
+        lifeStage:
+          type: string
+          enum: [Starting fresh, Career growth, Entrepreneurship, Reinvention, Midlife evolution]
+        visibilityGoal:
+          type: string
+          enum: [Everyday confidence, Camera ready, Executive presence, Personal brand, Special occasions]
+
+    BeautyMethod:
+      type: object
+      required: [completed, methodName, methodSummary, focusAreas, sequence]
+      properties:
+        completed:
+          type: boolean
+        diagnostic:
+          anyOf:
+            - $ref: "#/components/schemas/BeautyDiagnosticInput"
+            - type: "null"
+        methodName:
+          type: string
+        methodSummary:
+          type: string
+        focusAreas:
+          type: array
+          items:
+            type: string
+        sequence:
+          type: array
+          items:
+            $ref: "#/components/schemas/MethodStep"
+
+    MethodStep:
+      type: object
+      required: [number, title, description, accessTier]
+      properties:
+        number:
+          type: number
+        title:
+          type: string
+        description:
+          type: string
+        accessTier:
+          type: string
+          enum: [Free, Elevated, Premium]
 
     DashboardStats:
       type: object

@@ -9,6 +9,12 @@ export const usersTable = pgTable("users", {
   email: text("email").notNull(),
   bio: text("bio"),
   avatarUrl: text("avatar_url"),
+  membershipTier: text("membership_tier").default("Free").notNull(),
+  skinType: text("skin_type"),
+  undertone: text("undertone"),
+  featureNeeds: text("feature_needs").array(),
+  lifeStage: text("life_stage"),
+  visibilityGoal: text("visibility_goal"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

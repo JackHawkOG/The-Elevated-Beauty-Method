@@ -5,6 +5,7 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { UserProfileMembershipTier } from './userProfileMembershipTier';
 
 export interface UserProfile {
   id: number;
@@ -15,5 +16,6 @@ export interface UserProfile {
   bio?: string | null;
   /** @nullable */
   avatarUrl?: string | null;
+  membershipTier: UserProfileMembershipTier;
   createdAt: string;
 }

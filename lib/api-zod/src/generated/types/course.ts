@@ -5,6 +5,7 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { CourseAccessTier } from './courseAccessTier';
 
 export interface Course {
   id: number;
@@ -18,6 +19,9 @@ export interface Course {
   thumbnailUrl?: string | null;
   lessonCount: number;
   enrollmentCount: number;
+  accessTier: CourseAccessTier;
+  /** @nullable */
+  transformationStory?: string | null;
   isFeatured?: boolean;
   createdAt: string;
 }

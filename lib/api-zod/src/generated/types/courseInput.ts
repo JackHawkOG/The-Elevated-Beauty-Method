@@ -5,6 +5,7 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { CourseInputAccessTier } from './courseInputAccessTier';
 
 export interface CourseInput {
   /** @minLength 1 */
@@ -15,4 +16,6 @@ export interface CourseInput {
   instructorName: string;
   thumbnailUrl?: string;
   isFeatured?: boolean;
+  accessTier?: CourseInputAccessTier;
+  transformationStory?: string;
 }

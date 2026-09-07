@@ -12,6 +12,8 @@ export const coursesTable = pgTable("courses", {
   instructorName: text("instructor_name").notNull(),
   thumbnailUrl: text("thumbnail_url"),
   isFeatured: boolean("is_featured").default(false).notNull(),
+  accessTier: text("access_tier").default("Elevated").notNull(),
+  transformationStory: text("transformation_story"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

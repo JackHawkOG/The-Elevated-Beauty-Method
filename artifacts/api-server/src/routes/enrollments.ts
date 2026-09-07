@@ -10,6 +10,7 @@ import {
   UpdateProgressResponse,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
+import { canAccessTier } from "../lib/beauty-method";
 
 const router = Router();
 
@@ -43,17 +44,28 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   const { courseId } = parsed.data;
+  const [[course], [member]] = await Promise.all([
+    db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1),
+    db.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1),
+  ]);
+  if (!course) {
+    res.status(404).json({ error: "Course not found" });
+    return;
+  }
+  if (!member || !canAccessTier(member.membershipTier, course.accessTier)) {
+    res.status(403).json({ error: `${course.accessTier} membership required` });
+    return;
+  }
 
   // Idempotent — return existing if already enrolled
   const existing = await db.select().from(enrollmentsTable)
     .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
     .limit(1);
   if (existing.length > 0) {
-    const [course] = await db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1);
     const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(eq(lessonsTable.courseId, courseId));
     res.status(201).json(EnrollInCourseResponse.parse({
       ...existing[0],
-      courseTitle: course?.title ?? "",
+      courseTitle: course.title,
       totalLessons: totalRow?.count ?? 0,
       enrolledAt: existing[0].enrolledAt?.toISOString(),
     }));
@@ -61,7 +73,6 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
   }
 
   const [enrollment] = await db.insert(enrollmentsTable).values({ userId, courseId }).returning();
-  const [course] = await db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1);
   const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(eq(lessonsTable.courseId, courseId));
 
   // Log activity
@@ -70,12 +81,12 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     type: "enrollment",
     description: `enrolled in a course`,
     actorName: dbUser?.displayName ?? "A learner",
-    entityTitle: course?.title ?? "a course",
+    entityTitle: course.title,
   }).catch(() => {});
 
   res.status(201).json(EnrollInCourseResponse.parse({
     ...enrollment,
-    courseTitle: course?.title ?? "",
+    courseTitle: course.title,
     totalLessons: totalRow?.count ?? 0,
     enrolledAt: enrollment.enrolledAt?.toISOString(),
   }));

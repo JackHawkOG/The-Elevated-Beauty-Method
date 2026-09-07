@@ -42,6 +42,8 @@ router.get("/dashboard/featured", async (req, res): Promise<void> => {
       instructorName: coursesTable.instructorName,
       thumbnailUrl: coursesTable.thumbnailUrl,
       isFeatured: coursesTable.isFeatured,
+      accessTier: coursesTable.accessTier,
+      transformationStory: coursesTable.transformationStory,
       createdAt: coursesTable.createdAt,
       lessonCount: sql<number>`(select count(*) from ${lessonsTable} where ${lessonsTable.courseId} = ${coursesTable.id})::int`,
       enrollmentCount: sql<number>`(select count(*) from ${enrollmentsTable} where ${enrollmentsTable.courseId} = ${coursesTable.id})::int`,
@@ -52,7 +54,10 @@ router.get("/dashboard/featured", async (req, res): Promise<void> => {
     .limit(6)
     .orderBy(desc(coursesTable.createdAt));
 
-  res.json(GetFeaturedCoursesResponse.parse(rows.map(r => ({ ...r, createdAt: r.createdAt?.toISOString() }))));
+  res.json(GetFeaturedCoursesResponse.parse(rows.map(r => ({
+    ...r,
+    createdAt: r.createdAt?.toISOString(),
+  }))));
 });
 
 // GET /dashboard/recent-activity

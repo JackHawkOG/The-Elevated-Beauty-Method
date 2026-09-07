@@ -1,5 +1,5 @@
 @layer theme, base, clerk, components, utilities;
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Lato:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Lato:wght@300;400;500;700&display=swap');
 @import 'tailwindcss';
 @import '@clerk/themes/shadcn.css';
 @import 'tw-animate-css';
@@ -63,67 +63,67 @@
 }
 
 :root {
-  --background: 0 0% 4%; /* #0A0A0A */
-  --foreground: 41 52% 92%; /* #F5EEE0 */
-  --card: 53 36% 5%; /* #111108 */
+  --background: 30 16% 7%; /* Deep Espresso #15120f */
+  --foreground: 41 52% 92%; /* Cream #f5eee0 */
+  --card: 30 16% 10%; /* #1a1612 */
   --card-foreground: 41 52% 92%;
-  --popover: 53 36% 5%;
+  --popover: 30 16% 10%;
   --popover-foreground: 41 52% 92%;
-  --primary: 41 100% 88%; /* #FFECC2 */
-  --primary-foreground: 0 0% 4%; /* #0A0A0A */
-  --secondary: 41 21% 55%; /* #A39575 */
-  --secondary-foreground: 0 0% 4%;
-  --muted: 53 13% 9%; /* #1a1a14 */
-  --muted-foreground: 41 21% 55%; /* #A39575 */
-  --accent: 53 13% 9%; /* #1a1a14 */
-  --accent-foreground: 41 100% 88%; /* #FFECC2 */
+  --primary: 41 100% 83%; /* Champagne Gold #ffe099 */
+  --primary-foreground: 30 16% 7%;
+  --secondary: 30 15% 20%; /* Muted Brown/Gold */
+  --secondary-foreground: 41 100% 83%;
+  --muted: 30 16% 12%;
+  --muted-foreground: 41 21% 65%; /* #bfb39a */
+  --accent: 30 16% 15%;
+  --accent-foreground: 41 100% 83%;
   --destructive: 0 62% 30%;
   --destructive-foreground: 41 52% 92%;
-  --border: 40 15% 16%; /* #2F2B23 */
-  --input: 40 15% 16%; /* #2F2B23 */
-  --ring: 41 100% 88%; /* #FFECC2 */
-  --sidebar: 53 36% 5%; /* #111108 */
+  --border: 30 16% 16%; /* #2d2720 */
+  --input: 30 16% 16%;
+  --ring: 41 100% 83%;
+  --sidebar: 30 16% 7%;
   --sidebar-foreground: 41 52% 92%;
-  --sidebar-border: 40 15% 16%;
-  --sidebar-primary: 41 100% 88%;
-  --sidebar-primary-foreground: 0 0% 4%;
-  --sidebar-accent: 53 13% 9%;
-  --sidebar-accent-foreground: 41 100% 88%;
-  --sidebar-ring: 41 100% 88%;
+  --sidebar-border: 30 16% 16%;
+  --sidebar-primary: 41 100% 83%;
+  --sidebar-primary-foreground: 30 16% 7%;
+  --sidebar-accent: 30 16% 12%;
+  --sidebar-accent-foreground: 41 100% 83%;
+  --sidebar-ring: 41 100% 83%;
   
-  --radius: 0.5rem;
+  --radius: 0.75rem;
   --app-font-sans: 'Lato', sans-serif;
   --app-font-serif: 'Cormorant Garamond', serif;
 }
 
 .dark {
-  --background: 0 0% 4%; /* #0A0A0A */
-  --foreground: 41 52% 92%; /* #F5EEE0 */
-  --card: 53 36% 5%; /* #111108 */
+  --background: 30 16% 7%;
+  --foreground: 41 52% 92%;
+  --card: 30 16% 10%;
   --card-foreground: 41 52% 92%;
-  --popover: 53 36% 5%;
+  --popover: 30 16% 10%;
   --popover-foreground: 41 52% 92%;
-  --primary: 41 100% 88%; /* #FFECC2 */
-  --primary-foreground: 0 0% 4%; /* #0A0A0A */
-  --secondary: 41 21% 55%; /* #A39575 */
-  --secondary-foreground: 0 0% 4%;
-  --muted: 53 13% 9%; /* #1a1a14 */
-  --muted-foreground: 41 21% 55%; /* #A39575 */
-  --accent: 53 13% 9%; /* #1a1a14 */
-  --accent-foreground: 41 100% 88%; /* #FFECC2 */
+  --primary: 41 100% 83%;
+  --primary-foreground: 30 16% 7%;
+  --secondary: 30 15% 20%;
+  --secondary-foreground: 41 100% 83%;
+  --muted: 30 16% 12%;
+  --muted-foreground: 41 21% 65%;
+  --accent: 30 16% 15%;
+  --accent-foreground: 41 100% 83%;
   --destructive: 0 62% 30%;
   --destructive-foreground: 41 52% 92%;
-  --border: 40 15% 16%; /* #2F2B23 */
-  --input: 40 15% 16%; /* #2F2B23 */
-  --ring: 41 100% 88%; /* #FFECC2 */
-  --sidebar: 53 36% 5%; /* #111108 */
+  --border: 30 16% 16%;
+  --input: 30 16% 16%;
+  --ring: 41 100% 83%;
+  --sidebar: 30 16% 7%;
   --sidebar-foreground: 41 52% 92%;
-  --sidebar-border: 40 15% 16%;
-  --sidebar-primary: 41 100% 88%;
-  --sidebar-primary-foreground: 0 0% 4%;
-  --sidebar-accent: 53 13% 9%;
-  --sidebar-accent-foreground: 41 100% 88%;
-  --sidebar-ring: 41 100% 88%;
+  --sidebar-border: 30 16% 16%;
+  --sidebar-primary: 41 100% 83%;
+  --sidebar-primary-foreground: 30 16% 7%;
+  --sidebar-accent: 30 16% 12%;
+  --sidebar-accent-foreground: 41 100% 83%;
+  --sidebar-ring: 41 100% 83%;
 }
 
 @layer base {
@@ -131,7 +131,7 @@
     @apply border-border;
   }
   body {
-    @apply font-sans antialiased bg-background text-foreground;
+    @apply font-sans antialiased bg-background text-foreground selection:bg-primary/30;
   }
   
   h1, h2, h3, h4, h5, h6 {

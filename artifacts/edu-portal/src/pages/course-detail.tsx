@@ -36,7 +36,7 @@ export default function CourseDetailPage() {
         toast({ title: "Enrolled successfully", description: "You can now access all lessons." });
       },
       onError: () => {
-        toast({ title: "Enrollment failed", description: "There was an error enrolling you in this course.", variant: "destructive" });
+        toast({ title: "Membership upgrade required", description: `This pathway is included with ${course?.accessTier ?? "a higher"} membership.`, variant: "destructive" });
       }
     }
   });
@@ -100,6 +100,7 @@ export default function CourseDetailPage() {
                 <div className="flex flex-wrap gap-2 mb-4">
                   <Badge className="bg-primary text-primary-foreground border-transparent rounded-full px-3">{course.categoryName}</Badge>
                   <Badge variant="outline" className="bg-background/50 backdrop-blur border-border text-foreground rounded-full px-3">{course.difficulty}</Badge>
+                  <Badge variant="outline" className="bg-primary/10 backdrop-blur border-primary/30 text-primary rounded-full px-3">{course.accessTier} access</Badge>
                 </div>
                 <h1 className="text-4xl md:text-5xl font-serif font-bold text-foreground mb-4 leading-tight">{course.title}</h1>
                 <p className="text-lg text-muted-foreground">Taught by <span className="text-foreground font-medium">{course.instructorName}</span></p>
@@ -121,7 +122,7 @@ export default function CourseDetailPage() {
                     onClick={handleEnroll}
                     disabled={enrollMutation.isPending}
                   >
-                    {enrollMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Enroll Now for Free'}
+                    {enrollMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : course.accessTier === "Free" ? "Enroll Now for Free" : `Unlock with ${course.accessTier}`}
                   </Button>
                 )}
               </div>
@@ -205,7 +206,7 @@ export default function CourseDetailPage() {
                   onClick={handleEnroll}
                   disabled={enrollMutation.isPending}
                 >
-                  {enrollMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Enroll Free'}
+                  {enrollMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : course.accessTier === "Free" ? "Enroll Free" : `Unlock with ${course.accessTier}`}
                 </Button>
               </div>
             )}
