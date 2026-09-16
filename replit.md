@@ -51,6 +51,16 @@ A free educational community portal where anyone can sign up, browse courses acr
 - **Community Board**: Announcements, post new content, activity feed
 - **Profile**: View and edit display name and bio, see enrolled courses
 
+## Branding & Marketing Source of Truth
+
+- Use `attached_assets/Branding_&_Marketing__Mastery_Toolkit_Blueprint_for_TEBM_1789593207407.md` as the authoritative reference for TEBM branding, marketing, positioning, visual identity, voice, vocabulary, funnel language, and customer experience.
+- Cross-reference branding and marketing requests against this blueprint before changing copy, visuals, offers, campaigns, or customer-facing flows.
+- Preserve the approved Dark Luxury system: near-black and charcoal surfaces, warm cream text, champagne-gold accents, Cormorant Garamond headings, Lato body/UI text, pill-shaped actions, restrained borders, and subtle glows.
+- Follow the four voice pillars: Luxury of Truth, Beauty as Empowerment, Authority of Experience, and Timeless Elegance.
+- Prefer identity-led, confidence-building language. Avoid the blueprint's forbidden shame-based, perfectionist, transactional, trend-driven, and overly casual terms.
+- The uploaded master logo remains the authoritative TEBM and EduPortal logo.
+- Review `docs/tebm-branding-marketing-blueprint-review.md` before implementing pricing, deposits, retainers, or tier details because the blueprint contains unresolved internal conflicts in those areas.
+
 ## User preferences
 
 _Populate as needed._
