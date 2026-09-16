@@ -3,7 +3,8 @@ import { useClerk, useUser } from "@clerk/react";
 import { LayoutDashboard, Library, Users, User, LogOut, MessageSquare } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import ebmLogo from "@assets/generated_images/ebm-logo.svg";
+import masterLogo from "@assets/TEBM_-_Master_Logo_-_Website_2000x2000.png_1789590910265.png";
+import masterMonogram from "@assets/generated_images/tebm-master-monogram.png";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -15,11 +16,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen bg-background text-foreground w-full">
         <Sidebar className="border-r border-border bg-sidebar text-sidebar-foreground">
           <SidebarHeader className="p-4">
-            <Link href="/dashboard" className="flex items-center text-primary transition-opacity hover:opacity-80">
+            <Link href="/dashboard" className="flex items-center justify-center overflow-hidden rounded-xl bg-[#F5EEE0] transition-opacity hover:opacity-90">
               <img
-                src={ebmLogo}
+                src={masterLogo}
                 alt="The Elevated Beauty Method"
-                className="h-14 w-auto object-contain"
+                className="h-auto w-full object-contain"
               />
             </Link>
           </SidebarHeader>
@@ -71,9 +72,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           <header className="h-16 flex items-center px-6 border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10 md:hidden">
             <SidebarTrigger />
             <img
-              src={ebmLogo}
+              src={masterMonogram}
               alt="The Elevated Beauty Method"
-              className="ml-4 h-10 w-auto object-contain"
+              className="ml-4 h-11 w-auto object-contain drop-shadow-[0_3px_10px_rgba(255,236,194,0.18)]"
             />
           </header>
           <div className="flex-1 overflow-auto">

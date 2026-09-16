@@ -4,7 +4,8 @@ import { Sparkles, ArrowRight, Crown, Eye, Star, CheckCircle2 } from "lucide-rea
 import heroImage from "@assets/generated_images/hero-beauty.jpg";
 import diagnosticImage from "@assets/generated_images/diagnostic-preview.jpg";
 import everydayFaceImage from "@assets/generated_images/everyday-face.jpg";
-import ebmLogo from "@assets/generated_images/ebm-logo.svg";
+import masterLogo from "@assets/TEBM_-_Master_Logo_-_Website_2000x2000.png_1789590910265.png";
+import masterMonogram from "@assets/generated_images/tebm-master-monogram.png";
 
 export default function LandingPage() {
   return (
@@ -12,9 +13,9 @@ export default function LandingPage() {
       <nav className="h-20 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-50 px-6 md:px-12 flex items-center justify-between">
         <div className="flex items-center text-primary">
           <img
-            src={ebmLogo}
+            src={masterMonogram}
             alt="The Elevated Beauty Method"
-            className="h-14 w-auto object-contain"
+            className="h-14 w-auto object-contain drop-shadow-[0_4px_14px_rgba(255,236,194,0.2)]"
           />
         </div>
         <div className="flex items-center gap-4">
@@ -289,9 +290,9 @@ export default function LandingPage() {
       <footer className="py-12 px-6 md:px-12 lg:px-24 bg-card/50 border-t border-border flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center text-muted-foreground">
           <img
-            src={ebmLogo}
+            src={masterLogo}
             alt="The Elevated Beauty Method"
-            className="h-12 w-auto object-contain"
+            className="h-24 w-auto rounded-xl object-contain shadow-[0_8px_32px_-12px_rgba(255,236,194,0.25)]"
           />
         </div>
         <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} The Elevated Beauty Method™ by Blushing Beauty By Nikki.</p>
