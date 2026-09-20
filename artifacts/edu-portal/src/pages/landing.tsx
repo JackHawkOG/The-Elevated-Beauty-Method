@@ -10,7 +10,7 @@ import masterMonogram from "@assets/generated_images/tebm-master-monogram.png";
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
-      <nav className="relative min-h-64 border-b border-border/50 bg-background/90 px-6 py-6 backdrop-blur md:min-h-[22rem] md:px-12">
+      <nav className="relative min-h-[42rem] border-b border-border/50 bg-background/90 px-6 py-8 backdrop-blur md:min-h-[54rem] md:px-12">
         <Link
           href="/"
           aria-label="The Elevated Beauty Method home"
@@ -21,7 +21,7 @@ export default function LandingPage() {
             alt="The Elevated Beauty Method"
             className="h-40 w-auto object-contain drop-shadow-[0_8px_28px_rgba(220,206,191,0.22)] md:h-[17.5rem]"
           />
-          <h1 className="-mt-3 font-serif text-2xl font-semibold tracking-[0.08em] text-primary md:-mt-8 md:text-4xl">
+          <h1 className="mt-12 max-w-[95vw] font-serif text-[7.5rem] font-semibold leading-[0.84] tracking-[0.02em] text-primary md:mt-16 md:text-[11.25rem]">
             The Elevated Beauty Method
           </h1>
         </Link>
