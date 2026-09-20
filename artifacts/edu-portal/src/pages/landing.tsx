@@ -10,15 +10,22 @@ import masterMonogram from "@assets/generated_images/tebm-master-monogram.png";
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
-      <nav className="h-20 border-b border-border/50 bg-background/80 backdrop-blur sticky top-0 z-50 px-6 md:px-12 flex items-center justify-between">
-        <div className="flex items-center text-primary">
+      <nav className="relative min-h-64 border-b border-border/50 bg-background/90 px-6 py-6 backdrop-blur md:min-h-[22rem] md:px-12">
+        <Link
+          href="/"
+          aria-label="The Elevated Beauty Method home"
+          className="mx-auto flex w-fit flex-col items-center justify-center text-center"
+        >
           <img
             src={masterMonogram}
             alt="The Elevated Beauty Method"
-            className="h-14 w-auto object-contain drop-shadow-[0_4px_14px_rgba(255,236,194,0.2)]"
+            className="h-40 w-auto object-contain drop-shadow-[0_8px_28px_rgba(220,206,191,0.22)] md:h-[17.5rem]"
           />
-        </div>
-        <div className="flex items-center gap-4">
+          <h1 className="-mt-3 font-serif text-2xl font-semibold tracking-[0.08em] text-primary md:-mt-8 md:text-4xl">
+            The Elevated Beauty Method
+          </h1>
+        </Link>
+        <div className="absolute right-4 top-4 flex items-center gap-3 md:right-12 md:top-8 md:gap-4">
           <Link href="/sign-in" className="text-muted-foreground hover:text-primary transition-colors text-sm font-medium">
             Sign In
           </Link>
