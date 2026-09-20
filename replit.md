@@ -54,8 +54,11 @@ A free educational community portal where anyone can sign up, browse courses acr
 ## Branding & Marketing Source of Truth
 
 - Use `attached_assets/Branding_&_Marketing__Mastery_Toolkit_Blueprint_for_TEBM_1789593207407.md` as the authoritative reference for TEBM branding, marketing, positioning, visual identity, voice, vocabulary, funnel language, and customer experience.
+- Use `attached_assets/TEBM_Brand_Kit_Consistency__Brand_Identity,_Visual_Design_&_Aes_1789917998723.md` as the final authority for TEBM visual design requirements. Where it conflicts with the broader branding blueprint, this newer Brand Kit Consistency document governs visual design.
 - Cross-reference branding and marketing requests against this blueprint before changing copy, visuals, offers, campaigns, or customer-facing flows.
-- Preserve the approved Dark Luxury system: near-black and charcoal surfaces, warm cream text, champagne-gold accents, Cormorant Garamond headings, Lato body/UI text, pill-shaped actions, restrained borders, and subtle glows.
+- Preserve the approved Dark Luxury system: near-black and charcoal surfaces, warm cream text, `#dccebf` accents, Cormorant Garamond headings, Lato body/UI text, pill-shaped actions, restrained borders, and subtle glows.
+- `#dccebf` is the sole primary accent. It replaces `#FFEBBF` and `#FFECC2` throughout future design work, including buttons, badges, links, icons, active states, focus treatments, and glows.
+- Optional accents are Blush Pink `#F9D5E5` for the website, Dusty Rose `#C87A96` for the portal, and Mauve `#C9A8C0` for either.
 - Follow the four voice pillars: Luxury of Truth, Beauty as Empowerment, Authority of Experience, and Timeless Elegance.
 - Prefer identity-led, confidence-building language. Avoid the blueprint's forbidden shame-based, perfectionist, transactional, trend-driven, and overly casual terms.
 - The uploaded master logo remains the authoritative TEBM and EduPortal logo.
