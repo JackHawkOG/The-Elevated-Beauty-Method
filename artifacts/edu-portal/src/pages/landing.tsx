@@ -21,7 +21,7 @@ export default function LandingPage() {
             alt="The Elevated Beauty Method"
             className="h-40 w-auto object-contain drop-shadow-[0_8px_28px_rgba(220,206,191,0.22)] md:h-[17.5rem]"
           />
-          <h1 className="mt-12 max-w-[95vw] font-serif text-[7.5rem] font-semibold leading-[0.84] tracking-[0.02em] text-primary md:mt-16 md:text-[11.25rem]">
+          <h1 className="metallic-logo-text mt-12 max-w-[95vw] font-serif text-[7.5rem] font-semibold leading-[0.84] tracking-[0.02em] md:mt-16 md:text-[11.25rem]">
             The Elevated Beauty Method
           </h1>
         </Link>

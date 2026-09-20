@@ -138,3 +138,29 @@
     @apply font-serif;
   }
 }
+
+.metallic-logo-text {
+  color: transparent;
+  background-image: linear-gradient(
+    105deg,
+    #6f4b2d 0%,
+    #c9955f 10%,
+    #f8e0b5 22%,
+    #9a673d 34%,
+    #f6d9a6 48%,
+    #7b5030 60%,
+    #e7bd83 74%,
+    #fff0cf 86%,
+    #8a5a35 100%
+  );
+  background-size: 220% 100%;
+  background-position: 50% 50%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-text-stroke: 1px rgba(255, 233, 196, 0.28);
+  filter:
+    drop-shadow(0 2px 0 rgba(255, 240, 210, 0.28))
+    drop-shadow(0 7px 3px rgba(70, 40, 20, 0.7))
+    drop-shadow(0 18px 26px rgba(201, 149, 95, 0.2));
+}
