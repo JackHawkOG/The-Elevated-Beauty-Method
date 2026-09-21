@@ -105,7 +105,9 @@
 **Founding Member Launch Status:**
 
 * Launching soon; exact opening and closing dates are still to be announced.
-* The continuity requirement for retaining the $24/month Founding Member rate is still to be finalized.
+* The $24/month Founding Member rate remains active unless the member cancels.
+* Cancellation permanently ends the Founding Member rate. A returning member pays the standard $48/month rate.
+* Failed payments do not cause the member to lose the Founding Member rate.
 
 ---
 

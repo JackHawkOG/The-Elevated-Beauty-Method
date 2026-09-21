@@ -12,6 +12,7 @@ This review does not rewrite the source document. It records errors and ambiguit
 - The current launch includes only Tier 1 and Tier 2. Tier 3 and Tier 4 are retained as internal future-roadmap concepts with no approved public pricing.
 - Tier 2’s official customer-facing name is “The Elevated Method.”
 - Tier 1 and Tier 2 receive the MARI AI Imaging Processor. Future Tier 3 and Tier 4 receive the MARI AI Video app.
+- The Tier 2 Founding Member rate is $24/month. Cancellation permanently ends that rate; returning members pay $48/month. Failed payments do not cause loss of Founding Member pricing.
 - Remove “crowdsourced masterclasses.” Masterclasses are exclusive to Nikki.
 - Every Wedding/Bridal service requires a 25% retainer.
 - Every non-Wedding/Bridal service requires a flat $125 retainer.
@@ -21,9 +22,6 @@ This review does not rewrite the source document. It records errors and ambiguit
 
 1. **Tier 2 founding-member launch window.**  
    The launch is opening soon, but exact start and end dates are not yet set. Confirm those dates when available.
-
-2. **Founding-rate continuity.**  
-   Confirm whether the `$24/month` Founding Member rate remains valid only while membership stays continuously active, and what happens after cancellation or failed payment.
 
 ## Editorial and consistency corrections
 
@@ -43,4 +41,4 @@ No pricing was changed during this review. A confirmed pricing decision should p
 
 ## Safe application rule
 
-Use the blueprint directly for visual style, positioning, voice, vocabulary, customer experience, confirmed service prices, and confirmed retainer rules. Use the Founding Member Launch file for membership inclusions. Before opening paid enrollment, confirm the Founding Member launch dates and the policy for retaining the lifetime rate after cancellation or failed payment.
+Use the blueprint directly for visual style, positioning, voice, vocabulary, customer experience, confirmed service prices, and confirmed retainer rules. Use the Founding Member Launch file for membership inclusions and founding-rate continuity. Before opening paid enrollment, confirm the Founding Member launch dates.
