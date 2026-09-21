@@ -37,37 +37,65 @@ export default function LandingPage() {
 
       <main className="flex-1">
         {/* Hero */}
-        <section className="relative min-h-[85vh] flex items-center px-6 md:px-12 lg:px-24 overflow-hidden">
+        <section className="relative min-h-[85vh] overflow-hidden px-6 py-20 md:px-12 lg:px-24">
           <div className="absolute inset-0 z-0">
             <img src={heroImage} alt="Elevated Beauty" className="w-full h-full object-cover opacity-30" />
-            <div className="absolute inset-0 bg-gradient-to-r from-background via-background/90 to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-r from-background via-background/95 to-background/50"></div>
             <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"></div>
           </div>
 
-          <div className="relative z-10 mx-auto w-full max-w-6xl animate-in fade-in slide-in-from-bottom-8 text-center duration-1000">
-            <div className="mb-10 inline-flex items-center justify-center gap-4 rounded-full border border-[#dccebf]/30 bg-[#dccebf]/10 px-7 py-4 text-xl font-medium text-[#dccebf] md:text-[2.625rem] md:leading-none">
-              <Crown className="h-7 w-7 shrink-0 md:h-10 md:w-10" />
-              <span>A community for women ready to be seen</span>
+          <div className="relative z-10 mx-auto grid w-full max-w-7xl animate-in items-center gap-14 fade-in slide-in-from-bottom-8 duration-1000 lg:grid-cols-[1.05fr_0.95fr] lg:gap-20">
+            <div className="text-center lg:text-left">
+              <div className="mb-10 inline-flex items-center justify-center gap-4 rounded-full border border-[#dccebf]/30 bg-[#dccebf]/10 px-7 py-4 text-xl font-medium text-[#dccebf] md:text-[2.625rem] md:leading-none">
+                <Crown className="h-7 w-7 shrink-0 md:h-10 md:w-10" />
+                <span>A community for women ready to be seen</span>
+              </div>
+              <p className="mb-5 text-sm font-bold uppercase tracking-[0.28em] text-[#dccebf]">
+                Founding Member Launch
+              </p>
+              <h1 className="mb-8 font-serif text-5xl font-bold leading-[1.03] text-foreground md:text-7xl lg:text-[5.5rem]">
+                Discover Your Personalized{" "}
+                <span className="inline-block bg-gradient-to-br from-[#fff0cf] via-[#dccebf] to-[#9a673d] bg-clip-text font-bold italic text-transparent drop-shadow-[0_8px_18px_rgba(220,206,191,0.25)]">
+                  Elevated Beauty Blueprint
+                </span>
+              </h1>
+              <p className="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl lg:mx-0">
+                Get instant access to The Radiant Audit scorecard to identify your skincare gaps and unlock authentic, effortless radiance.
+              </p>
+              <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center lg:justify-start">
+                <Button asChild size="lg" className="h-16 rounded-full bg-[#dccebf] px-9 text-lg font-bold text-[#0A0A0A] shadow-[0_0_40px_-10px_rgba(220,206,191,0.45)] hover:bg-[#cdbbab]">
+                  <Link href="/sign-up">
+                    Get My Free Radiant Audit <ArrowRight className="ml-2 h-5 w-5" />
+                  </Link>
+                </Button>
+                <span className="text-sm text-muted-foreground">Free scorecard + routine check-in worksheet</span>
+              </div>
             </div>
-            <h1 className="mb-8 font-serif text-5xl font-bold leading-[1.08] text-foreground md:text-7xl lg:text-8xl">
-              Step Into Your Most{" "}
-              <span className="inline-block scale-110 bg-gradient-to-br from-[#fff0cf] via-[#dccebf] to-[#9a673d] bg-clip-text px-3 font-bold italic text-transparent drop-shadow-[0_8px_18px_rgba(220,206,191,0.25)]">
-                Elevated
-              </span>{" "}
-              Self.
-            </h1>
-            <p className="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-              Beauty enhances appearance. Confidence strengthens presence. Transformation changes how you see yourself. Join a community of women who are ready to become the most confident, visible version of themselves.
-            </p>
-            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Button asChild size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-8 h-14 text-base shadow-[0_0_40px_-10px_rgba(255,224,153,0.3)]">
-                <Link href="/sign-up">
-                  Discover Your Method <ArrowRight className="ml-2 w-5 h-5" />
-                </Link>
-              </Button>
-              <Button asChild size="lg" variant="outline" className="rounded-full px-8 h-14 text-base border-border hover:bg-muted text-foreground">
-                <Link href="/courses">Explore the Library</Link>
-              </Button>
+
+            <div className="relative mx-auto w-full max-w-xl">
+              <div className="absolute -inset-8 rounded-[3rem] bg-[#dccebf]/10 blur-3xl" aria-hidden="true" />
+              <div className="relative overflow-hidden rounded-[2rem] border border-[#dccebf]/25 bg-[#141414] p-3 shadow-[0_28px_80px_-24px_rgba(0,0,0,0.9)]">
+                <img
+                  src={diagnosticImage}
+                  alt="Luxury beauty essentials for The Radiant Audit"
+                  className="aspect-[4/5] w-full rounded-[1.5rem] object-cover"
+                />
+                <div className="absolute inset-x-8 bottom-8 rounded-2xl border border-[#dccebf]/30 bg-[#0A0A0A]/90 p-6 text-left shadow-2xl backdrop-blur-xl">
+                  <div className="mb-4 flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.24em] text-[#dccebf]">Your Complimentary Scorecard</p>
+                      <h2 className="mt-2 font-serif text-3xl font-bold text-[#F5EEE0]">The Radiant Audit</h2>
+                    </div>
+                    <Sparkles className="h-8 w-8 shrink-0 text-[#dccebf]" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm text-[#F5EEE0]/80">
+                    <span className="rounded-full border border-[#dccebf]/15 px-3 py-2">Skin clarity</span>
+                    <span className="rounded-full border border-[#dccebf]/15 px-3 py-2">Routine gaps</span>
+                    <span className="rounded-full border border-[#dccebf]/15 px-3 py-2">Product alignment</span>
+                    <span className="rounded-full border border-[#dccebf]/15 px-3 py-2">Next steps</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>
