@@ -21,7 +21,7 @@ export default function LandingPage() {
             alt="The Elevated Beauty Method"
             className="h-40 w-auto object-contain drop-shadow-[0_8px_28px_rgba(220,206,191,0.22)] md:h-[17.5rem]"
           />
-          <h1 className="metallic-logo-text mt-12 max-w-[95vw] font-serif text-[7.5rem] font-semibold leading-[0.84] tracking-[0.02em] md:mt-16 md:text-[11.25rem]">
+          <h1 className="metallic-logo-text mt-12 max-w-[95vw] font-serif text-[4rem] font-semibold leading-[0.88] tracking-[0.02em] sm:text-[5.5rem] md:mt-16 md:text-[11.25rem]">
             The Elevated Beauty Method
           </h1>
         </Link>
@@ -44,18 +44,22 @@ export default function LandingPage() {
             <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent"></div>
           </div>
 
-          <div className="relative z-10 max-w-3xl animate-in fade-in slide-in-from-bottom-8 duration-1000">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary text-sm mb-6 font-medium">
-              <Crown className="w-4 h-4" />
+          <div className="relative z-10 mx-auto w-full max-w-6xl animate-in fade-in slide-in-from-bottom-8 text-center duration-1000">
+            <div className="mb-10 inline-flex items-center justify-center gap-4 rounded-full border border-[#dccebf]/30 bg-[#dccebf]/10 px-7 py-4 text-xl font-medium text-[#dccebf] md:text-[2.625rem] md:leading-none">
+              <Crown className="h-7 w-7 shrink-0 md:h-10 md:w-10" />
               <span>A community for women ready to be seen</span>
             </div>
-            <h1 className="font-serif text-5xl md:text-7xl lg:text-8xl font-bold text-foreground leading-[1.1] mb-6">
-              Step into your most <span className="text-primary italic">elevated</span> self.
+            <h1 className="mb-8 font-serif text-5xl font-bold leading-[1.08] text-foreground md:text-7xl lg:text-8xl">
+              Step Into Your Most{" "}
+              <span className="inline-block scale-110 bg-gradient-to-br from-[#fff0cf] via-[#dccebf] to-[#9a673d] bg-clip-text px-3 font-bold italic text-transparent drop-shadow-[0_8px_18px_rgba(220,206,191,0.25)]">
+                Elevated
+              </span>{" "}
+              Self.
             </h1>
-            <p className="text-lg md:text-xl text-muted-foreground mb-10 max-w-2xl leading-relaxed">
+            <p className="mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
               Beauty enhances appearance. Confidence strengthens presence. Transformation changes how you see yourself. Join a community of women who are ready to become the most confident, visible version of themselves.
             </p>
-            <div className="flex flex-col sm:flex-row items-start gap-4">
+            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Button asChild size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-8 h-14 text-base shadow-[0_0_40px_-10px_rgba(255,224,153,0.3)]">
                 <Link href="/sign-up">
                   Discover Your Method <ArrowRight className="ml-2 w-5 h-5" />
