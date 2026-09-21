@@ -87,7 +87,7 @@ The Brand Map addresses the 7 Essential Mapping Questions:
 4. **Why?** Empowering women going through major life transitions (career advancement, milestone events, personal reinvention) to feel seen, visible, and anchored.  
 5. **Who?** Catering exclusively to **"The Elevated Woman"**—clients who value quality over quantity, expertise over trends, experience over discounts, and authenticity over perfection.  
 6. **Where Are You?** Positioned at the intersection of luxury hands-on artistry and accessible digital education.  
-7. **What’s Next?** Building an autonomous, systemized portal offering crowdsourced masterclasses, tiered workshops, and scalable subscription revenue.
+7. **What’s Next?** Building an autonomous, systemized portal offering exclusive masterclasses with Nikki, tiered workshops, and scalable subscription revenue.
 
 ### **1.2 "The Language is the Foundation" Integration**
 
@@ -228,7 +228,7 @@ To maintain brand alignment, all team members and copywriters must strictly adhe
 
 1. **Client-Facing Protocol:** Prioritize internal experience over visual output ("We will reveal a radiant finish that gives you the confidence to own the room"). Use active empowerment where the client is the hero and TEBM is the facilitator.  
 2. **Social Media Protocol:** Lead with education and commentary explaining the philosophy behind a look rather than simple before/after photos. Describe how the look *feels* rather than just how it *looks*.  
-3. **Lead Communication Protocol:** Respond with a "Vision-First" welcome acknowledging the milestone event. Guide leads consultatively rather than asking them to self-select services. Secure commitments using structured deposit invoices (20% retainer).  
+3. **Lead Communication Protocol:** Respond with a "Vision-First" welcome acknowledging the milestone event. Guide leads consultatively rather than asking them to self-select services. Secure commitments using a 25% retainer for all Wedding/Bridal services and a flat $125 retainer for all other services.  
 4. **Education Portal Protocol:** Operate as a "Guide, Not Guru"—co-creating mastery with the member. Enforce "Elevated Simplicity" by cutting through beauty industry noise. Frame technical steps around identity alignment.
 
 ---
@@ -247,7 +247,7 @@ TEBM implements a connected funnel strategy that bridges high-ticket 1:1 luxury 
 ┌─────────────────────────────────────────┐                               ┌─────────────────────────────────────────┐
 │    HIGH-TICKET 1:1 SERVICES (BBBN)      │                               │     DIGITAL SUBSCRIPTION PORTAL (TEBM)  │
 ├─────────────────────────────────────────┤                               ├─────────────────────────────────────────┤
-│ • Bridal Glam & Hair: $450 ($90 dep)    │                               │ • Tier 1: Free Tier ($0/mo)             │
+│ • Bridal Glam & Hair: $450 (25% retainer)│                              │ • Tier 1: Free Tier ($0/mo)             │
 │ • Event Glam & Hair: $325 ($125 dep)    │                               │   - Diagnostic + 5-Part Video Series    │
 │ • Microblading Initial: $400 ($125 dep) │                               │ • Tier 2: The Elevated Method ($97/mo)  │
 │ • Client Onboarding & Consult Call      │                               │   - Full Course Library & Workshops     │
@@ -265,17 +265,17 @@ TEBM implements a connected funnel strategy that bridges high-ticket 1:1 luxury 
 
 1:1 luxury services build immediate brand authority and cash flow while feeding high-intent clients into the digital ecosystem:
 
-* **Bridal Beauty (Makeup & Hair):** $450 full price (25% deposit; 3–4 hours duration).  
-  * *Bridal Makeup Only:* $275 (25%deposit).  
-  * *Bridal Hair Only:* $225 (25% deposit).  
-  * *Bridal Trial:* $350 ($125 deposit).  
-  * *Bridesmaids/Mothers (Makeup & Hair):* $300 (25% deposit).  
-* **Event Makeup & Hair:** $325 full price ($125 deposit; 2–3 hours duration).  
-  * *Event Hair Only:* $175 ($125 deposit).  
-  * *Event Makeup Only:* $275 ($125 deposit).  
-  * *Makeup & Hair Lesson:* $350 ($125 deposit).  
-* **Permanent Beauty (Microblading):** $400 initial session ($125 deposit; 2–3 hours duration).  
-  * *Microblading Touch-Up:* 00 ($125 deposit).
+* **Bridal Beauty (Makeup & Hair):** $450 full price (25% retainer; 3–4 hours duration).  
+  * *Bridal Makeup Only:* $275 (25% retainer).  
+  * *Bridal Hair Only:* $225 (25% retainer).  
+  * *Bridal Trial:* $350 (25% retainer).  
+  * *Bridesmaids/Mothers (Makeup & Hair):* $300 (25% retainer).  
+* **Event Makeup & Hair:** $325 full price ($125 retainer; 2–3 hours duration).  
+  * *Event Hair Only:* $175 ($125 retainer).  
+  * *Event Makeup Only:* $275 ($125 retainer).  
+  * *Makeup & Hair Lesson:* $350 ($125 retainer).  
+* **Permanent Beauty (Microblading):** $400 initial session ($125 retainer; 2–3 hours duration).  
+  * *Microblading Touch-Up:* $200 ($125 retainer).
 
 ### **4.2 Digital Subscription Membership Tiers (The Elevated Beauty Method Portal)**
 
@@ -310,7 +310,7 @@ The digital portal monetizes scalable education and builds recurring revenue:
 
 * **Step 1: Vision Inquiry.** Lead submits intake form detailing event date, ready-by time, location, and desired service outcome.  
 * **Step 2: Consultation Call.** A brief connection call aligns expectations and recommends the optimal service package.  
-* **Step 3: Quote & Retainer.** Customer receives an itemized quote along with a 20% retainer invoice. Date reservation locks upon receipt.  
+* **Step 3: Quote & Retainer.** Customer receives an itemized quote with a 25% retainer for all Wedding/Bridal services or a flat $125 retainer for all other services. Date reservation locks upon receipt.  
 * **Step 4: Portal Onboarding.** Following service completion, 1:1 clients are onboarded into the digital portal via the Personal Beauty Diagnostic.
 
 ---
@@ -329,7 +329,7 @@ Geometric enterprise growth is achieved by executing small, continuous improveme
 │ (+10% Shift)         │ (+10% Shift)         │ (+10% Shift)         │ (+10% Shift)               │
 ├──────────────────────┼──────────────────────┼──────────────────────┼────────────────────────────┤
 │ • Optimize ad copy   │ • Vision-first intake│ • Add hair extension │ • Exclusive workshops      │
-│   & Diagnostic hooks │ • 20% retainer system│   upsell ($50)       │ • Inner-circle community   │
+│   & Diagnostic hooks │ • Defined retainer rules│ upsell ($50)        │ • Inner-circle community   │
 │ • Leverage social    │ • Assertive closing  │ • Conversion to $97  │ • Milestone recognition    │
 │   education content  │   scripts            │   subscription tier  │   & rewards                │
 └──────────────────────┴──────────────────────┴──────────────────────┴────────────────────────────┘

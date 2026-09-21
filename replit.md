@@ -54,6 +54,7 @@ A free educational community portal where anyone can sign up, browse courses acr
 ## Branding & Marketing Source of Truth
 
 - Use `attached_assets/Branding_&_Marketing__Mastery_Toolkit_Blueprint_for_TEBM_1789593207407.md` as the authoritative reference for TEBM branding, marketing, positioning, visual identity, voice, vocabulary, funnel language, and customer experience.
+- Use `attached_assets/Founding_Member_Launch_-_Membership_Tiers_1789955682243.md` as the latest authority for membership tier names, inclusions, and launch pricing options. It supersedes older three-tier descriptions, but Tier 3 and Tier 4 prices remain undecided where the file lists multiple options.
 - Use `attached_assets/TEBM_Brand_Kit_Consistency__Brand_Identity,_Visual_Design_&_Aes_1789917998723.md` as the final authority for TEBM visual design requirements. Where it conflicts with the broader branding blueprint, this newer Brand Kit Consistency document governs visual design.
 - Cross-reference branding and marketing requests against this blueprint before changing copy, visuals, offers, campaigns, or customer-facing flows.
 - Preserve the approved Dark Luxury system: near-black and charcoal surfaces, warm cream text, `#dccebf` accents, Cormorant Garamond headings, Lato body/UI text, pill-shaped actions, restrained borders, and subtle glows.
@@ -63,6 +64,9 @@ A free educational community portal where anyone can sign up, browse courses acr
 - Prefer identity-led, confidence-building language. Avoid the blueprint's forbidden shame-based, perfectionist, transactional, trend-driven, and overly casual terms.
 - The uploaded master logo remains the authoritative TEBM and EduPortal logo.
 - Review `docs/tebm-branding-marketing-blueprint-review.md` before implementing pricing, deposits, retainers, or tier details because the blueprint contains unresolved internal conflicts in those areas.
+- Service retainers are final: 25% for every Wedding/Bridal service and a flat $125 for every non-Wedding/Bridal service.
+- Microblading pricing is final: $400 for the initial service and $200 for touch-ups.
+- Masterclasses are exclusive to Nikki; do not describe them as crowdsourced.
 
 ## User preferences
 
