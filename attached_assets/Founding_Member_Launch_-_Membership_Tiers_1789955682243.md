@@ -43,10 +43,8 @@
 
 ---
 
-**Tier 2:	 *The Elevated Method*	Core Recurring Subscription**  
-**Names / Titles:** 
-
-* Also referenced as ***The Beauty Mindset Accelerator***
+**Tier 2: *The Elevated Method* — Core Recurring Subscription**  
+**Official Customer-Facing Name:** ***The Elevated Method***
 
 **What It Includes:**
 
@@ -104,9 +102,16 @@
 * $48 / month  
 * $24/ month lifetime of membership for Founding Members Only \- purchased during the Launch window.
 
+**Founding Member Launch Status:**
+
+* Launching soon; exact opening and closing dates are still to be announced.
+* The continuity requirement for retaining the $24/month Founding Member rate is still to be finalized.
+
 ---
 
-**\\Tier 3:  *The Elevated Beauty Method***
+**Tier 3: *The Elevated Beauty Method* — Future Roadmap Tier**
+
+*Not included in the current Founding Member launch. Retain the feature concept for internal planning only. Do not publish, sell, or promote this tier until its offer and pricing receive final approval.*
 
 **What It Includes:**  
 **🤖 *MARI \- AI Video app***
@@ -168,17 +173,15 @@
 
 * Full access to the $1,500 Masterclass curriculum library.
 
-**💲Pricing Options Needing Finalization:**
+**💲Pricing Status:**
 
-* Option A:  $1,500 upfront \+ $49 / month (Highlighted in the financial blueprint and elevator pitches).  
-    
-* Option B:  $249–$599 upfront \+ $49–$97 / month.  
-    
-* Option C:  $39 / month plus standalone masterclass packages ranging from $1,500 to $5,000.
+* Deferred. No Tier 3 price is approved for publication.
 
 ---
 
-**Tier 4:  The Elevated Beauty Mastery**
+**Tier 4: The Elevated Beauty Mastery — Future Roadmap Tier**
+
+*Not included in the current Founding Member launch. Retain the feature concept for internal planning only. Do not publish, sell, or promote this tier until its offer and pricing receive final approval.*
 
 **Names/Titles:**
 
@@ -248,9 +251,7 @@
 
 * Tools and mentorship for entrepreneurs looking to use TEBM to build their own brand presence and income.
 
-**💲Pricing Options:**
+**💲Pricing Status:**
 
-* Option A:   $248 — $488 upfront \+  $48 — $88/month  
-* Option B:  $1,500 upfront \+ $88 / month   
-* Option C:   Full cohort packages ranging from $1,800 to $4,800.
+* Deferred. No Tier 4 price is approved for publication.
 
