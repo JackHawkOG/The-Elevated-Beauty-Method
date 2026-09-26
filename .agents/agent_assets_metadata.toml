@@ -98,3 +98,17 @@ mtime_ms = 1790415231212
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/4966ff40-a366-46ed-a42f-159c816404c9/6d344be3-caff-4223-954a-80052ad58020"
 storage_version_token = "1790415242881915"
 content_type = "image/svg+xml"
+
+[[outputs]]
+id = "yQgal4IdQVm8RsHGdVewL"
+uri = "file://exports/tebm-apple-app-claude-handoff.md"
+type = "text"
+title = "TEBM Apple App Conversation Handoff"
+description = "Downloadable Markdown transcript and decision summary to upload to Claude."
+logical_id = "3fce615a-d624-4df5-80aa-ff670af5fc9e"
+content_hash = "sha256:ce6384f7925edd00ccd2a87a0c5cdd7d1141dff61ce9eed19af7fab3e7a5ca9d"
+size = 12227
+mtime_ms = 1790419518051
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/3fce615a-d624-4df5-80aa-ff670af5fc9e/6c4e3cc4-f3ff-44f1-8994-2d47dd5c2dc7"
+storage_version_token = "1790419522315078"
+content_type = "text/markdown"
