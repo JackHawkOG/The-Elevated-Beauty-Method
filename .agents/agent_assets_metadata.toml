@@ -84,3 +84,17 @@ mtime_ms = 1790411844568
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/a39bf23e-c16d-4eff-a379-d543f4b1f733/a21736f8-e748-499f-8970-b9fbd729ddf1"
 storage_version_token = "1790411848703551"
 content_type = "image/svg+xml"
+
+[[outputs]]
+id = "C3y9XIWbHuYJOKYaUs594"
+uri = "file://artifacts/edu-portal/public/brand/tebm-master-logo-vector.svg"
+type = "image"
+title = "TEBM true-vector logo"
+description = "Original path-based SVG, preserved for future light-background or recolored logo uses."
+logical_id = "4966ff40-a366-46ed-a42f-159c816404c9"
+content_hash = "sha256:41b94fc3ae189ff4733ba506443d05a378c3eef317e9b4e500368c2227cc3e73"
+size = 15716
+mtime_ms = 1790415231212
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/4966ff40-a366-46ed-a42f-159c816404c9/6d344be3-caff-4223-954a-80052ad58020"
+storage_version_token = "1790415242881915"
+content_type = "image/svg+xml"
