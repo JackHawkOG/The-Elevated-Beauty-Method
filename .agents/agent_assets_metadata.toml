@@ -56,3 +56,17 @@ mtime_ms = 1790411070553
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/430cb712-5d70-4ad3-9ec9-b9045bd3b9d3/0edc8d4f-290e-4987-a2b4-55ea961a8177"
 storage_version_token = "1790411074731485"
 content_type = "image/png"
+
+[[outputs]]
+id = "J5ZoApBMtIjMK5WAsY5ao"
+uri = "file://artifacts/edu-portal/public/brand/tebm-master-logo-1200x600.png"
+type = "image"
+title = "TEBM custom 1200 × 600 logo"
+description = "Original custom-sized PNG saved alongside the EduPortal brand assets."
+logical_id = "9c9b9001-7724-4b31-b115-c1b449dacb58"
+content_hash = "sha256:bb29589f3b7321a7899846065c0a50f10793c9dbf6c8ad8a203799b613815905"
+size = 329762
+mtime_ms = 1790411113115
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/9c9b9001-7724-4b31-b115-c1b449dacb58/19df8946-e33e-4b92-b1d9-6c421bca85a2"
+storage_version_token = "1790411116117489"
+content_type = "image/png"
