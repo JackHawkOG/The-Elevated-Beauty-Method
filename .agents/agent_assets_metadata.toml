@@ -42,3 +42,17 @@ mtime_ms = 1790410699984
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/e60c7254-974d-4faf-b60a-13ca055a3919/a5495c39-26ce-4144-ada3-87b3eadf6bb5"
 storage_version_token = "1790410705277321"
 content_type = "image/png"
+
+[[outputs]]
+id = "W0TOVLOWLhyuu00JfEdx3"
+uri = "file://artifacts/edu-portal/public/brand/tebm-master-logo-mobile-socials-1080x1920.png"
+type = "image"
+title = "TEBM mobile logo"
+description = "Original 1080 × 1920 mobile and social PNG, saved as an EduPortal brand asset."
+logical_id = "430cb712-5d70-4ad3-9ec9-b9045bd3b9d3"
+content_hash = "sha256:e3ce0ea378bcf4641f6ea879590a1031a104c4c76dd5f281acb0e1d333a1436c"
+size = 142188
+mtime_ms = 1790411070553
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/430cb712-5d70-4ad3-9ec9-b9045bd3b9d3/0edc8d4f-290e-4987-a2b4-55ea961a8177"
+storage_version_token = "1790411074731485"
+content_type = "image/png"
