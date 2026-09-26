@@ -4,26 +4,23 @@ import { Sparkles, ArrowRight, Crown, Eye, Star, CheckCircle2 } from "lucide-rea
 import heroImage from "@assets/generated_images/hero-beauty.jpg";
 import diagnosticImage from "@assets/generated_images/diagnostic-preview.jpg";
 import everydayFaceImage from "@assets/generated_images/everyday-face.jpg";
-import masterLogo from "@assets/TEBM_-_Master_Logo_-_Website_2000x2000.png_1789590910265.png";
-import masterMonogram from "@assets/generated_images/tebm-master-monogram.png";
+
+const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-1920x1080.png`;
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
-      <nav className="relative min-h-[42rem] border-b border-border/50 bg-background/90 px-6 pb-4 pt-24 backdrop-blur md:min-h-[54rem] md:px-12 md:py-8">
+      <nav className="relative flex min-h-[31rem] items-center justify-center border-b border-border/50 bg-background/90 px-6 pb-8 pt-24 backdrop-blur md:min-h-[42rem] md:px-12 md:pt-28 lg:min-h-[58rem]">
         <Link
           href="/"
           aria-label="The Elevated Beauty Method home"
-          className="mx-auto flex w-fit flex-col items-center justify-center text-center"
+          className="mx-auto block w-full max-w-[1320px] transition-opacity hover:opacity-95"
         >
           <img
-            src={masterMonogram}
+            src={masterLogo}
             alt="The Elevated Beauty Method"
-            className="h-40 w-auto object-contain drop-shadow-[0_8px_28px_rgba(220,206,191,0.22)] md:h-[17.5rem]"
+            className="block h-auto w-full object-contain"
           />
-          <h1 className="metallic-logo-text mt-12 max-w-[95vw] font-serif text-[4rem] font-semibold leading-[0.88] tracking-[0.02em] sm:text-[5.5rem] md:mt-16 md:text-[11.25rem]">
-            The Elevated Beauty Method
-          </h1>
         </Link>
         <div className="absolute right-4 top-4 flex items-center gap-3 md:right-12 md:top-8 md:gap-4">
           <Link href="/sign-in" className="text-muted-foreground hover:text-primary transition-colors text-sm font-medium">
@@ -331,7 +328,7 @@ export default function LandingPage() {
           <img
             src={masterLogo}
             alt="The Elevated Beauty Method"
-            className="h-24 w-auto rounded-xl object-contain shadow-[0_8px_32px_-12px_rgba(255,236,194,0.25)]"
+            className="h-24 w-auto rounded-xl object-contain"
           />
         </div>
         <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} The Elevated Beauty Method™ by Blushing Beauty By Nikki.</p>

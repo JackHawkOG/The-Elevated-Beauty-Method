@@ -3,8 +3,9 @@ import { useClerk, useUser } from "@clerk/react";
 import { LayoutDashboard, Library, Users, User, LogOut, MessageSquare } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import masterLogo from "@assets/TEBM_-_Master_Logo_-_Website_2000x2000.png_1789590910265.png";
-import masterMonogram from "@assets/generated_images/tebm-master-monogram.png";
+
+const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-1920x1080.png`;
+const masterMonogram = `${import.meta.env.BASE_URL}brand/tebm-master-monogram.png`;
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -16,7 +17,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen bg-background text-foreground w-full">
         <Sidebar className="border-r border-border bg-sidebar text-sidebar-foreground">
           <SidebarHeader className="p-4">
-            <Link href="/dashboard" className="flex items-center justify-center overflow-hidden rounded-xl bg-[#F5EEE0] transition-opacity hover:opacity-90">
+            <Link href="/dashboard" className="flex items-center justify-center overflow-hidden rounded-xl transition-opacity hover:opacity-90">
               <img
                 src={masterLogo}
                 alt="The Elevated Beauty Method"
@@ -74,7 +75,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <img
               src={masterMonogram}
               alt="The Elevated Beauty Method"
-              className="ml-4 h-11 w-auto object-contain drop-shadow-[0_3px_10px_rgba(255,236,194,0.18)]"
+               className="ml-4 h-11 w-auto object-contain"
             />
           </header>
           <div className="flex-1 overflow-auto">

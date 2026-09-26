@@ -68,7 +68,7 @@ A free educational community portal where anyone can sign up, browse courses acr
 - Optional accents are Blush Pink `#F9D5E5` for the website, Dusty Rose `#C87A96` for the portal, and Mauve `#C9A8C0` for either.
 - Follow the four voice pillars: Luxury of Truth, Beauty as Empowerment, Authority of Experience, and Timeless Elegance.
 - Prefer identity-led, confidence-building language. Avoid the blueprint's forbidden shame-based, perfectionist, transactional, trend-driven, and overly casual terms.
-- The uploaded master logo remains the authoritative TEBM and EduPortal logo.
+- The current website and EduPortal master logo is `artifacts/edu-portal/public/brand/tebm-master-logo-1920x1080.png` (the upscaled cream-background PNG). The earlier transparent version remains saved separately for future use.
 - Review `docs/tebm-branding-marketing-blueprint-review.md` before implementing pricing, deposits, retainers, or tier details because the blueprint contains unresolved internal conflicts in those areas.
 - Service retainers are final: 25% for every Wedding/Bridal service and a flat $125 for every non-Wedding/Bridal service.
 - Microblading pricing is final: $400 for the initial service and $200 for touch-ups.

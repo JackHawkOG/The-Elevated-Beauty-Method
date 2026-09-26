@@ -36,7 +36,7 @@ const clerkAppearance = {
   options: {
     logoPlacement: "inside" as const,
     logoLinkUrl: basePath || "/",
-    logoImageUrl: `${window.location.origin}${basePath}/logo.png`,
+    logoImageUrl: `${window.location.origin}${basePath}/brand/tebm-master-logo-1920x1080.png`,
   },
   variables: {
     colorPrimary: "#FFECC2",
