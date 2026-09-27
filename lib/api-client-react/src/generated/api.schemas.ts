@@ -125,6 +125,32 @@ export type EditorialCourse = Course & ({
   publishedAt: string | null;
 });
 
+export type EditorialCourseSummaryAccessTier = typeof EditorialCourseSummaryAccessTier[keyof typeof EditorialCourseSummaryAccessTier];
+
+
+export const EditorialCourseSummaryAccessTier = {
+  Free: 'Free',
+  Elevated: 'Elevated',
+  Premium: 'Premium',
+} as const;
+
+export interface EditorialLessonSummary {
+  id: number;
+  title: string;
+  sortOrder: number;
+  /** @nullable */
+  publishedAt: string | null;
+}
+
+export interface EditorialCourseSummary {
+  id: number;
+  title: string;
+  accessTier: EditorialCourseSummaryAccessTier;
+  /** @nullable */
+  publishedAt: string | null;
+  lessons: EditorialLessonSummary[];
+}
+
 export type EditorialLesson = Lesson & ({
   revision: string;
   /** @nullable */

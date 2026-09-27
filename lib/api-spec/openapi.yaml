@@ -295,6 +295,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/Lesson"
 
+  /editorial/courses:
+    get:
+      operationId: listEditorialCourses
+      tags: [courses]
+      summary: List courses with unpublished course or lesson drafts (editor or owner)
+      responses:
+        "200":
+          description: Courses awaiting editorial review
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EditorialCourseSummary"
+
   /editorial/courses/{courseId}:
     get:
       operationId: reviewCourse
@@ -676,6 +691,28 @@ components:
           properties:
             revision: { type: string }
             publishedAt: { type: ["string", "null"] }
+
+    EditorialCourseSummary:
+      type: object
+      required: [id, title, accessTier, publishedAt, lessons]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        accessTier: { type: string, enum: [Free, Elevated, Premium] }
+        publishedAt: { type: ["string", "null"] }
+        lessons:
+          type: array
+          items:
+            $ref: "#/components/schemas/EditorialLessonSummary"
+
+    EditorialLessonSummary:
+      type: object
+      required: [id, title, sortOrder, publishedAt]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        sortOrder: { type: number }
+        publishedAt: { type: ["string", "null"] }
 
     EditorialLesson:
       allOf:

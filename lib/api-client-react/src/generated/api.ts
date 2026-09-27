@@ -32,6 +32,7 @@ import type {
   DashboardStats,
   EditorialApproval,
   EditorialCourse,
+  EditorialCourseSummary,
   EditorialLesson,
   Enrollment,
   EnrollmentInput,
@@ -971,6 +972,83 @@ export const useApproveLesson = <TError = ErrorType<unknown>,
       > => {
       return useMutation(getApproveLessonMutationOptions(options));
     }
+
+export const getListEditorialCoursesUrl = () => {
+
+
+
+
+  return `/api/editorial/courses`
+}
+
+/**
+ * @summary List courses with unpublished course or lesson drafts (editor or owner)
+ */
+export const listEditorialCourses = async ( options?: Parameters<typeof customFetch>[1]): Promise<EditorialCourseSummary[]> => {
+
+  return customFetch<EditorialCourseSummary[]>(getListEditorialCoursesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListEditorialCoursesQueryKey = () => {
+    return [
+    `/api/editorial/courses`
+    ] as const;
+    }
+
+
+export const getListEditorialCoursesQueryOptions = <TData = Awaited<ReturnType<typeof listEditorialCourses>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEditorialCourses>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListEditorialCoursesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listEditorialCourses>>> = ({ signal }) => listEditorialCourses({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listEditorialCourses>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListEditorialCoursesQueryResult = NonNullable<Awaited<ReturnType<typeof listEditorialCourses>>>
+export type ListEditorialCoursesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List courses with unpublished course or lesson drafts (editor or owner)
+ */
+
+export function useListEditorialCourses<TData = Awaited<ReturnType<typeof listEditorialCourses>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEditorialCourses>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListEditorialCoursesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getReviewCourseUrl = (courseId: number,) => {
 

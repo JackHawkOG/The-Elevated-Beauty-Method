@@ -129,6 +129,7 @@ import CourseDetailPage from '@/pages/course-detail';
 import LessonPage from '@/pages/lesson';
 import CommunityPage from '@/pages/community';
 import ProfilePage from '@/pages/profile';
+import EditorialPage from '@/pages/editorial';
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   return (
@@ -137,6 +138,14 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
       <Show when="signed-out"><Redirect to="/" /></Show>
     </>
   );
+}
+
+function EditorialRoute() {
+  const { user, isLoaded } = useUser();
+  if (!isLoaded) return null;
+  const role = user?.publicMetadata.role;
+  if (role !== "admin" && role !== "owner" && role !== "editor") return <NotFound />;
+  return <EditorialPage />;
 }
 
 function Router() {
@@ -151,6 +160,7 @@ function Router() {
       <Route path="/courses/:courseId/lessons/:lessonId" component={() => <ProtectedRoute component={LessonPage} />} />
       <Route path="/community" component={() => <ProtectedRoute component={CommunityPage} />} />
       <Route path="/profile" component={() => <ProtectedRoute component={ProfilePage} />} />
+      <Route path="/editorial" component={() => <ProtectedRoute component={EditorialRoute} />} />
       <Route component={NotFound} />
     </Switch>
   );

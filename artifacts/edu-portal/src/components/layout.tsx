@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useClerk, useUser } from "@clerk/react";
-import { LayoutDashboard, Library, Users, User, LogOut, MessageSquare } from "lucide-react";
+import { LayoutDashboard, Library, User, LogOut, MessageSquare, ClipboardCheck } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
@@ -11,6 +11,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { signOut } = useClerk();
   const { user } = useUser();
+  const canReview = ["admin", "owner", "editor"].includes(String(user?.publicMetadata.role));
 
   return (
     <SidebarProvider>
@@ -37,6 +38,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   <Link href="/courses"><Library /> <span>Courses</span></Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {canReview && <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={location.startsWith("/editorial")}>
+                  <Link href="/editorial" data-testid="link-editorial"><ClipboardCheck /> <span>Draft review</span></Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>}
               <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={location.startsWith("/community")}>
                   <Link href="/community"><MessageSquare /> <span>Community</span></Link>

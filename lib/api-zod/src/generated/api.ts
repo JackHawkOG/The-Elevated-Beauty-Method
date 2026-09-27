@@ -333,6 +333,24 @@ export const ApproveLessonResponse = zod.object({
 
 
 /**
+ * @summary List courses with unpublished course or lesson drafts (editor or owner)
+ */
+export const ListEditorialCoursesResponseItem = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "publishedAt": zod.string().nullable(),
+  "lessons": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "sortOrder": zod.number(),
+  "publishedAt": zod.string().nullable()
+}))
+})
+export const ListEditorialCoursesResponse = zod.array(ListEditorialCoursesResponseItem)
+
+
+/**
  * @summary Review exact course draft and revision (editor or owner)
  */
 export const ReviewCourseParams = zod.object({

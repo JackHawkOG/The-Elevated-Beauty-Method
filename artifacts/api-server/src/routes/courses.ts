@@ -23,6 +23,7 @@ import {
   ApproveLessonBody,
   ReviewCourseResponse,
   ReviewLessonResponse,
+  ListEditorialCoursesResponse,
 } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { usersTable } from "@workspace/db";
@@ -202,6 +203,27 @@ router.post("/courses/:courseId/approve", requireAuth, requireOwner, async (req,
   }
   const row = await buildCourseRow(id);
   res.json(CreateCourseResponse.parse({ ...row, createdAt: row?.createdAt?.toISOString() }));
+});
+
+router.get("/editorial/courses", requireAuth, requireContentEditor, async (_req, res): Promise<void> => {
+  const courses = await db.select({
+    id: coursesTable.id, title: coursesTable.title,
+    accessTier: coursesTable.accessTier, publishedAt: coursesTable.publishedAt,
+  }).from(coursesTable).orderBy(coursesTable.createdAt);
+  const lessons = await db.select({
+    id: lessonsTable.id, courseId: lessonsTable.courseId, title: lessonsTable.title,
+    sortOrder: lessonsTable.sortOrder, publishedAt: lessonsTable.publishedAt,
+  }).from(lessonsTable).orderBy(lessonsTable.sortOrder);
+  res.json(ListEditorialCoursesResponse.parse(courses.filter(course => !isApprovedStandaloneCourse(course.title)).map(course => {
+    const courseLessons = lessons.filter(lesson => lesson.courseId === course.id);
+    return {
+      ...course,
+      publishedAt: course.publishedAt?.toISOString() ?? null,
+      lessons: courseLessons.map(({ courseId: _courseId, ...lesson }) => ({
+        ...lesson, publishedAt: lesson.publishedAt?.toISOString() ?? null,
+      })),
+    };
+  }).filter(course => !course.publishedAt || course.lessons.some(lesson => !lesson.publishedAt))));
 });
 
 router.get("/editorial/courses/:courseId", requireAuth, requireContentEditor, async (req, res): Promise<void> => {
