@@ -53,11 +53,21 @@ function Answers({ audit }: { audit: RadiantAudit }) {
 export function RadiantAuditComparison({
   latest,
   history,
+  accountId,
 }: {
   latest: RadiantAudit;
   history: RadiantAuditHistoryEntry[];
+  accountId: string;
 }) {
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const storageKey = `radiant-audit:comparison:${accountId}`;
+  const [selectedId, setSelectedId] = useState<number | null>(() => {
+    try {
+      const stored = sessionStorage.getItem(storageKey);
+      return stored !== null && /^\d+$/.test(stored) ? Number(stored) : null;
+    } catch {
+      return null;
+    }
+  });
   const earlier = history.find(entry => entry.id === selectedId) ?? history[0];
 
   if (!earlier) {
@@ -73,7 +83,15 @@ export function RadiantAuditComparison({
         id="earlier-audit"
         className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground sm:w-auto"
         value={earlier.id}
-        onChange={event => setSelectedId(Number(event.target.value))}
+        onChange={event => {
+          const id = Number(event.target.value);
+          setSelectedId(id);
+          try {
+            sessionStorage.setItem(storageKey, String(id));
+          } catch {
+            // Selection still works for this page when storage is unavailable.
+          }
+        }}
       >
         {history.map((entry, index) => (
           <option key={entry.id} value={entry.id}>

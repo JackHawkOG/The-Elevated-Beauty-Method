@@ -7,11 +7,13 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "test:progress": "vitest run artifacts/api-server/src/routes/lesson-progress.test.ts artifacts/edu-portal/src/components/accelerator-dashboard.test.tsx --maxWorkers=1",
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
+    "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "dependencies": {
+    "@playwright/test": "^1.63.0",
     "@replit/connectors-sdk": "^0.4.1",
     "jspdf": "^4.2.1"
   },

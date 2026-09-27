@@ -180,7 +180,7 @@ export function RadiantAuditCompletePage() {
             ) : historyError ? (
               <p className="mt-8 text-destructive" role="alert">We couldn't load your earlier Audits. Please refresh and try again.</p>
             ) : (
-              <RadiantAuditComparison latest={saved} history={history ?? []} />
+              <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={saved} history={history ?? []} />
             )}
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild><Link href="/dashboard">Explore your free dashboard</Link></Button>

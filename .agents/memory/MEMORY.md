@@ -1,2 +1,3 @@
 - [Wouter server rendering in tests](wouter-ssr-tests.md) — static rendering of linked components needs a synchronous router hook; memoryLocation lacks a server snapshot.
 - [OpenAPI integer codegen](openapi-integer-codegen.md) — generated Zod can emit z.int() against the installed Zod v3 runtime; check integer fields before relying on codegen.
+- [Audit browser test boundary](audit-browser-test-boundary.md) — the repeatable comparison browser test isolates auth/API; pair it with server isolation checks rather than treating it as live Clerk coverage.
