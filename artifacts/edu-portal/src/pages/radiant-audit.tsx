@@ -38,6 +38,7 @@ export default function RadiantAuditPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const save = useSaveRadiantAudit();
+  const attempt = useRef<{ answers: string; id: string } | null>(null);
   const email = user?.primaryEmailAddress?.emailAddress;
 
   async function handleSubmit(audit: RadiantAuditSubmission) {
@@ -53,7 +54,12 @@ export default function RadiantAuditPage() {
         return;
       }
       try {
-        const saved = await save.mutateAsync({ data: auditAnswers(audit) });
+        const answers = auditAnswers(audit);
+        const signature = JSON.stringify(answers);
+        if (attempt.current?.answers !== signature) {
+          attempt.current = { answers: signature, id: crypto.randomUUID() };
+        }
+        const saved = await save.mutateAsync({ data: { ...answers, submissionId: attempt.current.id } });
         trackRadiantAuditSaved(saved.completionKind);
         queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
         void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
@@ -129,7 +135,10 @@ export function RadiantAuditCompletePage() {
       return;
     }
     try {
-      const result = await save.mutateAsync({ data: auditAnswers(audit) });
+      // Persist the ID before sending, so a refresh or lost response retries the
+      // same submission rather than creating a retake.
+      const staged = stageAudit(audit);
+      const result = await save.mutateAsync({ data: { ...auditAnswers(audit), submissionId: staged.submissionId } });
       trackRadiantAuditSaved(result.completionKind);
       queryClient.setQueryData(getGetRadiantAuditQueryKey(), result.audit);
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });

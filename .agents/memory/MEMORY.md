@@ -7,3 +7,4 @@
 - [Stripe sync in bundled server](stripe-sync-bundling.md) — keep the sync library external so its filesystem migrations remain available at runtime; connector credentials may use different field names than examples.
 - [Stripe checkout test fixtures](stripe-checkout-test-fixtures.md) — keep session identity intact when changing mocked Stripe status; incomplete fixtures can hide failed reservation release.
 - [Membership capacity test isolation](membership-capacity-test-isolation.md) — test runs share one development inventory; serialize full fixture lifetimes, not just individual reservations.
+- [Audit retry receipts and privacy](audit-retry-receipts.md) — retry receipts retain answer snapshots; erase them when Audit data is explicitly deleted.

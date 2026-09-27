@@ -9,6 +9,13 @@ import type { RadiantAuditInputRoutineChecksItem } from './radiantAuditInputRout
 import type { RadiantAuditInputValuesChecksItem } from './radiantAuditInputValuesChecksItem';
 
 export interface RadiantAuditInput {
+  /**
+     * Stable ID for one submission; reuse on retries, generate a new ID for a new retake.
+     * @minLength 36
+     * @maxLength 36
+     * @pattern ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+     */
+  submissionId?: string;
   /** @maxItems 5 */
   routineChecks: RadiantAuditInputRoutineChecksItem[];
   /** @maxItems 5 */

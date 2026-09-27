@@ -1044,6 +1044,12 @@ components:
       type: object
       required: [routineChecks, valuesChecks, beautyTrend, masteryGoal, researchTime]
       properties:
+        submissionId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          description: Stable ID for one submission; reuse on retries, generate a new ID for a new retake.
         routineChecks:
           type: array
           maxItems: 5

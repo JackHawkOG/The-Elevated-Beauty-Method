@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, bigserial, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, bigserial, index, uuid, jsonb, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -31,3 +31,10 @@ export const radiantAuditHistoryTable = pgTable("radiant_audit_history", {
 export const insertRadiantAuditHistorySchema = createInsertSchema(radiantAuditHistoryTable).omit({ id: true });
 export type InsertRadiantAuditHistory = z.infer<typeof insertRadiantAuditHistorySchema>;
 export type RadiantAuditHistory = typeof radiantAuditHistoryTable.$inferSelect;
+
+export const radiantAuditSubmissionsTable = pgTable("radiant_audit_submissions", {
+  clerkId: text("clerk_id").notNull().references(() => usersTable.clerkId),
+  submissionId: uuid("submission_id").notNull(),
+  answers: jsonb("answers").notNull(),
+  result: jsonb("result"),
+}, table => [primaryKey({ columns: [table.clerkId, table.submissionId] })]);

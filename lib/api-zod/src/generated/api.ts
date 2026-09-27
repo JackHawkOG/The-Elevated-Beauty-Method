@@ -647,6 +647,11 @@ export const SaveBeautyDiagnosticResponse = zod.object({
 /**
  * @summary Get the signed-in member's Radiant Audit, if submitted
  */
+export const getRadiantAuditResponseOneOneSubmissionIdMin = 36;
+export const getRadiantAuditResponseOneOneSubmissionIdMax = 36;
+
+
+export const getRadiantAuditResponseOneOneSubmissionIdRegExp = new RegExp('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
 export const getRadiantAuditResponseOneOneRoutineChecksMax = 5;
 
 export const getRadiantAuditResponseOneOneValuesChecksMax = 5;
@@ -660,6 +665,7 @@ export const getRadiantAuditResponseOneOneResearchTimeMax = 1000;
 
 
 export const GetRadiantAuditResponse = zod.union([zod.object({
+  "submissionId": zod.string().min(getRadiantAuditResponseOneOneSubmissionIdMin).max(getRadiantAuditResponseOneOneSubmissionIdMax).regex(getRadiantAuditResponseOneOneSubmissionIdRegExp).optional().describe('Stable ID for one submission; reuse on retries, generate a new ID for a new retake.'),
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditResponseOneOneRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(getRadiantAuditResponseOneOneValuesChecksMax),
   "beautyTrend": zod.string().min(1).max(getRadiantAuditResponseOneOneBeautyTrendMax),
@@ -681,6 +687,11 @@ export const DeleteRadiantAuditResponse = zod.void()
 /**
  * @summary Submit or update the signed-in member's Radiant Audit
  */
+export const saveRadiantAuditBodySubmissionIdMin = 36;
+export const saveRadiantAuditBodySubmissionIdMax = 36;
+
+
+export const saveRadiantAuditBodySubmissionIdRegExp = new RegExp('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
 export const saveRadiantAuditBodyRoutineChecksMax = 5;
 
 export const saveRadiantAuditBodyValuesChecksMax = 5;
@@ -694,6 +705,7 @@ export const saveRadiantAuditBodyResearchTimeMax = 1000;
 
 
 export const SaveRadiantAuditBody = zod.object({
+  "submissionId": zod.string().min(saveRadiantAuditBodySubmissionIdMin).max(saveRadiantAuditBodySubmissionIdMax).regex(saveRadiantAuditBodySubmissionIdRegExp).optional().describe('Stable ID for one submission; reuse on retries, generate a new ID for a new retake.'),
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditBodyRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditBodyValuesChecksMax),
   "beautyTrend": zod.string().min(1).max(saveRadiantAuditBodyBeautyTrendMax),
@@ -701,6 +713,11 @@ export const SaveRadiantAuditBody = zod.object({
   "researchTime": zod.string().min(1).max(saveRadiantAuditBodyResearchTimeMax)
 })
 
+export const saveRadiantAuditResponseAuditOneSubmissionIdMin = 36;
+export const saveRadiantAuditResponseAuditOneSubmissionIdMax = 36;
+
+
+export const saveRadiantAuditResponseAuditOneSubmissionIdRegExp = new RegExp('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
 export const saveRadiantAuditResponseAuditOneRoutineChecksMax = 5;
 
 export const saveRadiantAuditResponseAuditOneValuesChecksMax = 5;
@@ -715,6 +732,7 @@ export const saveRadiantAuditResponseAuditOneResearchTimeMax = 1000;
 
 export const SaveRadiantAuditResponse = zod.object({
   "audit": zod.object({
+  "submissionId": zod.string().min(saveRadiantAuditResponseAuditOneSubmissionIdMin).max(saveRadiantAuditResponseAuditOneSubmissionIdMax).regex(saveRadiantAuditResponseAuditOneSubmissionIdRegExp).optional().describe('Stable ID for one submission; reuse on retries, generate a new ID for a new retake.'),
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditResponseAuditOneRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditResponseAuditOneValuesChecksMax),
   "beautyTrend": zod.string().min(1).max(saveRadiantAuditResponseAuditOneBeautyTrendMax),
@@ -732,6 +750,11 @@ export const SaveRadiantAuditResponse = zod.object({
 /**
  * @summary List the signed-in member's earlier Radiant Audit submissions, newest first
  */
+export const getRadiantAuditHistoryResponseOneOneSubmissionIdMin = 36;
+export const getRadiantAuditHistoryResponseOneOneSubmissionIdMax = 36;
+
+
+export const getRadiantAuditHistoryResponseOneOneSubmissionIdRegExp = new RegExp('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
 export const getRadiantAuditHistoryResponseOneOneRoutineChecksMax = 5;
 
 export const getRadiantAuditHistoryResponseOneOneValuesChecksMax = 5;
@@ -745,6 +768,7 @@ export const getRadiantAuditHistoryResponseOneOneResearchTimeMax = 1000;
 
 
 export const GetRadiantAuditHistoryResponseItem = zod.object({
+  "submissionId": zod.string().min(getRadiantAuditHistoryResponseOneOneSubmissionIdMin).max(getRadiantAuditHistoryResponseOneOneSubmissionIdMax).regex(getRadiantAuditHistoryResponseOneOneSubmissionIdRegExp).optional().describe('Stable ID for one submission; reuse on retries, generate a new ID for a new retake.'),
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditHistoryResponseOneOneRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(getRadiantAuditHistoryResponseOneOneValuesChecksMax),
   "beautyTrend": zod.string().min(1).max(getRadiantAuditHistoryResponseOneOneBeautyTrendMax),
