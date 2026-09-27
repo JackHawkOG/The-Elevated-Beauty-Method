@@ -42,7 +42,18 @@ async function assertRepair(repair: "migration" | "startup repair") {
         enrolled_at timestamp NOT NULL
       )
     `);
+    await client.query(`
+      CREATE TEMP TABLE lessons (
+        id integer PRIMARY KEY,
+        course_id integer NOT NULL,
+        published_at timestamp
+      )
+    `);
     await client.query("SET search_path TO pg_temp, public");
+    await client.query(`
+      INSERT INTO lessons (id, course_id, published_at) VALUES
+        (31, 7, '2022-01-01'), (41, 7, '2022-01-01'), (51, 8, '2022-01-01')
+    `);
     await client.query(`
       INSERT INTO enrollments (id, user_id, course_id, completed_lessons, last_lesson_id, enrolled_at)
       VALUES
@@ -84,6 +95,7 @@ async function assertRepair(repair: "migration" | "startup repair") {
   } finally {
     await client.query("RESET search_path");
     await client.query("DROP TABLE IF EXISTS pg_temp.enrollments");
+    await client.query("DROP TABLE IF EXISTS pg_temp.lessons");
     client.release();
   }
 }

@@ -7,6 +7,7 @@ import { ensurePublicationSchema } from "./lib/ensure-publication-schema";
 import { ensureRadiantAuditSchema } from "./lib/ensure-radiant-audit-schema";
 import { ensureMembershipSchema } from "./lib/ensure-membership-schema";
 import { ensureAnnouncementSchema } from "./lib/ensure-announcement-schema";
+import { reconcileAnnouncementActivity } from "./lib/reconcile-announcement-activity";
 import { ensureMemberStoriesSchema } from "./lib/ensure-member-stories-schema";
 import { getStripeSync } from "./lib/stripeClient";
 import { startMembershipReconciliation } from "./lib/membership-reconciliation";
@@ -34,6 +35,7 @@ await ensureRadiantAuditSchema();
 await ensureMembershipSchema();
 const needsPublicationBackfill = await ensurePublicationSchema();
 await ensureMemberJourneyContent(needsPublicationBackfill);
+await reconcileAnnouncementActivity();
 
 if (!process.env.DATABASE_URL || !process.env.REPLIT_DOMAINS?.split(",")[0]) {
   throw new Error("Stripe requires DATABASE_URL and REPLIT_DOMAINS");
