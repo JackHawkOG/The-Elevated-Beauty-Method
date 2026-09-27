@@ -55,22 +55,34 @@ export default function LessonPage() {
     query: { queryKey: getGetLessonQueryKey(lessonId), enabled: !!lessonId }
   });
 
-  const { data: lessons, isLoading: lessonsLoading } = useListLessons(courseId, {
+  const { data: lessons, isLoading: lessonsLoading, isFetching: lessonsFetching, error: lessonsError, refetch: refetchLessons } = useListLessons(courseId, {
     query: { queryKey: getListLessonsQueryKey(courseId), enabled: !!courseId }
   });
   const { data: enrollments } = useListEnrollments();
   const completedIds = new Set(enrollments?.find(item => item.courseId === courseId)?.completedLessonIds ?? []);
   const isComplete = completedIds.has(lessonId);
+  const currentIndex = lessons?.findIndex(l => l.id === lessonId) ?? -1;
+  const outlineReady = !lessonsLoading && !lessonsError && currentIndex >= 0;
+  const prevLesson = outlineReady && currentIndex > 0 ? lessons?.[currentIndex - 1] : null;
+  const nextLesson = outlineReady && lessons && currentIndex < lessons.length - 1 ? lessons[currentIndex + 1] : null;
 
   const updateProgress = useUpdateProgress({
     mutation: {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getListEnrollmentsQueryKey() });
+        // Do not interpret an unavailable outline as the end of the course.
+        const outlineState = queryClient.getQueryState(getListLessonsQueryKey(courseId));
+        const currentLessons = outlineState?.status === "success"
+          ? queryClient.getQueryData<NonNullable<typeof lessons>>(getListLessonsQueryKey(courseId))
+          : undefined;
+        const index = currentLessons?.findIndex(l => l.id === lessonId) ?? -1;
+        if (!currentLessons || index < 0) {
+          toast({ title: "Progress saved", description: "The course outline is unavailable. Try loading it again to continue." });
+          return;
+        }
         toast({ title: "Progress saved", description: "Lesson marked as complete." });
-        // Find next lesson and redirect if exists
-        const currentIndex = lessons?.findIndex(l => l.id === lessonId) ?? -1;
-        if (lessons && currentIndex >= 0 && currentIndex < lessons.length - 1) {
-          setLocation(`/courses/${courseId}/lessons/${lessons[currentIndex + 1].id}`);
+        if (index < currentLessons.length - 1) {
+          setLocation(`/courses/${courseId}/lessons/${currentLessons[index + 1].id}`);
         } else {
           setLocation(`/courses/${courseId}`);
         }
@@ -82,12 +94,8 @@ export default function LessonPage() {
   });
 
   const handleComplete = () => {
-    updateProgress.mutate({ courseId, data: { lessonId } });
+    if (outlineReady) updateProgress.mutate({ courseId, data: { lessonId } });
   };
-
-  const currentIndex = lessons?.findIndex(l => l.id === lessonId) ?? -1;
-  const prevLesson = currentIndex > 0 ? lessons?.[currentIndex - 1] : null;
-  const nextLesson = lessons && currentIndex < lessons.length - 1 ? lessons[currentIndex + 1] : null;
 
   if (isLoading) {
     return (
@@ -177,6 +185,13 @@ export default function LessonPage() {
       <div className="flex-1 overflow-auto p-4 space-y-1">
         {lessonsLoading ? (
           [1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full bg-muted mb-2" />)
+        ) : !outlineReady ? (
+          <div role="alert" className="space-y-3 rounded-lg border border-border p-4 text-sm">
+            <p>The course outline is unavailable. Try again to see the other lessons.</p>
+            <Button data-testid="button-retry-outline-sidebar" variant="outline" size="sm" onClick={() => { void refetchLessons(); }} disabled={lessonsFetching}>
+              {lessonsFetching ? "Trying again..." : "Try again"}
+            </Button>
+          </div>
         ) : (
           lessons?.map((l, i) => {
             const isActive = l.id === lessonId;
@@ -231,7 +246,7 @@ export default function LessonPage() {
               size="sm"
               className="hidden sm:flex border-border text-foreground hover:bg-muted"
               onClick={handleComplete}
-              disabled={updateProgress.isPending}
+              disabled={updateProgress.isPending || !outlineReady}
             >
               {updateProgress.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
                {isComplete ? "Completed · Continue" : "Mark Complete"}
@@ -242,6 +257,14 @@ export default function LessonPage() {
         <main className="flex-1 overflow-auto bg-background">
           <div className="max-w-3xl mx-auto px-6 py-12 md:py-20">
             <h1 className="text-3xl md:text-5xl font-serif font-bold mb-8 leading-tight">{lesson.title}</h1>
+            {!outlineReady && !lessonsLoading && (
+              <div role="alert" data-testid="status-outline-unavailable" className="mb-8 rounded-xl border border-border bg-card p-5">
+                <p className="mb-3 text-sm text-foreground">The course outline is unavailable. You can read this lesson, but please try again before completing it so we can take you to the right next lesson.</p>
+                <Button data-testid="button-retry-outline" variant="outline" size="sm" onClick={() => { void refetchLessons(); }} disabled={lessonsFetching}>
+                  {lessonsFetching ? "Trying again..." : "Try loading outline again"}
+                </Button>
+              </div>
+            )}
             
             {lesson.videoUrl && (
               <div className="aspect-video rounded-2xl overflow-hidden bg-black mb-12 border border-border shadow-2xl">
@@ -273,11 +296,11 @@ export default function LessonPage() {
 
               <Button 
                 onClick={handleComplete}
-                disabled={updateProgress.isPending}
+                disabled={updateProgress.isPending || !outlineReady}
                 className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {updateProgress.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-                 {nextLesson ? (isComplete ? 'Continue' : 'Complete & Continue') : (isComplete ? 'Return to Course' : 'Finish Course')}
+                 {!outlineReady ? 'Waiting for course outline' : nextLesson ? (isComplete ? 'Continue' : 'Complete & Continue') : (isComplete ? 'Return to Course' : 'Finish Course')}
                 {nextLesson && <ChevronRight className="w-4 h-4 ml-1" />}
               </Button>
             </div>
