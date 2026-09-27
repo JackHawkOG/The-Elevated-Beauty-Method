@@ -41,7 +41,7 @@ export default function Dashboard() {
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
   const { data: enrollments, isLoading: enrollmentsLoading } = useListEnrollments();
   const { data: method, isLoading: methodLoading } = useGetBeautyMethod();
-  const { data: audit, isLoading: auditLoading } = useGetRadiantAudit();
+  const { data: audit, isLoading: auditLoading, isError: auditError, isFetching: auditFetching, refetch: refetchAudit } = useGetRadiantAudit();
 
   return (
     <AppLayout>
@@ -55,16 +55,29 @@ export default function Dashboard() {
         {!auditLoading && (
           <section className="rounded-2xl border border-primary/30 bg-card/70 p-6">
             <h2 className="font-serif text-2xl text-foreground">Your Radiant Audit</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {audit
-                ? `Your reflection is saved. Current routine: ${audit.routineScore}/5 · Your values: ${audit.valuesScore}/5.`
-                : "Begin with the scorecard and check-in worksheet from The Radiant Audit."}
-            </p>
-            <Button asChild className="mt-4 rounded-full">
-              <Link href={audit ? "/radiant-audit/complete" : "/radiant-audit"}>
-                {audit ? "Review your Audit" : "Complete your Audit"}
-              </Link>
-            </Button>
+            {auditError ? (
+              <>
+                <p role="alert" className="mt-2 text-sm text-muted-foreground">
+                  We couldn't load your Audit right now. Your saved answers may still be there. Please try again.
+                </p>
+                <Button className="mt-4 rounded-full" disabled={auditFetching} onClick={() => void refetchAudit()}>
+                  {auditFetching ? "Trying again…" : "Retry loading Audit"}
+                </Button>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {audit
+                    ? `Your reflection is saved. Current routine: ${audit.routineScore}/5 · Your values: ${audit.valuesScore}/5.`
+                    : "Begin with the scorecard and check-in worksheet from The Radiant Audit."}
+                </p>
+                <Button asChild className="mt-4 rounded-full">
+                  <Link href={audit ? "/radiant-audit/complete" : "/radiant-audit"}>
+                    {audit ? "Review your Audit" : "Complete your Audit"}
+                  </Link>
+                </Button>
+              </>
+            )}
           </section>
         )}
 

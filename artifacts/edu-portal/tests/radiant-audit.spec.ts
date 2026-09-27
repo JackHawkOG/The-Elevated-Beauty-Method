@@ -60,6 +60,40 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("dashboard does not claim a saved Audit is missing when its GET fails and recovers on retry", async ({ page }) => {
+  const savedAudit: Audit = {
+    ...fixture("saved"),
+    routineScore: 1,
+    valuesScore: 2,
+    completedAt: "2026-09-02T12:00:00.000Z",
+  };
+  let auditGets = 0;
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/users/me") return route.fulfill({ json: { membershipTier: "Free" } });
+    if (path === "/api/dashboard/stats") {
+      return route.fulfill({ json: { totalCourses: 0, totalLessons: 0, totalEnrollments: 0, totalCategories: 0 } });
+    }
+    if (path === "/api/users/me/beauty-method") return route.fulfill({ json: null });
+    return route.fulfill({ json: [] });
+  });
+  await page.route("**/api/users/me/radiant-audit", route => {
+    auditGets += 1;
+    if (auditGets === 1) return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+    return route.fulfill({ json: savedAudit });
+  });
+
+  await page.goto("/tests/audit-harness.html?page=/dashboard");
+  await expect(page.getByRole("alert")).toContainText("We couldn't load your Audit right now");
+  await expect(page.getByRole("link", { name: "Complete your Audit" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Review your Audit" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry loading Audit" }).click();
+  await expect(page.getByText("Your reflection is saved. Current routine: 1/5 · Your values: 2/5.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Review your Audit" })).toHaveAttribute("href", "/radiant-audit/complete");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(auditGets).toBe(2);
+});
+
 async function stageVisitorAnswers(page: Page) {
   await page.goto("/tests/audit-harness.html");
   await page.getByLabel("Skincare consistency").check();
