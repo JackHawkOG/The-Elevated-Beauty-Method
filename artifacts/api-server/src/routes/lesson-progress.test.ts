@@ -389,6 +389,61 @@ test("standalone course resume hides published lessons that no longer match revi
   }
 });
 
+test("a draft exact duplicate before the published approved lesson cannot block opening or completing it", async () => {
+  const userId = `test-approved-duplicate-${run}`;
+  const approved = approvedTopicLessons[0];
+  let reviewedCourseId: number | undefined;
+  try {
+    await db.insert(usersTable).values({
+      clerkId: userId, displayName: "Approved Duplicate Test",
+      email: `${userId}@example.invalid`, membershipTier: "Elevated",
+    });
+    const [course] = await db.insert(coursesTable).values({
+      title: approved.title, description: "Draft duplicate fixture", categoryId,
+      instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+    }).returning();
+    reviewedCourseId = course.id;
+    const [draft] = await db.insert(lessonsTable).values({
+      courseId: course.id, title: approved.title, content: approved.content,
+      sortOrder: 1, publishedAt: null,
+    }).returning();
+    const [published] = await db.insert(lessonsTable).values({
+      courseId: course.id, title: approved.title, content: approved.content,
+      sortOrder: 1, publishedAt: new Date(),
+    }).returning();
+    expect(draft.id).toBeLessThan(published.id);
+
+    const listing = await request(userId, `/courses/${course.id}/lessons`);
+    expect(listing.status).toBe(200);
+    expect((listing.data as Array<{ id: number }>).map(lesson => lesson.id)).toEqual([published.id]);
+    expect((await request(userId, `/lessons/${draft.id}`)).status).toBe(404);
+    const detail = await request(userId, `/lessons/${published.id}`);
+    expect(detail.status).toBe(200);
+    expect(detail.data).toMatchObject({ id: published.id });
+
+    expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).status).toBe(201);
+    expect((await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: draft.id })).status).toBe(400);
+    const completion = await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: published.id });
+    expect(completion.status).toBe(200);
+    expect(completion.data).toMatchObject({ lastLessonId: published.id, completedLessons: 1 });
+    const progress = await request(userId, "/enrollments");
+    expect(progress.status).toBe(200);
+    expect((progress.data as Array<{ courseId: number; completedLessonIds: number[] }>)
+      .find(row => row.courseId === course.id)?.completedLessonIds).toEqual([published.id]);
+  } finally {
+    if (reviewedCourseId) {
+      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, userId));
+      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.courseId, reviewedCourseId));
+      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, reviewedCourseId));
+      await db.delete(coursesTable).where(eq(coursesTable.id, reviewedCourseId));
+    }
+    await db.delete(activityTable).where(and(
+      eq(activityTable.entityTitle, approved.title), eq(activityTable.actorName, "Approved Duplicate Test"),
+    ));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
+  }
+});
+
 test("Elevated progress survives fresh requests and revisit; repeats and out-of-order completions do not inflate it", async () => {
   const enrolled = await request(elevatedId, "/enrollments", "POST", { courseId });
   expect(enrolled.status).toBe(201);

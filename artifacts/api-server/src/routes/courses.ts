@@ -380,7 +380,9 @@ router.get("/lessons/:lessonId", requireAuth, jitProvisionUser, async (req, res)
   }
 
   if (isApprovedStandaloneCourse(course.title)) {
-    const courseLessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.sortOrder);
+    const courseLessons = await db.select().from(lessonsTable)
+      .where(and(eq(lessonsTable.courseId, course.id), isNotNull(lessonsTable.publishedAt)))
+      .orderBy(lessonsTable.sortOrder);
     if (publishedLessonsForCourse(course.title, courseLessons)[0]?.id !== lesson.id) {
       res.status(404).json({ error: "Lesson not published" });
       return;

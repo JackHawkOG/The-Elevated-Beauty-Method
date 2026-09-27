@@ -153,7 +153,9 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
     res.status(403).json({ error: "Membership required" }); return;
   }
   if (isApprovedStandaloneCourse(course.title)) {
-    const courseLessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, courseId)).orderBy(lessonsTable.sortOrder);
+    const courseLessons = await db.select().from(lessonsTable)
+      .where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
+      .orderBy(lessonsTable.sortOrder);
     if (publishedLessonsForCourse(course.title, courseLessons)[0]?.id !== lessonId) {
       res.status(404).json({ error: "Lesson not published" }); return;
     }
