@@ -79,6 +79,7 @@ export function RadiantAuditCompletePage() {
   const { user, isLoaded } = useUser();
   const [pending, setPending] = useState(readPendingAudit);
   const [error, setError] = useState<string | null>(null);
+  const [confirmedEmail, setConfirmedEmail] = useState<string | null>(null);
   const started = useRef(false);
   const queryClient = useQueryClient();
   const save = useSaveRadiantAudit();
@@ -89,11 +90,19 @@ export function RadiantAuditCompletePage() {
     query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !!saved },
   });
   const email = user?.primaryEmailAddress?.emailAddress;
+  const verifiedEmail = user?.primaryEmailAddress?.verification.status === "verified" ? email : undefined;
   const mismatch = !!pending && !!isLoaded &&
-    (!email || email.toLowerCase() !== pending.email.toLowerCase());
+    (!verifiedEmail || verifiedEmail.toLowerCase() !== pending.email.toLowerCase());
 
   async function submitPending(audit: RadiantAuditSubmission) {
     setError(null);
+    // Check again on retries; never rely on an earlier render's account identity.
+    const currentEmail = user?.primaryEmailAddress;
+    if (!user || currentEmail?.verification.status !== "verified" ||
+        currentEmail.emailAddress.toLowerCase() !== audit.email.toLowerCase()) {
+      setError("Sign in with the verified email for this Audit before saving your answers.");
+      return;
+    }
     try {
       const result = await save.mutateAsync({ data: auditAnswers(audit) });
       trackRadiantAuditSaved(result.completionKind);
@@ -103,6 +112,20 @@ export function RadiantAuditCompletePage() {
       setPending(null);
     } catch {
       setError("We couldn't save your Audit. Your answers are still in this browser. Please try again.");
+    }
+  }
+
+  function confirmEmailCorrection() {
+    if (!pending || !verifiedEmail || confirmedEmail !== verifiedEmail ||
+        pending.email.toLowerCase() === verifiedEmail.toLowerCase()) return;
+    try {
+      // Persist consent's target before allowing the pending save to resume on reload.
+      const corrected = { ...pending, email: verifiedEmail };
+      stageAudit(corrected);
+      setError(null);
+      setPending(corrected);
+    } catch {
+      setError("We couldn't keep your corrected email in this browser. Your answers are still here; please try again.");
     }
   }
 
@@ -120,13 +143,34 @@ export function RadiantAuditCompletePage() {
             <h1 className="font-serif text-4xl">Check your email address</h1>
             <p className="mt-4 text-muted-foreground">
               Your Audit was entered with {pending?.email}, but you signed in as {email || "a different account"}.
-              To protect your answers, sign in with the email you entered or start a new Audit with this account.
+              Your answers are still in this browser and haven't been saved to this account.
             </p>
+            {verifiedEmail ? (
+              <div className="mt-6 rounded-2xl border border-primary/25 p-5">
+                <p>Entered the wrong email? You can save these answers to your verified account at <strong>{verifiedEmail}</strong> instead.</p>
+                <label className="mt-4 flex items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1 accent-primary"
+                    checked={confirmedEmail === verifiedEmail}
+                    onChange={(event) => setConfirmedEmail(event.target.checked ? verifiedEmail : null)}
+                  />
+                  I confirm that these are my Audit answers and agree to save them to {verifiedEmail}.
+                </label>
+                <Button className="mt-4" disabled={confirmedEmail !== verifiedEmail || save.isPending} onClick={confirmEmailCorrection}>
+                  Correct email and save my Audit
+                </Button>
+              </div>
+            ) : (
+              <p className="mt-4 text-muted-foreground">
+                Verify your account email before saving these answers, or sign in with the email you entered.
+              </p>
+            )}
+            {error && <p className="mt-4 text-destructive" role="alert">{error}</p>}
             <div className="mt-8 flex flex-wrap gap-4">
               <Button onClick={() => void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` })}>
                 Sign in with that email
               </Button>
-              <Button asChild variant="outline"><Link href="/radiant-audit">Start a new Audit</Link></Button>
             </div>
           </>
         ) : pending ? (
