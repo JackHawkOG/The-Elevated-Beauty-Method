@@ -415,3 +415,50 @@ test("a signed-in draft never appears for another account and can be discarded",
   await page.reload();
   await expect(page.locator("#mastery-goal")).toHaveValue("");
 });
+
+for (const scenario of ["expired", "unreadable JSON", "invalid answers"] as const) {
+  test(`${scenario} signed-in drafts are removed without restoring answers, and a new draft remains editable`, async ({ page }) => {
+    await signInAs(page, "member-a");
+    const oldAnswer = `private ${scenario} answer`;
+    await page.evaluate(({ key, scenario, oldAnswer }) => {
+      const answers = {
+        email: "member-a@example.invalid",
+        routineChecks: ["skincare-consistency"],
+        valuesChecks: ["quality-over-price"],
+        beautyTrend: oldAnswer,
+        masteryGoal: oldAnswer,
+        researchTime: oldAnswer,
+      };
+      const record = { owner: "member-a", expiresAt: Date.now() + 60_000, answers };
+      if (scenario === "expired") record.expiresAt = Date.now() - 1;
+      if (scenario === "invalid answers") {
+        // A parseable record with a broken field must not partially restore the other answers.
+        (record.answers as { valuesChecks: unknown }).valuesChecks = "quality-over-price";
+      }
+      localStorage.setItem(key, scenario === "unreadable JSON"
+        ? `{"owner":"member-a","answers":{"masteryGoal":"${oldAnswer}"`
+        : JSON.stringify(record));
+    }, { key: signedInDraftKey, scenario, oldAnswer });
+
+    await page.reload();
+    await expect(page.locator("#beauty-trend")).toHaveValue("");
+    await expect(page.locator("#mastery-goal")).toHaveValue("");
+    await expect(page.locator("#research-time")).toHaveValue("");
+    await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+    await expect(page.getByLabel("Quality over price")).not.toBeChecked();
+    await expect(page.locator("body")).not.toContainText(oldAnswer);
+    expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+
+    const freshAnswer = `fresh ${scenario} answer`;
+    await page.getByLabel("Skincare consistency").check();
+    await page.locator("#mastery-goal").fill(freshAnswer);
+    await expect.poll(() => page.evaluate(key => {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw).answers.masteryGoal : null;
+    }, signedInDraftKey)).toBe(freshAnswer);
+    await page.reload();
+    await expect(page.getByLabel("Skincare consistency")).toBeChecked();
+    await expect(page.locator("#mastery-goal")).toHaveValue(freshAnswer);
+    await expect(page.locator("body")).not.toContainText(oldAnswer);
+  });
+}
