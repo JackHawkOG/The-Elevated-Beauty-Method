@@ -22,6 +22,43 @@ export function trackRadiantAuditSaved(completionKind: "first_time" | "retake"):
   trackEvent("radiant_audit_saved", { completion_kind: completionKind });
 }
 
+type AuditVerificationLocation = "form" | "completion";
+const auditVerificationKey = "radiant_audit_verification_account";
+
+export function trackAuditVerificationAction(
+  action: "verify_email" | "switch_account",
+  location: AuditVerificationLocation,
+): void {
+  trackEvent("radiant_audit_verification_action", { action, location });
+}
+
+// Local-only marker: never send an account ID, email, or answers to analytics.
+export function rememberAuditVerification(accountId: string): void {
+  try {
+    window.sessionStorage.setItem(auditVerificationKey, accountId);
+  } catch {
+    // Storage may be disabled; analytics must not interrupt the Audit.
+  }
+}
+
+export function clearAuditVerification(): void {
+  try {
+    window.sessionStorage.removeItem(auditVerificationKey);
+  } catch {
+    // Storage may be disabled.
+  }
+}
+
+export function trackAuditResumptionIfRequested(accountId: string, location: AuditVerificationLocation): void {
+  try {
+    if (window.sessionStorage.getItem(auditVerificationKey) !== accountId) return;
+  } catch {
+    return;
+  }
+  trackEvent("radiant_audit_resumed_after_verification", { location });
+  clearAuditVerification();
+}
+
 export function trackMembershipCheckoutStarted(kind: "founding" | "standard"): void {
   trackEvent("membership_checkout_started", { kind });
 }

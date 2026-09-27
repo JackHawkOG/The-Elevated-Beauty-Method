@@ -18,7 +18,10 @@ import {
 } from "@workspace/api-client-react";
 import { RadiantAuditForm, type RadiantAuditSubmission } from "@/components/radiant-audit-form";
 import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
-import { trackEvent, trackRadiantAuditSaved } from "@/lib/analytics";
+import {
+  clearAuditVerification, rememberAuditVerification, trackAuditResumptionIfRequested,
+  trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
+} from "@/lib/analytics";
 import { clearPendingAudit, isAuditReadyToSave, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
 import { auditDraftWrittenAt, clearAuditDraft, getAuditSubmissionId, readAuditDraft, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
@@ -219,6 +222,7 @@ export default function RadiantAuditPage() {
         // Clear only after the server confirms the save.
         try { clearAuditDraft(user?.id); } catch { /* A storage failure must not hide a confirmed save. */ }
         trackRadiantAuditSaved(saved.completionKind);
+        trackAuditResumptionIfRequested(user!.id, "form");
         queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
         void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
         try { clearPendingAudit(); } catch { /* A storage failure must not hide a confirmed save. */ }
@@ -266,9 +270,19 @@ export default function RadiantAuditPage() {
       submitting={!isLoaded || save.isPending}
       error={error}
       onSubmit={handleSubmit}
-      onVerifyEmail={audit => { if (keepAnswers(audit)) openUserProfile(); }}
+      onVerifyEmail={audit => {
+        if (keepAnswers(audit)) {
+          if (accountId) rememberAuditVerification(accountId);
+          trackAuditVerificationAction("verify_email", "form");
+          openUserProfile();
+        }
+      }}
       onSwitchAccount={audit => {
-        if (keepAnswers(audit)) void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
+        if (keepAnswers(audit)) {
+          clearAuditVerification();
+          trackAuditVerificationAction("switch_account", "form");
+          void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
+        }
       }}
     />
   );
@@ -325,6 +339,7 @@ export function RadiantAuditCompletePage() {
       const staged = stageAudit(audit);
       const result = await save.mutateAsync({ data: { ...auditAnswers(audit), submissionId: staged.submissionId } });
       trackRadiantAuditSaved(result.completionKind);
+      trackAuditResumptionIfRequested(user.id, "completion");
       queryClient.setQueryData(getGetRadiantAuditQueryKey(), result.audit);
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
       clearPendingAudit();
@@ -386,7 +401,11 @@ export function RadiantAuditCompletePage() {
                 <p className="text-muted-foreground">Verify your primary email in your account profile under Email addresses before saving these answers, or sign in with the email you entered.</p>
                 {user && (
                   <div className="mt-4 flex flex-wrap gap-3">
-                    <Button variant="outline" onClick={() => openUserProfile()}>Verify my email</Button>
+                    <Button variant="outline" onClick={() => {
+                      rememberAuditVerification(user.id);
+                      trackAuditVerificationAction("verify_email", "completion");
+                      openUserProfile();
+                    }}>Verify my email</Button>
                     <Button variant="ghost" onClick={() => void user.reload().catch(() => setError("We couldn't check your email status. Please try again."))}>Check verification status</Button>
                   </div>
                 )}
@@ -395,7 +414,11 @@ export function RadiantAuditCompletePage() {
             {error && <p className="mt-4 text-destructive" role="alert">{error}</p>}
             <div className="mt-8 flex flex-wrap gap-4">
               <Button asChild variant="outline"><Link href="/radiant-audit">Edit my answers</Link></Button>
-              <Button onClick={() => void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` })}>
+              <Button onClick={() => {
+                clearAuditVerification();
+                trackAuditVerificationAction("switch_account", "completion");
+                void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
+              }}>
                 Use another account
               </Button>
             </div>
