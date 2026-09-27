@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 
 function requireDevelopment() {
   if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT) {
@@ -129,18 +129,11 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   ];
   const created: string[] = [];
   try {
-    await setupClerkTestingToken({ page });
-    for (const email of [wrongEmail, stagedEmail]) {
-    const user = await client.users.createUser({
-      emailAddress: [email],
-      skipPasswordRequirement: true,
-    });
-
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
-          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
-
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
-          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    for (const account of accounts) {
+      const user = await client.users.createUser({
+        emailAddress: [account.email],
+        skipPasswordRequirement: true,
+      });
       created.push(user.id);
     }
     await signIn(page, accounts[0].email);
@@ -165,6 +158,90 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   }
 });
 
+test("a delayed Audit response from the previous member never appears after switching accounts", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const a = { email: `audit-late-a-${tag}+clerk_test@example.com`, marker: `late-a-${tag}` };
+  const b = { email: `audit-late-b-${tag}+clerk_test@example.com` };
+  const created: string[] = [];
+  let release!: () => void;
+  let captured!: () => void;
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const requested = new Promise<void>(resolve => { captured = resolve; });
+  let held = false;
+  let delayed: Promise<void> | undefined;
+  const isAuditGet = (route: Route) =>
+    route.request().method() === "GET" &&
+    new URL(route.request().url()).pathname === "/api/users/me/radiant-audit";
+
+  try {
+    for (const account of [a, b]) {
+      const user = await client.users.createUser({
+        emailAddress: [account.email],
+        skipPasswordRequirement: true,
+      });
+      created.push(user.id);
+    }
+    await signIn(page, a.email);
+    await save(page, a.email, a.marker);
+    const aResponse = await page.evaluate(async () => {
+      const response = await fetch("/api/users/me/radiant-audit");
+      return { status: response.status, body: await response.text() };
+    });
+    expect(aResponse.status).toBe(200);
+    expect(aResponse.body).toContain(reflections(a.marker).masteryGoal);
+    // A new page load ensures A's completion query must issue a fresh GET.
+    await page.goto("/radiant-audit");
+    await page.route("**/api/users/me/radiant-audit", async route => {
+      if (!isAuditGet(route) || held) return route.continue();
+      held = true;
+      delayed = (async () => {
+        captured();
+        await released;
+        // The former query may already be aborted on sign-out, which is safe.
+        await route.fulfill({ status: 200, contentType: "application/json", body: aResponse.body }).catch(error => {
+          if (!/aborted|closed|cancelled|canceled|intercept/i.test(String(error))) throw error;
+        });
+      })();
+      await delayed;
+    });
+    await page.goto("/radiant-audit/complete", { waitUntil: "domcontentloaded" });
+    await requested;
+    expect(held).toBe(true);
+    await clerk.signOut({ page });
+    await expect(page.locator("body")).not.toContainText(reflections(a.marker).masteryGoal);
+
+    const aAnswers = Object.values(reflections(a.marker));
+    await page.evaluate(answers => {
+      const windowWithLeak = window as typeof window & { auditLeaks?: string[]; auditObserver?: MutationObserver };
+      windowWithLeak.auditLeaks = [];
+      const check = () => {
+        const text = document.body.innerText;
+        for (const answer of answers) {
+          if (text.includes(answer) && !windowWithLeak.auditLeaks?.includes(answer)) windowWithLeak.auditLeaks?.push(answer);
+        }
+      };
+      windowWithLeak.auditObserver = new MutationObserver(check);
+      windowWithLeak.auditObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+      check();
+    }, aAnswers);
+    await clerk.signIn({ page, emailAddress: b.email });
+    release();
+    await delayed;
+    expect(await page.evaluate(() => (window as typeof window & { auditLeaks?: string[] }).auditLeaks ?? [])).toEqual([]);
+    await page.goto("/radiant-audit/complete");
+    await expect(page.getByRole("heading", { name: "Start your Radiant Audit" })).toBeVisible();
+    for (const answer of aAnswers) await expect(page.locator("body")).not.toContainText(answer);
+  } finally {
+    release();
+    await page.unroute("**/api/users/me/radiant-audit");
+    await cleanUpAccounts(client, created);
+  }
+});
+
 test("staged answers survive real sign-out and sign-in without saving to the wrong verified account", async ({ page }) => {
   test.setTimeout(120_000);
   requireDevelopment();
@@ -178,16 +255,10 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   try {
     await setupClerkTestingToken({ page });
     for (const email of [wrongEmail, stagedEmail]) {
-    const user = await client.users.createUser({
-      emailAddress: [email],
-      skipPasswordRequirement: true,
-    });
-
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
-          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
-
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
-          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+      });
       created.push(user.id);
       expect(user.primaryEmailAddress?.verification.status).toBe("verified");
     }
@@ -258,12 +329,6 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
       emailAddress: [email],
       skipPasswordRequirement: true,
     });
-
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
-          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
-
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
-          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
     userId = user.id;
     await signIn(page, email);
     for (const marker of [`first-${tag}`, `second-${tag}`, `current-${tag}`]) {
@@ -306,19 +371,42 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
       response.request().method() === "DELETE" &&
       new URL(response.url()).pathname === "/api/users/me/radiant-audit",
     );
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
-          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
-        try {
-          await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, userId));
-          await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, userId));
-          await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, userId));
-          await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
-        } finally {
-          await pool.end();
-        }
-      } finally {
-        await client.users.deleteUser(userId);
-      }
+    await confirm.getByRole("button", { name: "Permanently delete current Audit" }).click();
+    expect((await deleted).status()).toBe(204);
+    expect(deletes).toBe(1);
+    await expect(confirm).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Start your Radiant Audit" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit", exact: true })).toHaveCount(0);
+    await expect(page.locator("main")).not.toContainText(reflections(`current-${tag}`).masteryGoal);
+    await expect(comparison).toContainText("you have no current Audit");
+    await expect(comparison.getByRole("heading", { name: /^Latest ·/ })).toHaveCount(0);
+    await expect(comparison.getByRole("combobox", { name: "Compare with" }).locator("option")).toHaveCount(2);
+
+    for (const [index, marker] of [[0, `second-${tag}`], [1, `first-${tag}`]] as const) {
+      await comparison.getByRole("combobox", { name: "Compare with" }).selectOption({ index });
+      await expect(comparison).toContainText(reflections(marker).masteryGoal);
+      await expect(comparison).toContainText(reflections(marker).beautyTrend);
+      await expect(comparison).toContainText(reflections(marker).researchTime);
+    }
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Start your Radiant Audit" })).toBeVisible();
+    await expect(comparison.getByRole("heading", { name: /^Latest ·/ })).toHaveCount(0);
+    await expect(comparison.getByRole("combobox", { name: "Compare with" }).locator("option")).toHaveCount(2);
+    await expect(comparison).toContainText(reflections(`first-${tag}`).masteryGoal);
+    await comparison.getByRole("combobox", { name: "Compare with" }).selectOption({ index: 0 });
+    await expect(comparison).toContainText(reflections(`second-${tag}`).masteryGoal);
+    await expect(page.locator("main")).not.toContainText(reflections(`current-${tag}`).masteryGoal);
+
+    await page.goto("/dashboard");
+    await expect(dashboardAudit).toContainText("Begin with the scorecard and check-in worksheet");
+    await expect(dashboardAudit.getByRole("link", { name: "Complete your Audit" })).toHaveAttribute("href", "/radiant-audit");
+    await page.reload();
+    await expect(dashboardAudit).toContainText("Begin with the scorecard and check-in worksheet");
+    await expect(dashboardAudit.getByRole("link", { name: "Complete your Audit" })).toHaveAttribute("href", "/radiant-audit");
+  } finally {
+    if (userId) {
+      await cleanUpAccounts(client, [userId]);
     }
   }
 });

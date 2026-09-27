@@ -1,14 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useState } from "react";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useUser } from '@clerk/react';
 import { publishableKeyFromHost } from '@clerk/react/internal';
 import { shadcn } from '@clerk/themes';
 import { Switch, Route, useLocation, Redirect, Router as WouterRouter } from 'wouter';
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-
-const queryClient = new QueryClient();
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -79,23 +77,17 @@ const clerkAppearance = {
   },
 };
 
-function ClerkQueryClientCacheInvalidator() {
-  const { addListener } = useClerk();
-  const qc = useQueryClient();
-  const prevUserIdRef = useRef<string | null | undefined>(undefined);
-  useEffect(() => {
-    const unsub = addListener(({ user }) => {
-      const userId = user?.id ?? null;
-      if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== userId) {
-        qc.clear();
-      }
-      prevUserIdRef.current = userId;
-    });
-    return unsub;
-  }, [addListener, qc]);
-  return null;
+function MemberQuerySession() {
+  const [queryClient] = useState(() => new QueryClient());
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Router />
+        <Toaster />
+      </TooltipProvider>
+    </QueryClientProvider>
+  );
 }
-
 function SignInPage() {
   const pendingAudit = readPendingAudit();
   const joiningMembership = new URLSearchParams(window.location.search).get("membership") === "1";
@@ -219,13 +211,7 @@ function ClerkProviderWithRoutes() {
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}
     >
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <ClerkQueryClientCacheInvalidator />
-          <Router />
-          <Toaster />
-        </TooltipProvider>
-      </QueryClientProvider>
+      <MemberQueryProvider />
     </ClerkProvider>
   );
 }
@@ -239,3 +225,11 @@ function App() {
 }
 
 export default App;
+
+function MemberQueryProvider() {
+  const { user, isLoaded } = useUser();
+  if (!isLoaded) return null;
+  // A response still in flight on the former member's client cannot populate
+  // the next member's cache, even if it resolves after the auth change.
+  return <MemberQuerySession key={user?.id ?? "signed-out"} />;
+}

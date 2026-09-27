@@ -11,3 +11,4 @@
 - [Audit retry receipts and privacy](audit-retry-receipts.md) — retry receipts retain answer snapshots; erase them when Audit data is explicitly deleted.
 - [Development DB URL guard](development-db-url-guard.md) — workspace DB URLs can include SSL options; reject target-changing URL options without rejecting legitimate connection settings.
 - [Audit draft privacy tradeoff](audit-draft-privacy.md) — local recovery favors one short-lived account draft over retaining drafts for multiple users of a shared browser.
+- [Delayed Clerk response tests](delayed-clerk-response-tests.md) — browser interception can lose session auth on replay; capture an authenticated response before holding the route.
