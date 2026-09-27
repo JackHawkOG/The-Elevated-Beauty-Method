@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, enrollmentsTable, coursesTable, lessonsTable, lessonCompletionsTable, activityTable, usersTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, isNotNull } from "drizzle-orm";
 import {
   ListEnrollmentsResponse,
   EnrollInCourseBody,
@@ -25,14 +25,14 @@ router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
       courseTitle: coursesTable.title,
       userId: enrollmentsTable.userId,
       completedLessons: enrollmentsTable.completedLessons,
-      completedLessonIds: sql<number[]>`coalesce((select array_agg(lc.lesson_id order by lc.lesson_id) from lesson_completions lc inner join lessons l on l.id = lc.lesson_id where lc.user_id = ${enrollmentsTable.userId} and l.course_id = ${enrollmentsTable.courseId}), ARRAY[]::integer[])`,
-      totalLessons: sql<number>`(select count(*) from ${lessonsTable} where ${lessonsTable.courseId} = ${enrollmentsTable.courseId})::int`,
+      completedLessonIds: sql<number[]>`coalesce((select array_agg(lc.lesson_id order by lc.lesson_id) from lesson_completions lc inner join lessons l on l.id = lc.lesson_id where lc.user_id = ${enrollmentsTable.userId} and l.course_id = ${enrollmentsTable.courseId} and l.published_at is not null), ARRAY[]::integer[])`,
+      totalLessons: sql<number>`(select count(*) from ${lessonsTable} where ${lessonsTable.courseId} = ${enrollmentsTable.courseId} and ${lessonsTable.publishedAt} is not null)::int`,
       lastLessonId: enrollmentsTable.lastLessonId,
       enrolledAt: enrollmentsTable.enrolledAt,
     })
     .from(enrollmentsTable)
     .leftJoin(coursesTable, eq(enrollmentsTable.courseId, coursesTable.id))
-    .where(eq(enrollmentsTable.userId, userId));
+    .where(and(eq(enrollmentsTable.userId, userId), isNotNull(coursesTable.publishedAt)));
 
   res.json(ListEnrollmentsResponse.parse(rows.map(r => ({ ...r, enrolledAt: r.enrolledAt?.toISOString() }))));
 });
@@ -50,7 +50,7 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1),
     db.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1),
   ]);
-  if (!course) {
+  if (!course?.publishedAt) {
     res.status(404).json({ error: "Course not found" });
     return;
   }
@@ -64,7 +64,7 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
     .limit(1);
   if (existing.length > 0) {
-    const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(eq(lessonsTable.courseId, courseId));
+    const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
     res.status(201).json(EnrollInCourseResponse.parse({
       ...existing[0],
       courseTitle: course.title,
@@ -75,7 +75,7 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
   }
 
   const [enrollment] = await db.insert(enrollmentsTable).values({ userId, courseId }).returning();
-  const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(eq(lessonsTable.courseId, courseId));
+  const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
 
   // Log activity
   const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1);
@@ -114,8 +114,8 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
     db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1),
     db.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1),
   ]);
-  if (!lesson) { res.status(400).json({ error: "Lesson does not belong to this course" }); return; }
-  if (!course || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
+  if (!lesson?.publishedAt) { res.status(400).json({ error: "Lesson does not belong to this course" }); return; }
+  if (!course?.publishedAt || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
     res.status(403).json({ error: "Membership required" }); return;
   }
   if (isApprovedStandaloneCourse(course.title)) {
@@ -138,10 +138,10 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
       .values({ userId, lessonId })
       .onConflictDoNothing();
     const [[totalRow], [completedRow]] = await Promise.all([
-      tx.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(eq(lessonsTable.courseId, courseId)),
+      tx.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
       tx.select({ count: sql<number>`count(*)::int` }).from(lessonCompletionsTable)
         .innerJoin(lessonsTable, eq(lessonCompletionsTable.lessonId, lessonsTable.id))
-        .where(and(eq(lessonCompletionsTable.userId, userId), eq(lessonsTable.courseId, courseId))),
+        .where(and(eq(lessonCompletionsTable.userId, userId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
     ]);
     const [updated] = await tx.update(enrollmentsTable)
       .set({ lastLessonId: lessonId, completedLessons: completedRow.count })

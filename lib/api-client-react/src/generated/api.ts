@@ -30,6 +30,9 @@ import type {
   CourseDetail,
   CourseInput,
   DashboardStats,
+  EditorialApproval,
+  EditorialCourse,
+  EditorialLesson,
   Enrollment,
   EnrollmentInput,
   HealthStatus,
@@ -316,7 +319,7 @@ export const getCreateCourseUrl = () => {
 }
 
 /**
- * @summary Create a new course (admin)
+ * @summary Create a draft course (editor)
  */
 export const createCourse = async (courseInput: CourseInput, options?: Parameters<typeof customFetch>[1]): Promise<Course> => {
 
@@ -365,7 +368,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateCourseMutationError = ErrorType<unknown>
 
     /**
- * @summary Create a new course (admin)
+ * @summary Create a draft course (editor)
  */
 export const useCreateCourse = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCourse>>, TError,{data: BodyType<CourseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -455,6 +458,150 @@ export function useGetCourse<TData = Awaited<ReturnType<typeof getCourse>>, TErr
 
 
 
+export const getUpdateCourseUrl = (courseId: number,) => {
+
+
+
+
+  return `/api/courses/${courseId}`
+}
+
+/**
+ * @summary Replace course copy and withdraw it pending owner approval (editor)
+ */
+export const updateCourse = async (courseId: number,
+    courseInput: CourseInput, options?: Parameters<typeof customFetch>[1]): Promise<Course> => {
+
+  return customFetch<Course>(getUpdateCourseUrl(courseId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(courseInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateCourseMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCourse>>, TError,{courseId: number;data: BodyType<CourseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateCourse>>, TError,{courseId: number;data: BodyType<CourseInput>}, TContext> => {
+
+const mutationKey = ['updateCourse'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateCourse>>, {courseId: number;data: BodyType<CourseInput>}> = (props) => {
+          const {courseId,data} = props ?? {};
+
+          return  updateCourse(courseId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateCourseMutationResult = NonNullable<Awaited<ReturnType<typeof updateCourse>>>
+    export type UpdateCourseMutationBody = BodyType<CourseInput>
+    export type UpdateCourseMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Replace course copy and withdraw it pending owner approval (editor)
+ */
+export const useUpdateCourse = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCourse>>, TError,{courseId: number;data: BodyType<CourseInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateCourse>>,
+        TError,
+        {courseId: number;data: BodyType<CourseInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateCourseMutationOptions(options));
+    }
+
+export const getApproveCourseUrl = (courseId: number,) => {
+
+
+
+
+  return `/api/courses/${courseId}/approve`
+}
+
+/**
+ * @summary Approve current course copy for publication (owner)
+ */
+export const approveCourse = async (courseId: number,
+    editorialApproval: EditorialApproval, options?: Parameters<typeof customFetch>[1]): Promise<Course> => {
+
+  return customFetch<Course>(getApproveCourseUrl(courseId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(editorialApproval)
+  }
+);}
+
+
+
+
+
+export const getApproveCourseMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveCourse>>, TError,{courseId: number;data: BodyType<EditorialApproval>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveCourse>>, TError,{courseId: number;data: BodyType<EditorialApproval>}, TContext> => {
+
+const mutationKey = ['approveCourse'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveCourse>>, {courseId: number;data: BodyType<EditorialApproval>}> = (props) => {
+          const {courseId,data} = props ?? {};
+
+          return  approveCourse(courseId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveCourseMutationResult = NonNullable<Awaited<ReturnType<typeof approveCourse>>>
+    export type ApproveCourseMutationBody = BodyType<EditorialApproval>
+    export type ApproveCourseMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve current course copy for publication (owner)
+ */
+export const useApproveCourse = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveCourse>>, TError,{courseId: number;data: BodyType<EditorialApproval>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveCourse>>,
+        TError,
+        {courseId: number;data: BodyType<EditorialApproval>},
+        TContext
+      > => {
+      return useMutation(getApproveCourseMutationOptions(options));
+    }
+
 export const getListLessonsUrl = (courseId: number,) => {
 
 
@@ -541,7 +688,7 @@ export const getCreateLessonUrl = (courseId: number,) => {
 }
 
 /**
- * @summary Add a lesson to a course (admin)
+ * @summary Add a draft lesson to a course (editor)
  */
 export const createLesson = async (courseId: number,
     lessonInput: LessonInput, options?: Parameters<typeof customFetch>[1]): Promise<Lesson> => {
@@ -591,7 +738,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateLessonMutationError = ErrorType<unknown>
 
     /**
- * @summary Add a lesson to a course (admin)
+ * @summary Add a draft lesson to a course (editor)
  */
 export const useCreateLesson = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLesson>>, TError,{courseId: number;data: BodyType<LessonInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -669,6 +816,304 @@ export function useGetLesson<TData = Awaited<ReturnType<typeof getLesson>>, TErr
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetLessonQueryOptions(lessonId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateLessonUrl = (lessonId: number,) => {
+
+
+
+
+  return `/api/lessons/${lessonId}`
+}
+
+/**
+ * @summary Replace lesson copy and withdraw it pending owner approval (editor)
+ */
+export const updateLesson = async (lessonId: number,
+    lessonInput: LessonInput, options?: Parameters<typeof customFetch>[1]): Promise<Lesson> => {
+
+  return customFetch<Lesson>(getUpdateLessonUrl(lessonId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(lessonInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateLessonMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLesson>>, TError,{lessonId: number;data: BodyType<LessonInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateLesson>>, TError,{lessonId: number;data: BodyType<LessonInput>}, TContext> => {
+
+const mutationKey = ['updateLesson'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateLesson>>, {lessonId: number;data: BodyType<LessonInput>}> = (props) => {
+          const {lessonId,data} = props ?? {};
+
+          return  updateLesson(lessonId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateLessonMutationResult = NonNullable<Awaited<ReturnType<typeof updateLesson>>>
+    export type UpdateLessonMutationBody = BodyType<LessonInput>
+    export type UpdateLessonMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Replace lesson copy and withdraw it pending owner approval (editor)
+ */
+export const useUpdateLesson = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLesson>>, TError,{lessonId: number;data: BodyType<LessonInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateLesson>>,
+        TError,
+        {lessonId: number;data: BodyType<LessonInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateLessonMutationOptions(options));
+    }
+
+export const getApproveLessonUrl = (lessonId: number,) => {
+
+
+
+
+  return `/api/lessons/${lessonId}/approve`
+}
+
+/**
+ * @summary Approve current lesson copy for publication (owner)
+ */
+export const approveLesson = async (lessonId: number,
+    editorialApproval: EditorialApproval, options?: Parameters<typeof customFetch>[1]): Promise<Lesson> => {
+
+  return customFetch<Lesson>(getApproveLessonUrl(lessonId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(editorialApproval)
+  }
+);}
+
+
+
+
+
+export const getApproveLessonMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveLesson>>, TError,{lessonId: number;data: BodyType<EditorialApproval>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveLesson>>, TError,{lessonId: number;data: BodyType<EditorialApproval>}, TContext> => {
+
+const mutationKey = ['approveLesson'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveLesson>>, {lessonId: number;data: BodyType<EditorialApproval>}> = (props) => {
+          const {lessonId,data} = props ?? {};
+
+          return  approveLesson(lessonId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveLessonMutationResult = NonNullable<Awaited<ReturnType<typeof approveLesson>>>
+    export type ApproveLessonMutationBody = BodyType<EditorialApproval>
+    export type ApproveLessonMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve current lesson copy for publication (owner)
+ */
+export const useApproveLesson = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveLesson>>, TError,{lessonId: number;data: BodyType<EditorialApproval>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveLesson>>,
+        TError,
+        {lessonId: number;data: BodyType<EditorialApproval>},
+        TContext
+      > => {
+      return useMutation(getApproveLessonMutationOptions(options));
+    }
+
+export const getReviewCourseUrl = (courseId: number,) => {
+
+
+
+
+  return `/api/editorial/courses/${courseId}`
+}
+
+/**
+ * @summary Review exact course draft and revision (editor or owner)
+ */
+export const reviewCourse = async (courseId: number, options?: Parameters<typeof customFetch>[1]): Promise<EditorialCourse> => {
+
+  return customFetch<EditorialCourse>(getReviewCourseUrl(courseId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReviewCourseQueryKey = (courseId: number,) => {
+    return [
+    `/api/editorial/courses/${courseId}`
+    ] as const;
+    }
+
+
+export const getReviewCourseQueryOptions = <TData = Awaited<ReturnType<typeof reviewCourse>>, TError = ErrorType<unknown>>(courseId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof reviewCourse>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReviewCourseQueryKey(courseId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof reviewCourse>>> = ({ signal }) => reviewCourse(courseId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: courseId !== null && courseId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof reviewCourse>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ReviewCourseQueryResult = NonNullable<Awaited<ReturnType<typeof reviewCourse>>>
+export type ReviewCourseQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Review exact course draft and revision (editor or owner)
+ */
+
+export function useReviewCourse<TData = Awaited<ReturnType<typeof reviewCourse>>, TError = ErrorType<unknown>>(
+ courseId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof reviewCourse>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getReviewCourseQueryOptions(courseId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReviewLessonUrl = (lessonId: number,) => {
+
+
+
+
+  return `/api/editorial/lessons/${lessonId}`
+}
+
+/**
+ * @summary Review exact lesson draft and revision (editor or owner)
+ */
+export const reviewLesson = async (lessonId: number, options?: Parameters<typeof customFetch>[1]): Promise<EditorialLesson> => {
+
+  return customFetch<EditorialLesson>(getReviewLessonUrl(lessonId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReviewLessonQueryKey = (lessonId: number,) => {
+    return [
+    `/api/editorial/lessons/${lessonId}`
+    ] as const;
+    }
+
+
+export const getReviewLessonQueryOptions = <TData = Awaited<ReturnType<typeof reviewLesson>>, TError = ErrorType<unknown>>(lessonId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof reviewLesson>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReviewLessonQueryKey(lessonId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof reviewLesson>>> = ({ signal }) => reviewLesson(lessonId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: lessonId !== null && lessonId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof reviewLesson>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ReviewLessonQueryResult = NonNullable<Awaited<ReturnType<typeof reviewLesson>>>
+export type ReviewLessonQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Review exact lesson draft and revision (editor or owner)
+ */
+
+export function useReviewLesson<TData = Awaited<ReturnType<typeof reviewLesson>>, TError = ErrorType<unknown>>(
+ lessonId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof reviewLesson>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getReviewLessonQueryOptions(lessonId,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -14,9 +14,10 @@ export const coursesTable = pgTable("courses", {
   isFeatured: boolean("is_featured").default(false).notNull(),
   accessTier: text("access_tier").default("Elevated").notNull(),
   transformationStory: text("transformation_story"),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const insertCourseSchema = createInsertSchema(coursesTable).omit({ id: true, createdAt: true });
+export const insertCourseSchema = createInsertSchema(coursesTable).omit({ id: true, createdAt: true, publishedAt: true });
 export type InsertCourse = z.infer<typeof insertCourseSchema>;
 export type Course = typeof coursesTable.$inferSelect;

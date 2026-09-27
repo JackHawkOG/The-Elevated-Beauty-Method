@@ -111,6 +111,26 @@ export interface CourseInput {
   transformationStory?: string;
 }
 
+export interface EditorialApproval {
+  /**
+     * @minLength 64
+     * @maxLength 64
+     */
+  revision: string;
+}
+
+export type EditorialCourse = Course & ({
+  revision: string;
+  /** @nullable */
+  publishedAt: string | null;
+});
+
+export type EditorialLesson = Lesson & ({
+  revision: string;
+  /** @nullable */
+  publishedAt: string | null;
+});
+
 export interface LessonInput {
   /** @minLength 1 */
   title: string;

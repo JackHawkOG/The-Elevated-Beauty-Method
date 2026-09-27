@@ -13,7 +13,7 @@ router.get("/categories", async (req, res): Promise<void> => {
       slug: categoriesTable.slug,
       icon: categoriesTable.icon,
       description: categoriesTable.description,
-      courseCount: sql<number>`(select count(*) from ${coursesTable} where ${coursesTable.categoryId} = ${categoriesTable.id})::int`,
+      courseCount: sql<number>`(select count(*) from ${coursesTable} where ${coursesTable.categoryId} = ${categoriesTable.id} and ${coursesTable.publishedAt} is not null)::int`,
     })
     .from(categoriesTable)
     .orderBy(categoriesTable.name);

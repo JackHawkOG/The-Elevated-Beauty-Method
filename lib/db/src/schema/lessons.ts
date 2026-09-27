@@ -11,9 +11,10 @@ export const lessonsTable = pgTable("lessons", {
   videoUrl: text("video_url"),
   sortOrder: integer("sort_order").notNull().default(0),
   durationMinutes: integer("duration_minutes").notNull().default(10),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const insertLessonSchema = createInsertSchema(lessonsTable).omit({ id: true, createdAt: true });
+export const insertLessonSchema = createInsertSchema(lessonsTable).omit({ id: true, createdAt: true, publishedAt: true });
 export type InsertLesson = z.infer<typeof insertLessonSchema>;
 export type Lesson = typeof lessonsTable.$inferSelect;

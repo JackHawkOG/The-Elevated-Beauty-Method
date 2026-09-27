@@ -61,7 +61,7 @@ export const ListCoursesResponse = zod.array(ListCoursesResponseItem)
 
 
 /**
- * @summary Create a new course (admin)
+ * @summary Create a draft course (editor)
  */
 
 
@@ -132,6 +132,80 @@ export const GetCourseResponse = zod.object({
 
 
 /**
+ * @summary Replace course copy and withdraw it pending owner approval (editor)
+ */
+export const UpdateCourseParams = zod.object({
+  "courseId": zod.coerce.number()
+})
+
+
+
+
+export const UpdateCourseBody = zod.object({
+  "title": zod.string().min(1),
+  "description": zod.string(),
+  "categoryId": zod.number(),
+  "difficulty": zod.string(),
+  "instructorName": zod.string(),
+  "thumbnailUrl": zod.string().optional(),
+  "isFeatured": zod.boolean().optional(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']).optional(),
+  "transformationStory": zod.string().optional()
+})
+
+export const UpdateCourseResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "categoryId": zod.number(),
+  "categoryName": zod.string(),
+  "difficulty": zod.string(),
+  "instructorName": zod.string(),
+  "thumbnailUrl": zod.string().nullish(),
+  "lessonCount": zod.number(),
+  "enrollmentCount": zod.number(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "transformationStory": zod.string().nullish(),
+  "isFeatured": zod.boolean().optional(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Approve current course copy for publication (owner)
+ */
+export const ApproveCourseParams = zod.object({
+  "courseId": zod.coerce.number()
+})
+
+export const approveCourseBodyRevisionMin = 64;
+export const approveCourseBodyRevisionMax = 64;
+
+
+
+export const ApproveCourseBody = zod.object({
+  "revision": zod.string().min(approveCourseBodyRevisionMin).max(approveCourseBodyRevisionMax)
+})
+
+export const ApproveCourseResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "categoryId": zod.number(),
+  "categoryName": zod.string(),
+  "difficulty": zod.string(),
+  "instructorName": zod.string(),
+  "thumbnailUrl": zod.string().nullish(),
+  "lessonCount": zod.number(),
+  "enrollmentCount": zod.number(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "transformationStory": zod.string().nullish(),
+  "isFeatured": zod.boolean().optional(),
+  "createdAt": zod.string()
+})
+
+
+/**
  * @summary List lessons for a course
  */
 export const ListLessonsParams = zod.object({
@@ -152,7 +226,7 @@ export const ListLessonsResponse = zod.array(ListLessonsResponseItem)
 
 
 /**
- * @summary Add a lesson to a course (admin)
+ * @summary Add a draft lesson to a course (editor)
  */
 export const CreateLessonParams = zod.object({
   "courseId": zod.coerce.number()
@@ -198,6 +272,114 @@ export const GetLessonResponse = zod.object({
   "durationMinutes": zod.number(),
   "createdAt": zod.string()
 })
+
+
+/**
+ * @summary Replace lesson copy and withdraw it pending owner approval (editor)
+ */
+export const UpdateLessonParams = zod.object({
+  "lessonId": zod.coerce.number()
+})
+
+
+
+
+export const UpdateLessonBody = zod.object({
+  "title": zod.string().min(1),
+  "content": zod.string().optional(),
+  "videoUrl": zod.string().optional(),
+  "sortOrder": zod.number(),
+  "durationMinutes": zod.number()
+})
+
+export const UpdateLessonResponse = zod.object({
+  "id": zod.number(),
+  "courseId": zod.number(),
+  "title": zod.string(),
+  "content": zod.string().nullish(),
+  "videoUrl": zod.string().nullish(),
+  "sortOrder": zod.number(),
+  "durationMinutes": zod.number(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Approve current lesson copy for publication (owner)
+ */
+export const ApproveLessonParams = zod.object({
+  "lessonId": zod.coerce.number()
+})
+
+export const approveLessonBodyRevisionMin = 64;
+export const approveLessonBodyRevisionMax = 64;
+
+
+
+export const ApproveLessonBody = zod.object({
+  "revision": zod.string().min(approveLessonBodyRevisionMin).max(approveLessonBodyRevisionMax)
+})
+
+export const ApproveLessonResponse = zod.object({
+  "id": zod.number(),
+  "courseId": zod.number(),
+  "title": zod.string(),
+  "content": zod.string().nullish(),
+  "videoUrl": zod.string().nullish(),
+  "sortOrder": zod.number(),
+  "durationMinutes": zod.number(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Review exact course draft and revision (editor or owner)
+ */
+export const ReviewCourseParams = zod.object({
+  "courseId": zod.coerce.number()
+})
+
+export const ReviewCourseResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "description": zod.string(),
+  "categoryId": zod.number(),
+  "categoryName": zod.string(),
+  "difficulty": zod.string(),
+  "instructorName": zod.string(),
+  "thumbnailUrl": zod.string().nullish(),
+  "lessonCount": zod.number(),
+  "enrollmentCount": zod.number(),
+  "accessTier": zod.enum(['Free', 'Elevated', 'Premium']),
+  "transformationStory": zod.string().nullish(),
+  "isFeatured": zod.boolean().optional(),
+  "createdAt": zod.string()
+}).and(zod.object({
+  "revision": zod.string(),
+  "publishedAt": zod.string().nullable()
+}))
+
+
+/**
+ * @summary Review exact lesson draft and revision (editor or owner)
+ */
+export const ReviewLessonParams = zod.object({
+  "lessonId": zod.coerce.number()
+})
+
+export const ReviewLessonResponse = zod.object({
+  "id": zod.number(),
+  "courseId": zod.number(),
+  "title": zod.string(),
+  "content": zod.string().nullish(),
+  "videoUrl": zod.string().nullish(),
+  "sortOrder": zod.number(),
+  "durationMinutes": zod.number(),
+  "createdAt": zod.string()
+}).and(zod.object({
+  "revision": zod.string(),
+  "publishedAt": zod.string().nullable()
+}))
 
 
 /**

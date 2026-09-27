@@ -60,3 +60,10 @@ Try a sample or patch-test as directed when possible, especially if your skin re
 - [x] Proposal T — exact title, outcome, copy, prompt, and Tier 2 approved by owner
 
 The owner approved all three exact drafts and their Tier 2 placement in the editorial approval request; no edits or tier changes were requested. Publish them as **separate** one-lesson courses without modifying or appending to the four-module Accelerator. All other topics remain unpublished.
+
+## API publication gate for future material
+
+- Course and lesson POST/PATCH requests require a signed-in user with a server-managed Clerk `publicMetadata.role` of `owner`, `admin`, or `editor`. A member account alone cannot author. Creation saves a **draft**, not a catalog item; replacing published copy withdraws that course or lesson immediately.
+- Review the exact draft using `GET /api/editorial/courses/{courseId}` or `GET /api/editorial/lessons/{lessonId}` (editor/owner only). These return the complete copy, tier/metadata for a course, publication status, and a revision hash. The public catalog, lesson detail, enrollment, progress, featured cards, and counts exclude unpublished rows.
+- Only `owner` or `admin` can publish: after approving the exact title, teaching copy, practice prompt, and tier, POST `{ "revision": "<hash from review response>" }` to `/api/courses/{courseId}/approve` or `/api/lessons/{lessonId}/approve`. A changed draft or already published revision is rejected with 409; review again before retrying. Approve both the course and each lesson for a new course.
+- The previously approved standalone lessons are protected from edits through these routes. Changes to their approved text must first be reviewed and recorded here, then made in the reviewed seed copy rather than silently edited through the API. No role is assigned automatically; role assignment is an owner-controlled Clerk server-side operation.

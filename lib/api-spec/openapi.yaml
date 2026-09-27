@@ -98,7 +98,7 @@ paths:
     post:
       operationId: createCourse
       tags: [courses]
-      summary: Create a new course (admin)
+      summary: Create a draft course (editor)
       requestBody:
         required: true
         content:
@@ -133,6 +133,54 @@ paths:
                 $ref: "#/components/schemas/CourseDetail"
         "404":
           description: Not found
+    patch:
+      operationId: updateCourse
+      tags: [courses]
+      summary: Replace course copy and withdraw it pending owner approval (editor)
+      parameters:
+        - in: path
+          name: courseId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CourseInput"
+      responses:
+        "200":
+          description: Draft course
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
+
+  /courses/{courseId}/approve:
+    post:
+      operationId: approveCourse
+      tags: [courses]
+      summary: Approve current course copy for publication (owner)
+      parameters:
+        - in: path
+          name: courseId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditorialApproval"
+      responses:
+        "200":
+          description: Published course
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Course"
 
   /courses/{courseId}/lessons:
     get:
@@ -157,7 +205,7 @@ paths:
     post:
       operationId: createLesson
       tags: [lessons]
-      summary: Add a lesson to a course (admin)
+      summary: Add a draft lesson to a course (editor)
       parameters:
         - in: path
           name: courseId
@@ -198,6 +246,92 @@ paths:
                 $ref: "#/components/schemas/Lesson"
         "404":
           description: Not found
+    patch:
+      operationId: updateLesson
+      tags: [lessons]
+      summary: Replace lesson copy and withdraw it pending owner approval (editor)
+      parameters:
+        - in: path
+          name: lessonId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LessonInput"
+      responses:
+        "200":
+          description: Draft lesson
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lesson"
+
+  /lessons/{lessonId}/approve:
+    post:
+      operationId: approveLesson
+      tags: [lessons]
+      summary: Approve current lesson copy for publication (owner)
+      parameters:
+        - in: path
+          name: lessonId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EditorialApproval"
+      responses:
+        "200":
+          description: Published lesson
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lesson"
+
+  /editorial/courses/{courseId}:
+    get:
+      operationId: reviewCourse
+      tags: [courses]
+      summary: Review exact course draft and revision (editor or owner)
+      parameters:
+        - in: path
+          name: courseId
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Draft under review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditorialCourse"
+
+  /editorial/lessons/{lessonId}:
+    get:
+      operationId: reviewLesson
+      tags: [lessons]
+      summary: Review exact lesson draft and revision (editor or owner)
+      parameters:
+        - in: path
+          name: lessonId
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Draft under review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EditorialLesson"
 
   /enrollments:
     get:
@@ -524,6 +658,33 @@ components:
           enum: [Free, Elevated, Premium]
         transformationStory:
           type: string
+
+    EditorialApproval:
+      type: object
+      required: [revision]
+      properties:
+        revision:
+          type: string
+          minLength: 64
+          maxLength: 64
+
+    EditorialCourse:
+      allOf:
+        - $ref: "#/components/schemas/Course"
+        - type: object
+          required: [revision, publishedAt]
+          properties:
+            revision: { type: string }
+            publishedAt: { type: ["string", "null"] }
+
+    EditorialLesson:
+      allOf:
+        - $ref: "#/components/schemas/Lesson"
+        - type: object
+          required: [revision, publishedAt]
+          properties:
+            revision: { type: string }
+            publishedAt: { type: ["string", "null"] }
 
     Lesson:
       type: object
