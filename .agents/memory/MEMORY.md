@@ -18,3 +18,4 @@
 - [Pooled PostgreSQL temp fixtures](pooled-postgres-temp-fixtures.md) — session-local tables and functions survive pool release; clean both before the next test borrows the client.
 - [Story removal privacy](story-removal-privacy.md) — hide disputed stories immediately while keeping claimant identity and owner review private.
 - [Nullable JSON API responses](nullable-json-api-responses.md) — use explicit JSON response mode for nullable direct client calls; automatic inference can return the string "null".
+- [Vitest source-check callback shapes](vitest-source-check-callbacks.md) — static checks must account for optional timeouts and curried each callbacks when locating test bodies.

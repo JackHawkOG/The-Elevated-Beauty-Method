@@ -1,0 +1,92 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { checkSuite } from "./check-development-database-guards.mjs";
+
+const imports = `import { db, pool } from "@workspace/db";
+import { requireDevelopmentDatabase } from "./test-development-database";`;
+
+test("rejects fixture writes and schema setup without an early guard", () => {
+  assert.match(checkSuite(`${imports}
+    beforeAll(async () => { await db.insert(usersTable).values({}); requireDevelopmentDatabase(); });`)[0], /beforeAll/);
+  assert.match(checkSuite(`import { ensureMembershipSchema } from "../lib/ensure-membership-schema";
+    beforeAll(async () => { await ensureMembershipSchema(); });`)[0], /import/);
+  assert.ok(checkSuite(`${imports}
+    test("writes", async () => { await pool.query("INSERT INTO users VALUES (1)"); });`).length);
+});
+
+test("accepts beforeAll and per-test guards, including named each callbacks", () => {
+  assert.deepEqual(checkSuite(`${imports}
+    beforeAll(async () => { requireDevelopmentDatabase(); await db.insert(usersTable).values({}); });
+    test("writes", async () => { await pool.query("DELETE FROM users"); });`), []);
+  assert.deepEqual(checkSuite(`${imports}
+    test.each(["migration"] as const)("works %s", repair);
+    async function repair() { requireDevelopmentDatabase(); await pool.connect(); }`), []);
+});
+
+test("does not treat mock database unit tests as real database writes", () => {
+  assert.deepEqual(checkSuite(`import { pool } from "@workspace/db";
+    vi.mock("@workspace/db", () => ({ pool: { query: vi.fn() } }));
+    test("mock", async () => { await pool.query("DELETE FROM users"); });`), []);
+  assert.deepEqual(checkSuite(`import type { PoolClient } from "@workspace/db";
+    const client = { query: async () => ({ rows: [] }) } as unknown as PoolClient;
+    test("mock", async () => { await client.query("INSERT INTO users"); });`), []);
+  assert.deepEqual(checkSuite(`import { db } from "@workspace/db";
+    vi.mock("@workspace/db", () => ({ db: { insert: vi.fn() } }));
+    beforeAll(async () => { await ensureMembershipSchema(); });
+    test("mock", () => db.insert(usersTable));`), []);
+});
+
+test("rejects module-scope writes despite a guarded setup hook", () => {
+  assert.match(checkSuite(`${imports}
+    const pending = db.delete(usersTable);
+    beforeAll(() => { requireDevelopmentDatabase(); });`)[0], /module scope/);
+  assert.match(checkSuite(`${imports}
+    db.insert(usersTable).values({});
+    beforeAll(() => { requireDevelopmentDatabase(); });`)[0], /module scope/);
+});
+
+test("rejects a setup hook that runs before a later guard", () => {
+  assert.match(checkSuite(`${imports}
+    beforeAll(async () => { await pool.query("DELETE FROM users"); });
+    beforeAll(() => { requireDevelopmentDatabase(); });`)[0], /beforeAll/);
+});
+
+test("rejects unguarded setup writes even when tests guard themselves or only read", () => {
+  for (const testBody of [
+    `requireDevelopmentDatabase(); await pool.query("DELETE FROM users");`,
+    `expect(true).toBe(true);`,
+  ]) {
+    assert.ok(checkSuite(`${imports}
+      beforeAll(async () => { await db.insert(usersTable).values({}); });
+      test("case", async () => { ${testBody} });`)
+      .some(problem => problem.includes("beforeAll")));
+  }
+  assert.ok(checkSuite(`${imports}
+    beforeEach(async () => { await pool.query("DELETE FROM users"); });
+    test("case", async () => { requireDevelopmentDatabase(); await pool.query("DELETE FROM users"); });`)
+    .some(problem => problem.includes("beforeEach")));
+});
+
+test("ignores pure tests in a suite whose database test guards itself", () => {
+  assert.deepEqual(checkSuite(`${imports}
+    test("constant", () => { expect(1).toBe(1); });
+    test("writes", async () => { requireDevelopmentDatabase(); await pool.query("DELETE FROM users"); }, 30000);`), []);
+});
+
+test("accepts a first beforeEach guard, but not one following an unguarded beforeAll", () => {
+  assert.deepEqual(checkSuite(`${imports}
+    beforeEach(() => { requireDevelopmentDatabase(); });
+    test("writes", async () => { await pool.query("DELETE FROM users"); });`), []);
+  assert.ok(checkSuite(`${imports}
+    beforeAll(async () => { await pool.query("DELETE FROM users"); });
+    beforeEach(() => { requireDevelopmentDatabase(); });
+    test("writes", async () => { await pool.query("DELETE FROM users"); });`).length);
+});
+
+test("detects direct pg pools and workspace database namespace imports", () => {
+  assert.ok(checkSuite(`import { Pool } from "pg";
+    const connection = new Pool();
+    test("writes", async () => { await connection.query("INSERT INTO users VALUES (1)"); });`).length);
+  assert.ok(checkSuite(`import * as database from "@workspace/db";
+    test("writes", async () => { await database.db.insert(usersTable).values({}); });`).length);
+});

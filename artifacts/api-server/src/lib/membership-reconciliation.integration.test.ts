@@ -407,7 +407,7 @@ test("a lost cancellation response rolls back the webhook, then redelivery obser
 
     expect(await deliver("invoice.payment_failed", event, eventId)).toBe(200);
     expect(retrieve).toHaveBeenCalledTimes(2);
-    expect(list).toHaveBeenCalledTimes(1); // Canceled subscriptions need no further invoice lookup.
+    expect(list).toHaveBeenCalledTimes(2); // The first delivery rechecks invoices; cancellation retries need no further lookup.
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(await recordedEvents()).toEqual([{ id: eventId }]);
     expect(await state(lostSubscriptionId)).toEqual({
