@@ -22,6 +22,7 @@ vi.mock("@clerk/react", () => ({ useUser: () => ({ user: null }) }));
 vi.mock("@/components/layout", () => ({ AppLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 
 import MembershipPage from "./membership";
+
 function page(phase: string, available: boolean) {
   state.offer = { phase, foundingAvailable: available };
   return renderToStaticMarkup(

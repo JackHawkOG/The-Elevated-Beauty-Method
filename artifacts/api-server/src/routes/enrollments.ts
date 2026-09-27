@@ -27,7 +27,12 @@ router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
       completedLessons: enrollmentsTable.completedLessons,
       completedLessonIds: sql<number[]>`coalesce((select array_agg(lc.lesson_id order by lc.lesson_id) from lesson_completions lc inner join lessons l on l.id = lc.lesson_id where lc.user_id = ${enrollmentsTable.userId} and l.course_id = ${enrollmentsTable.courseId} and l.published_at is not null), ARRAY[]::integer[])`,
       totalLessons: sql<number>`(select count(*) from ${lessonsTable} where ${lessonsTable.courseId} = ${enrollmentsTable.courseId} and ${lessonsTable.publishedAt} is not null)::int`,
-      lastLessonId: enrollmentsTable.lastLessonId,
+      lastLessonId: sql<number | null>`(
+        select l.id from lessons l
+        where l.id = ${enrollmentsTable.lastLessonId}
+          and l.course_id = ${enrollmentsTable.courseId}
+          and l.published_at is not null
+      )`,
       enrolledAt: enrollmentsTable.enrolledAt,
     })
     .from(enrollmentsTable)
@@ -87,9 +92,14 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
   });
   if (!enrollment) throw new Error("Enrollment missing after conflict");
   const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
+  const [availableLesson] = enrollment.lastLessonId == null ? [] : await db.select({ id: lessonsTable.id })
+    .from(lessonsTable)
+    .where(and(eq(lessonsTable.id, enrollment.lastLessonId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
+    .limit(1);
 
   res.status(201).json(EnrollInCourseResponse.parse({
     ...enrollment,
+    lastLessonId: availableLesson?.id ?? null,
     courseTitle: course.title,
     totalLessons: totalRow?.count ?? 0,
     enrolledAt: enrollment.enrolledAt?.toISOString(),

@@ -203,6 +203,52 @@ test("simultaneous enrollment requests return one row and create one activity en
   expect((repeated.data as { id: number }).id).toBe(ids[0]);
 });
 
+test("resume never exposes a missing, unpublished, or other-course lesson", async () => {
+  const userId = `test-resume-${run}`;
+  let otherCourseId: number | undefined;
+  try {
+    await db.insert(usersTable).values({
+      clerkId: userId, displayName: "Resume Test", email: `${userId}@example.invalid`, membershipTier: "Elevated",
+    });
+    const [otherCourse] = await db.insert(coursesTable).values({
+      title: `Resume pointer test ${run}`, description: "Cross-course pointer fixture", categoryId,
+      instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+    }).returning();
+    otherCourseId = otherCourse.id;
+    const [otherLesson] = await db.insert(lessonsTable).values({
+      courseId: otherCourse.id, title: "Other lesson", sortOrder: 1, publishedAt: new Date(),
+    }).returning();
+    const [draftLesson] = await db.insert(lessonsTable).values({
+      courseId, title: "Unpublished resume test", sortOrder: 5, publishedAt: null,
+    }).returning();
+    try {
+      expect((await request(userId, "/enrollments", "POST", { courseId })).status).toBe(201);
+      const assertResume = async (pointer: number, expected: number | null) => {
+        await db.update(enrollmentsTable).set({ lastLessonId: pointer })
+          .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)));
+        expect(await enrollment(userId)).toMatchObject({ lastLessonId: expected });
+        const again = await request(userId, "/enrollments", "POST", { courseId });
+        expect(again.status).toBe(201);
+        expect(again.data).toMatchObject({ lastLessonId: expected });
+      };
+      await assertResume(otherLesson.id, null);
+      await assertResume(draftLesson.id, null);
+      await assertResume(2147483647, null);
+      await assertResume(lessonIds[0], lessonIds[0]);
+    } finally {
+      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, userId));
+      await db.delete(lessonsTable).where(eq(lessonsTable.id, draftLesson.id));
+    }
+  } finally {
+    if (otherCourseId) {
+      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, otherCourseId));
+      await db.delete(coursesTable).where(eq(coursesTable.id, otherCourseId));
+    }
+    await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Resume Test")));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
+  }
+});
+
 test("Elevated progress survives fresh requests and revisit; repeats and out-of-order completions do not inflate it", async () => {
   const enrolled = await request(elevatedId, "/enrollments", "POST", { courseId });
   expect(enrolled.status).toBe(201);

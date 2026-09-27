@@ -3,23 +3,25 @@ BEGIN;
 LOCK TABLE "enrollments" IN SHARE ROW EXCLUSIVE MODE;
 
 -- Keep the earliest enrollment identity and date, but retain the greatest
--- recorded progress and the latest non-null last lesson from duplicate rows.
+-- recorded progress and the latest available lesson in the enrolled course.
 WITH ranked AS (
-  SELECT "id", "user_id", "course_id",
+  SELECT e."id", e."user_id", e."course_id",
     row_number() OVER (
-      PARTITION BY "user_id", "course_id" ORDER BY "enrolled_at", "id"
+      PARTITION BY e."user_id", e."course_id" ORDER BY e."enrolled_at", e."id"
     ) AS position,
-    max("completed_lessons") OVER (
-      PARTITION BY "user_id", "course_id"
+    max(e."completed_lessons") OVER (
+      PARTITION BY e."user_id", e."course_id"
     ) AS most_completed,
     count(*) OVER (
-      PARTITION BY "user_id", "course_id"
+      PARTITION BY e."user_id", e."course_id"
     ) AS copies,
-    first_value("last_lesson_id") OVER (
-      PARTITION BY "user_id", "course_id"
-      ORDER BY ("last_lesson_id" IS NULL), "completed_lessons" DESC, "enrolled_at" DESC, "id" DESC
+    first_value(l."id") OVER (
+      PARTITION BY e."user_id", e."course_id"
+      ORDER BY (l."id" IS NULL), e."completed_lessons" DESC, e."enrolled_at" DESC, e."id" DESC
     ) AS latest_lesson
-  FROM "enrollments"
+  FROM "enrollments" e
+  LEFT JOIN "lessons" l ON l."id" = e."last_lesson_id"
+    AND l."course_id" = e."course_id" AND l."published_at" IS NOT NULL
 )
 UPDATE "enrollments" e
 SET "completed_lessons" = r.most_completed, "last_lesson_id" = r.latest_lesson
