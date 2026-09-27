@@ -15,12 +15,24 @@ vi.mock("../middlewares/requireAuth", () => ({
   jitProvisionUser: (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
 }));
 
-const sessions = new Map<string, { id: string; status: string; url: string; payment_status?: string; subscription?: string }>();
-const createSession = vi.fn(async () => {
+type TestSession = {
+  id: string; status: string; url: string; created: number;
+  metadata?: { reservationId: string; membershipCheckout?: string };
+  payment_status?: string; subscription?: string;
+};
+const sessions = new Map<string, TestSession>();
+const createSession = vi.fn(async (params?: { metadata?: TestSession["metadata"] }, options?: { idempotencyKey?: string }) => {
   const id = `cs_${randomUUID()}`;
-  const session = { id, status: "open", url: `https://checkout.stripe.test/${id}` };
+  const session: TestSession = { id, status: "open", url: `https://checkout.stripe.test/${id}`,
+    created: Math.floor(Date.now() / 1000), metadata: params?.metadata };
   sessions.set(id, session);
   return session;
+});
+
+const listSessions = vi.fn(async (params: { status: string; created: { lte: number }; limit: number; starting_after?: string }) => {
+  const eligible = [...sessions.values()].filter(s => s.status === params.status && s.created <= params.created.lte);
+  const offset = params.starting_after ? eligible.findIndex(s => s.id === params.starting_after) + 1 : 0;
+  return { data: eligible.slice(offset, offset + params.limit), has_more: offset + params.limit < eligible.length };
 });
 const retrieveSession = vi.fn(async (id: string) => {
   const session = sessions.get(id);
@@ -49,7 +61,7 @@ vi.mock("../lib/stripeClient", () => ({
       { id: "price_standard_test", unit_amount: 4800, currency: "usd", recurring: { interval: "month" } },
     ] }) },
     customers: { create: async () => ({ id: `cus_${randomUUID()}` }) },
-    checkout: { sessions: { create: createSession, retrieve: retrieveSession, expire: expireSession } },
+    checkout: { sessions: { create: createSession, list: listSessions, retrieve: retrieveSession, expire: expireSession } },
     invoices: { list: async () => ({ data: [...invoiceHistory].sort((a, b) => b.created - a.created), has_more: false }) },
     subscriptions: {
       retrieve: async (id: string) => ({
@@ -152,7 +164,7 @@ afterAll(async () => {
 });
 
 test("opening is inclusive and closing is exclusive for the offer and founding checkout", async () => {
-  const buyer = await addUser(0);
+  const buyer = await addUser(200);
   clock(opens - 1);
   expect((await request("/membership/offer")).data.phase).toBe("upcoming");
   expect((await request("/membership/checkout", "POST", buyer, { kind: "founding" })).status).toBe(409);
@@ -172,7 +184,7 @@ test("opening is inclusive and closing is exclusive for the offer and founding c
 
 test("a database failure after Stripe session creation expires the untracked checkout", async () => {
   clock(opens);
-  const buyer = await addUser(200);
+  const buyer = await addUser(201);
   const originalConnect = pool.connect.bind(pool);
   let restoreQuery: (() => void) | undefined;
   const connectSpy = vi.spyOn(pool, "connect").mockImplementationOnce(async () => {
@@ -201,8 +213,53 @@ test("a database failure after Stripe session creation expires the untracked che
   expect(expireSession).toHaveBeenCalledWith(session.id);
   expect(sessions.get(session.id)).toMatchObject({ status: "expired", url: "" });
   expect(await row(buyer)).toBeUndefined();
-  // Even if the URL were obtained separately, Stripe's expired session cannot accept payment.
-  expect(sessions.get(session.id)?.status).not.toBe("open");
+  vi.restoreAllMocks();
+});
+
+test("lost Stripe responses leave recoverable sessions; recovery expires only untracked open checkouts", async () => {
+  clock(opens);
+  const [openBuyer, paidBuyer, trackedBuyer] = await Promise.all([addUser(210), addUser(211), addUser(212)]);
+  const originalCreate = createSession.getMockImplementation()!;
+  const loseResponse = async (...args: Parameters<typeof originalCreate>) => {
+    await originalCreate(...args); // Stripe created it, but its response never reached the server.
+    throw new Error("Connection lost after Stripe accepted checkout");
+  };
+  const before = sessions.size;
+  createSession.mockImplementationOnce(loseResponse).mockImplementationOnce(loseResponse);
+  expect((await request("/membership/checkout", "POST", openBuyer, { kind: "standard" })).status).toBe(503);
+  expect((await request("/membership/checkout", "POST", paidBuyer, { kind: "standard" })).status).toBe(503);
+  expect(await row(openBuyer)).toBeUndefined();
+  expect(await row(paidBuyer)).toBeUndefined();
+  const [orphan, completed] = [...sessions.values()].slice(before);
+  expect(orphan.metadata).toMatchObject({ membershipCheckout: "true", reservationId: expect.any(String) });
+  expect(createSession.mock.calls.at(-2)?.[1]?.idempotencyKey).toBe(`membership-${orphan.metadata?.reservationId}`);
+  expect(expireSession).not.toHaveBeenCalledWith(orphan.id);
+  completed.status = "complete";
+  completed.payment_status = "paid";
+  completed.subscription = `sub_${randomUUID()}`;
+
+  expect((await request("/membership/checkout", "POST", trackedBuyer, { kind: "standard" })).status).toBe(200);
+  const tracked = sessions.get((await row(trackedBuyer)).stripe_session_id)!;
+  const unrelated: TestSession = { id: `cs_${randomUUID()}`, status: "open", url: "https://checkout.stripe.test/other",
+    created: orphan.created, metadata: { reservationId: "999999" } };
+  sessions.set(unrelated.id, unrelated);
+
+  clock(opens + 32 * 60 * 1000);
+  // The listing may still include a session that completed during pagination.
+  listSessions.mockImplementationOnce(async () => ({
+    data: [orphan, completed, tracked, unrelated], has_more: false,
+  }));
+  expect((await request("/membership/offer")).status).toBe(200);
+  expect(listSessions).toHaveBeenCalledWith(expect.objectContaining({
+    status: "open", created: { lte: Math.floor(Date.now() / 1000) - 31 * 60 },
+  }));
+  expect(sessions.get(orphan.id)?.status).toBe("expired");
+  expect(expireSession).toHaveBeenCalledWith(orphan.id);
+  expect(expireSession).not.toHaveBeenCalledWith(completed.id);
+  expect(completed.status).toBe("complete");
+  expect(tracked.status).toBe("open");
+  expect(unrelated.status).toBe("open");
+  expect((await row(trackedBuyer)).status).toBe("pending");
   vi.restoreAllMocks();
 });
 
@@ -244,7 +301,7 @@ test("concurrent last-place checkouts reserve once; only confirmed Stripe expira
   expect((await request("/membership/offer")).data.foundingAvailable).toBe(false);
   expect((await row(winner)).status).toBe("pending");
   const retrievedBefore = retrieveSession.mock.calls.length;
-  sessions.set(pending.stripe_session_id, { id: pending.stripe_session_id, status: "expired", url: "" });
+  sessions.set(pending.stripe_session_id, { ...sessions.get(pending.stripe_session_id)!, status: "expired", url: "" });
   const afterExpiration = await request("/membership/offer");
   expect(retrieveSession.mock.calls.length).toBeGreaterThan(retrievedBefore);
   expect(retrieveSession.mock.calls.at(-1)?.[0]).toBe(pending.stripe_session_id);
