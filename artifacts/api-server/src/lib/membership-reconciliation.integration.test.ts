@@ -19,6 +19,8 @@ const clerkId = `billing-race-${id}`;
 const subscriptionId = `sub_billing_race_${id}`;
 const otherClerkId = `billing-bystander-${id}`;
 const otherSubscriptionId = `sub_billing_bystander_${id}`;
+const paginatedClerkId = `billing-paginated-${id}`;
+const paginatedSubscriptionId = `sub_billing_paginated_${id}`;
 const eventIds: string[] = [];
 let seeded = false;
 
@@ -51,10 +53,10 @@ function invoice(name: string, date: string, status: Stripe.Invoice.Status): Str
 }
 
 type MembershipState = { status: string; failed_months: number; last_failed_invoice: string | null; membership_tier: string };
-async function state(): Promise<MembershipState> {
+async function state(forSubscriptionId = subscriptionId): Promise<MembershipState> {
   const result = await pool.query<MembershipState>(
     "SELECT m.status, m.failed_months, m.last_failed_invoice, u.membership_tier FROM membership_checkouts m JOIN users u ON u.clerk_id = m.clerk_id WHERE m.stripe_subscription_id = $1",
-    [subscriptionId],
+    [forSubscriptionId],
   );
   return result.rows[0];
 }
@@ -93,13 +95,19 @@ beforeAll(async () => {
     "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id, failed_months) VALUES ($1, 'founding', 'confirmed', $2, 2)",
     [otherClerkId, otherSubscriptionId],
   );
+  await pool.query("INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [paginatedClerkId, "Paginated billing fixture", `${paginatedClerkId}@example.invalid`]);
+  await pool.query(
+    "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)",
+    [paginatedClerkId, paginatedSubscriptionId],
+  );
 });
 
 afterAll(async () => {
   if (!seeded) return;
   await pool.query("DELETE FROM membership_webhook_events WHERE id = ANY($1::text[])", [eventIds]);
-  await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId]]);
-  await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId]]);
+  await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId]]);
+  await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId]]);
 });
 
 test("late invoice and subscription notices use current Stripe state; sweeps cannot undo forfeiture", async () => {
@@ -206,6 +214,50 @@ test("late invoice and subscription notices use current Stripe state; sweeps can
   );
   expect(bystander.rows[0]).toEqual({
     status: "confirmed", failed_months: 2, last_failed_invoice: null, membership_tier: "Elevated",
+  });
+});
+
+test("paid renewal on an older invoice page stops the failed-month streak", async () => {
+  const marchFailure = invoice("paginated-mar", "2026-03-01", "open");
+  const februaryFailure = invoice("paginated-feb", "2026-02-01", "uncollectible");
+  const firstPage = [
+    ...Array.from({ length: 98 }, (_, index) =>
+      invoice(`paginated-draft-${index}`, "2026-03-03", "draft")),
+    marchFailure,
+    februaryFailure,
+  ];
+  const secondPage = [
+    invoice("paginated-jan-paid", "2026-01-01", "paid"),
+    invoice("paginated-dec", "2025-12-01", "open"),
+  ];
+  const list = vi.fn(async (params: { subscription: string; limit: number; starting_after?: string }) => {
+    expect(params.subscription).toBe(paginatedSubscriptionId);
+    expect(params.limit).toBe(100);
+    if (params.starting_after === undefined) return { data: firstPage, has_more: true };
+    if (params.starting_after === februaryFailure.id) return { data: secondPage, has_more: false };
+    throw new Error(`Unexpected invoice cursor: ${params.starting_after}`);
+  });
+  const cancel = vi.fn();
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: {
+      retrieve: async (requestedId: string) => {
+        expect(requestedId).toBe(paginatedSubscriptionId);
+        return { status: "active", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+      },
+      cancel,
+    },
+    invoices: { list },
+  } as unknown as Stripe);
+
+  await reconcileMemberships(paginatedSubscriptionId);
+
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(list).toHaveBeenNthCalledWith(2, {
+    subscription: paginatedSubscriptionId, limit: 100, starting_after: februaryFailure.id,
+  });
+  expect(cancel).not.toHaveBeenCalled();
+  expect(await state(paginatedSubscriptionId)).toEqual({
+    status: "confirmed", failed_months: 2, last_failed_invoice: marchFailure.id, membership_tier: "Elevated",
   });
 });
 
