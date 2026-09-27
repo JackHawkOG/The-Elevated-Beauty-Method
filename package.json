@@ -9,7 +9,7 @@
     "check:pre-release": "pnpm run check && pnpm run test:progress:browser",
     "test:progress": "vitest run artifacts/api-server/src/routes/lesson-progress.test.ts artifacts/api-server/src/routes/enrollment-migration.test.ts artifacts/edu-portal/src/components/accelerator-dashboard.test.tsx artifacts/api-server/src/routes/publication-authorization.test.ts artifacts/api-server/src/routes/member-progress-browser-environment.test.ts --maxWorkers=1",
     "test:progress:browser": "vitest run artifacts/api-server/src/routes/member-progress.browser.test.ts --maxWorkers=1",
-    "test:membership": "vitest run artifacts/api-server/src/routes/membership-reservations.test.ts --maxWorkers=1",
+    "test:membership": "vitest run artifacts/api-server/src/routes/membership-reservations.test.ts artifacts/api-server/src/routes/membership-flow.test.ts artifacts/api-server/src/lib/membership-reconciliation.test.ts artifacts/edu-portal/src/pages/membership.test.tsx --maxWorkers=1",
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
     "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",
     "test:audit-live": "playwright test --config playwright.audit-live.config.ts",

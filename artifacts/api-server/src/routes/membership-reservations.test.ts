@@ -1,6 +1,6 @@
 import { afterAll, expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
-import { pool } from "@workspace/db";
+import { pool, type PoolClient } from "@workspace/db";
 import { ensureMembershipSchema } from "../lib/ensure-membership-schema";
 import {
   FOUNDING_LIMIT, lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry,
@@ -8,6 +8,7 @@ import {
 
 const prefix = `founder-test-${randomUUID()}`;
 const generated: string[] = [];
+let fixtureLock: PoolClient | undefined;
 
 test("Checkout expiry leaves a margin above Stripe's 30-minute minimum", () => {
   const startedAt = Date.now();
@@ -17,9 +18,16 @@ test("Checkout expiry leaves a margin above Stripe's 30-minute minimum", () => {
 });
 
 afterAll(async () => {
-  if (generated.length) {
-    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [generated]);
-    await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [generated]);
+  try {
+    if (generated.length) {
+      await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [generated]);
+      await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [generated]);
+    }
+  } finally {
+    if (fixtureLock) {
+      await fixtureLock.query("SELECT pg_advisory_unlock(20261001, 55)");
+      fixtureLock.release();
+    }
   }
 });
 
@@ -36,6 +44,9 @@ test("the final place can be reserved once; expiration releases it but confirmed
       decodeURIComponent(target.username) !== process.env.PGUSER) {
     throw new Error("Founding capacity test cannot run against a different database");
   }
+  // Hold the same test-only lock as the HTTP flow suite until fixture cleanup.
+  fixtureLock = await pool.connect();
+  await fixtureLock.query("SELECT pg_advisory_lock(20261001, 55)");
   await ensureMembershipSchema();
   const existing = await pool.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM membership_checkouts WHERE kind = 'founding' AND status IN ('pending', 'confirmed', 'forfeited')",

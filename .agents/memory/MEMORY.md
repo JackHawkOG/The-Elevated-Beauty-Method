@@ -5,3 +5,5 @@
 - [Audit checkbox browser interaction](audit-checkbox-browser-interaction.md) — live Playwright checks should click the visible label, not the visually hidden checkbox.
 - [Concurrent task merges](concurrent-task-merges.md) — a task completion check can see newly merged test code; reread the current worktree before addressing feedback.
 - [Stripe sync in bundled server](stripe-sync-bundling.md) — keep the sync library external so its filesystem migrations remain available at runtime; connector credentials may use different field names than examples.
+- [Stripe checkout test fixtures](stripe-checkout-test-fixtures.md) — keep session identity intact when changing mocked Stripe status; incomplete fixtures can hide failed reservation release.
+- [Membership capacity test isolation](membership-capacity-test-isolation.md) — test runs share one development inventory; serialize full fixture lifetimes, not just individual reservations.
