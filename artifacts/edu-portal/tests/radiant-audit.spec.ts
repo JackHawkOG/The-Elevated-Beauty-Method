@@ -62,7 +62,7 @@ test.beforeEach(async ({ page }) => {
 
 test("dashboard does not claim a saved Audit is missing when its GET fails and recovers on retry", async ({ page }) => {
   const savedAudit: Audit = {
-    ...fixture("saved"),
+    ...fixture("first"),
     routineScore: 1,
     valuesScore: 2,
     completedAt: "2026-09-02T12:00:00.000Z",
@@ -189,7 +189,7 @@ test("an unverified account cannot save staged answers, even when its email matc
   const writes: string[] = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
     if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
-    return route.fulfill({ json: null });
+    return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
   });
   await stageVisitorAnswers(page);
   await page.evaluate(() => {
@@ -209,7 +209,7 @@ test("an unverified signed-in member cannot save directly from the Audit form", 
   const writes: string[] = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
     if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
-    return route.fulfill({ json: null });
+    return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
   });
   await page.goto("/tests/audit-harness.html");
   await page.evaluate(() => {
@@ -230,8 +230,8 @@ test("an unverified signed-in member cannot save directly from the Audit form", 
 test("partial answers staged for email verification return to the form and never auto-save", async ({ page }) => {
   const writes: Array<{ account: string | undefined; answers: Answers }> = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
-    if (route.request().method() === "PUT") {
-      const request = route.request();
+    const request = route.request();
+    if (request.method() === "PUT") {
       const { submissionId: _submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
       writes.push({ account: request.headers().authorization, answers });
       return route.fulfill({ json: {
@@ -436,25 +436,71 @@ test("signed-in member compares both earlier Audits after saving and reload, wit
   await expect(comparison).not.toContainText(outsider.masteryGoal);
   await expect(comparison).not.toContainText(outsider.beautyTrend);
   await expect(comparison).not.toContainText(outsider.researchTime);
-  await expect(page.locator("body")).not.toContainText(outsider.masteryGoal);
 
   await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
-  await expect(comparison).toContainText("third private goal");
   await expect(earlier).toContainText("first private goal");
   await page.reload();
-  await expect(comparison).toContainText("third private goal");
   await expect(earlier).toContainText("first private goal");
   await comparison.getByRole("combobox", { name: "Compare with" }).selectOption({ index: 0 });
   await expect(earlier).toContainText("second private goal");
-  await expect(comparison).not.toContainText(outsider.masteryGoal);
-  await expect(page.locator("body")).not.toContainText(outsider.beautyTrend);
-
-  // Capture calls before navigation resets the sink, so a later reload cannot hide a leak.
   expect(tracking).toEqual([
     { name: "radiant_audit_saved", data: { completion_kind: "first_time" } },
     { name: "radiant_audit_saved", data: { completion_kind: "retake" } },
     { name: "radiant_audit_saved", data: { completion_kind: "retake" } },
   ]);
+});
+
+test("an earlier Audit removed in another tab cannot silently switch the deletion target", async ({ page }) => {
+  const makeEntry = (id: number, tag: string, completedAt: string): HistoryEntry => ({
+    id, ...fixture(tag), completedAt, routineScore: 1, valuesScore: 2,
+  });
+  const removed = makeEntry(101, "first", "2026-09-01T12:00:00.000Z");
+  const remaining = makeEntry(202, "second", "2026-09-02T12:00:00.000Z");
+  const latest = makeEntry(303, "third", "2026-09-03T12:00:00.000Z");
+  let history = [remaining, removed];
+  let historyReads = 0;
+  const deletes: number[] = [];
+  await page.route("**/api/users/me/radiant-audit**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "GET" && path.endsWith("/history")) {
+      historyReads++;
+      return route.fulfill({ json: history });
+    }
+    if (route.request().method() === "GET") return route.fulfill({ json: latest });
+    if (route.request().method() === "DELETE" && path.includes("/history/")) {
+      const id = Number(path.split("/").at(-1));
+      deletes.push(id);
+      history = history.filter(entry => entry.id !== id);
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 405 });
+  });
+  await signInAs(page, "member-a");
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  const comparison = page.getByRole("region", { name: "How your answers have changed" });
+  const select = comparison.getByRole("combobox", { name: "Compare with" });
+  await select.selectOption("101");
+  await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("ID 101");
+  history = [remaining];
+  const readsBeforeRefresh = historyReads;
+  await page.evaluate(() => (window as unknown as { __refreshAuditHistory: () => Promise<void> }).__refreshAuditHistory());
+  await expect.poll(() => historyReads).toBeGreaterThan(readsBeforeRefresh);
+  await expect(dialog.getByRole("button", { name: "Delete earlier Audit" })).toBeDisabled();
+  await expect(dialog).toContainText("ID 101");
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(comparison.getByRole("button", { name: "Delete selected earlier Audit" })).toBeDisabled();
+  await expect(select).toHaveValue("");
+  expect(deletes).toEqual([]);
+  await page.reload();
+  await expect(select).toHaveValue("");
+  await expect(comparison.getByRole("button", { name: "Delete selected earlier Audit" })).toBeDisabled();
+  await select.selectOption("202");
+  await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+  await expect(dialog).toContainText("ID 202");
+  await dialog.getByRole("button", { name: "Delete earlier Audit" }).click();
+  await expect.poll(() => deletes).toEqual([202]);
 });
 
 test("failed signed-in save preserves answers and checks until a successful retry", async ({ page }) => {

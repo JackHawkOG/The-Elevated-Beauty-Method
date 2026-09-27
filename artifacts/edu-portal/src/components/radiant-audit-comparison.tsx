@@ -79,28 +79,30 @@ export function RadiantAuditComparison({
       return null;
     }
   });
-  const [confirmation, setConfirmation] = useState<"selected" | "all" | null>(null);
+  const [confirmation, setConfirmation] = useState<{ kind: "selected"; entry: RadiantAuditHistoryEntry } | { kind: "all" } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const deleteEntry = useDeleteRadiantAuditHistoryEntry();
   const clearHistory = useClearRadiantAuditHistory();
   const deleting = deleteEntry.isPending || clearHistory.isPending;
-  const earlier = history.find(entry => entry.id === selectedId) ?? history[0];
+  const staleSelection = selectedId !== null && !history.some(entry => entry.id === selectedId);
+  const earlier = staleSelection ? undefined : (history.find(entry => entry.id === selectedId) ?? history[0]);
+  const confirmedEntryAvailable = confirmation?.kind !== "selected" || history.some(entry => entry.id === confirmation.entry.id);
 
   async function confirmDeletion() {
-    if (!confirmation || (confirmation === "selected" && !earlier)) return;
+    if (!confirmation || !confirmedEntryAvailable) return;
     setError(null);
     const key = getGetRadiantAuditHistoryQueryKey();
     try {
-      if (confirmation === "all") {
+      if (confirmation.kind === "all") {
         await clearHistory.mutateAsync();
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, []);
         try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
         setSelectedId(null);
         setNotice(latest ? "Earlier Audit history cleared. Your latest Audit is still saved." : "Earlier Audit history cleared. You have no current Audit.");
-      } else if (earlier) {
-        const id = earlier.id;
+      } else {
+        const id = confirmation.entry.id;
         await deleteEntry.mutateAsync({ id });
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, entries => entries?.filter(entry => entry.id !== id));
         try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
@@ -114,7 +116,7 @@ export function RadiantAuditComparison({
     }
   }
 
-  if (!earlier) {
+  if (!history.length) {
     return (
       <div className="mt-8">
         <p className="text-sm text-muted-foreground">Retake your Audit to compare your answers over time.</p>
@@ -133,7 +135,7 @@ export function RadiantAuditComparison({
       <select
         id="earlier-audit"
         className="mt-2 w-full rounded-xl border border-border bg-background px-3 py-2 text-foreground sm:w-auto"
-        value={earlier.id}
+        value={earlier?.id ?? ""}
         onChange={event => {
           const id = Number(event.target.value);
           setSelectedId(id);
@@ -144,23 +146,25 @@ export function RadiantAuditComparison({
           }
         }}
       >
+        {staleSelection && <option value="" disabled>Choose an earlier Audit</option>}
         {history.map((entry, index) => (
           <option key={entry.id} value={entry.id}>
             {dateLabel(entry.completedAt)}{index === history.length - 1 ? " · First Audit" : ""}
           </option>
         ))}
       </select>
+      {staleSelection && <p className="mt-2 text-sm text-muted-foreground" role="status">That earlier Audit is no longer in your history. Choose another submission to continue.</p>}
       <div className="mt-4 flex flex-wrap gap-3">
-        <Button type="button" variant="outline" onClick={() => { setError(null); setConfirmation("selected"); }}>
+        <Button type="button" variant="outline" disabled={!earlier || deleting} onClick={() => { if (earlier) { setError(null); setConfirmation({ kind: "selected", entry: earlier }); } }}>
           Delete selected earlier Audit
         </Button>
-        <Button type="button" variant="outline" onClick={() => { setError(null); setConfirmation("all"); }}>
+        <Button type="button" variant="outline" onClick={() => { setError(null); setConfirmation({ kind: "all" }); }}>
           Clear earlier history
         </Button>
       </div>
       {notice && <p className="mt-3 text-sm" role="status">{notice}</p>}
       {error && <p className="mt-3 text-sm text-destructive" role="alert">{error}</p>}
-      <div className={`mt-5 grid gap-4 ${latest ? "sm:grid-cols-2" : ""}`}>
+      {earlier && <div className={`mt-5 grid gap-4 ${latest ? "sm:grid-cols-2" : ""}`}>
         <div className="min-w-0 rounded-2xl border border-border p-5">
           <h3 className="mb-5 font-serif text-xl">Earlier · {dateLabel(earlier.completedAt)}</h3>
           <Answers audit={earlier} />
@@ -171,25 +175,28 @@ export function RadiantAuditComparison({
             <Answers audit={latest} />
           </div>
         )}
-      </div>
+      </div>}
       <AlertDialog open={confirmation !== null} onOpenChange={open => { if (!open && !deleting) setConfirmation(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{confirmation === "all" ? "Clear all earlier Audits?" : "Delete this earlier Audit?"}</AlertDialogTitle>
+            <AlertDialogTitle>{confirmation?.kind === "all" ? "Clear all earlier Audits?" : "Delete this earlier Audit?"}</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmation === "all"
+              {confirmation?.kind === "all"
                 ? `All earlier submissions and their written reflections will be permanently deleted. ${latest ? "Your latest Audit will remain saved." : "You have no current Audit."}`
-                : `The earlier submission from ${dateLabel(earlier.completedAt)} and its written reflections will be permanently deleted. ${latest ? "Your latest Audit will remain saved." : "You have no current Audit."}`}
+                : confirmation?.kind === "selected"
+                  ? `The earlier submission from ${dateLabel(confirmation.entry.completedAt)} (ID ${confirmation.entry.id}) and its written reflections will be permanently deleted. ${latest ? "Your latest Audit will remain saved." : "You have no current Audit."}`
+                  : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {!confirmedEntryAvailable && <p className="text-sm text-destructive" role="alert">That submission is no longer in your history. Close this window and choose another submission.</p>}
           {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleting}
+              disabled={deleting || !confirmedEntryAvailable}
               onClick={event => { event.preventDefault(); void confirmDeletion(); }}
             >
-              {deleting ? "Deleting…" : confirmation === "all" ? "Clear earlier history" : "Delete earlier Audit"}
+              {deleting ? "Deleting…" : confirmation?.kind === "all" ? "Clear earlier history" : "Delete earlier Audit"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

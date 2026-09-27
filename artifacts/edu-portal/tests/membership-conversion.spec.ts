@@ -89,7 +89,7 @@ for (const kind of ["founding", "standard"] as const) {
     const events: Event[] = [];
     let checkoutRequests = 0;
     let membership: { kind: Kind; status: "pending" } | null = null;
-    const checkoutUrl = `https://checkout.stripe.test/session/${kind}`;
+    const checkoutUrl = `https://checkout.stripe.com/session/${kind}`;
 
     await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
       events.push(event);
@@ -116,7 +116,7 @@ for (const kind of ["founding", "standard"] as const) {
       membership = { kind, status: "pending" };
       await route.fulfill({ json: { url: checkoutUrl } });
     });
-    await page.route("https://checkout.stripe.test/**", route => route.fulfill({
+    await page.route("https://checkout.stripe.com/**", route => route.fulfill({
       contentType: "text/html",
       body: "<!doctype html><title>Stripe checkout test</title>",
     }));
