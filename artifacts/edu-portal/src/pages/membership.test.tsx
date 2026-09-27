@@ -1,15 +1,27 @@
 import { expect, test, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Router } from "wouter";
+import type { EffectCallback } from "react";
 
 const state = vi.hoisted(() => ({
   offer: { phase: "open", foundingAvailable: true },
   isLoading: false,
   isError: false,
+  membership: null as null | {
+    kind: "founding" | "standard";
+    status: "confirmed" | "forfeited";
+    cancellationDate: string | null;
+  },
+  effects: [] as Array<EffectCallback>,
+  invalidateQueries: vi.fn(),
 }));
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return { ...actual, useEffect: (effect: EffectCallback) => { state.effects.push(effect); } };
+});
 vi.mock("@workspace/api-client-react", () => ({
   useGetMembershipOffer: () => ({ data: state.offer, isLoading: state.isLoading, isError: state.isError }),
-  useGetMyMembership: () => ({ data: { membership: null } }),
+  useGetMyMembership: () => ({ data: { membership: state.membership }, isPending: false, isError: false }),
   useGetConfirmedMembershipCounts: () => ({ data: { founding: 0, standard: 0 } }),
   useCreateMembershipCheckout: () => ({ isPending: false }),
   useCreateMembershipPortal: () => ({ isPending: false }),
@@ -17,7 +29,7 @@ vi.mock("@workspace/api-client-react", () => ({
   getGetMyMembershipQueryKey: () => ["membership", "me"],
   getGetConfirmedMembershipCountsQueryKey: () => ["membership", "confirmed-counts"],
 }));
-vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: state.invalidateQueries }) }));
 vi.mock("@clerk/react", () => ({ useUser: () => ({ user: null }) }));
 vi.mock("@/components/layout", () => ({ AppLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 
@@ -33,6 +45,7 @@ function page(phase: string, available: boolean) {
 }
 
 test("founding enrollment is shown only while open and places remain", () => {
+  state.membership = null;
   const upcoming = page("upcoming", true);
   expect(upcoming).toContain("Enrollment opens October 1");
   expect(upcoming).not.toContain("Continue to secure checkout");
@@ -52,4 +65,46 @@ test("founding enrollment is shown only while open and places remain", () => {
   expect(closed).toContain("founding enrollment window has closed");
   expect(closed).not.toContain("Continue to secure checkout");
   expect(closed).toContain("Join at the standard rate");
+});
+
+test("billing return refreshes scheduled cancellation to resumed or ended wording", () => {
+  const date = "2030-06-15T12:00:00.000Z";
+  state.membership = { kind: "founding", status: "confirmed", cancellationDate: date };
+  state.effects.length = 0;
+  state.invalidateQueries.mockClear();
+
+  const scheduled = page("open", true);
+  expect(scheduled).toContain("membership is active until your scheduled cancellation.");
+  expect(scheduled).toContain("Your cancellation takes effect on");
+  expect(scheduled).toContain("2030");
+  expect(scheduled).toContain("You keep access until then.");
+
+  const addEventListener = vi.fn();
+  const removeEventListener = vi.fn();
+  vi.stubGlobal("window", { addEventListener, removeEventListener, location: { href: "https://example.test/membership" } });
+  try {
+    const cleanups = state.effects.map((effect) => effect());
+    expect(addEventListener).toHaveBeenCalledWith("pageshow", expect.any(Function));
+    const onPageShow = addEventListener.mock.calls.find(([event]) => event === "pageshow")?.[1];
+    onPageShow();
+    expect(state.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["membership", "me"] });
+    for (const cleanup of cleanups) cleanup?.();
+    expect(removeEventListener).toHaveBeenCalledWith("pageshow", onPageShow);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+
+  state.membership = { kind: "founding", status: "confirmed", cancellationDate: null };
+  const resumed = page("open", true);
+  expect(resumed).toContain("membership is active.");
+  expect(resumed).not.toContain("active until your scheduled cancellation");
+  expect(resumed).not.toContain("Your cancellation takes effect on");
+  expect(resumed).not.toContain("2030");
+  expect(resumed).not.toContain("You keep access until then.");
+
+  state.membership = { kind: "founding", status: "forfeited", cancellationDate: null };
+  const ended = page("open", true);
+  expect(ended).toContain("membership has ended.");
+  expect(ended).not.toContain("membership is active");
+  expect(ended).not.toContain("Your cancellation takes effect on");
 });
