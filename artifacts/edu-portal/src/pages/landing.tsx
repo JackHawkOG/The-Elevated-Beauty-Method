@@ -183,46 +183,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* Transformation Proof */}
-        <section className="py-24 px-6 md:px-12 lg:px-24 bg-card/50 border-y border-border/50">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <h2 className="font-serif text-4xl md:text-5xl font-bold mb-4">The Transformation</h2>
-              <p className="text-muted-foreground text-lg max-w-2xl mx-auto">Change on the outside unlocks change on the inside. Hear from women who stepped into their visibility.</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {[
-                {
-                  quote: "I used to hide behind the camera in Zoom meetings. The Elevated Method gave me the practical tools to show up confidently. Now, I lead with my camera on, every time.",
-                  author: "Sarah J.",
-                  role: "Executive Director"
-                },
-                {
-                  quote: "After my divorce, I didn't recognize myself in the mirror. This community wasn't just about makeup; it was about reclaiming my identity and learning to love who I saw.",
-                  author: "Elena M.",
-                  role: "Reclaiming Her Time"
-                },
-                {
-                  quote: "Building a personal brand felt overwhelming until I learned how to create a consistent, camera-ready look. The ROI on this investment paid for itself in my first launch.",
-                  author: "Jessica T.",
-                  role: "Founder & Coach"
-                }
-              ].map((testimonial, i) => (
-                <div key={i} className="bg-background border border-border p-8 rounded-2xl shadow-lg relative">
-                  <div className="absolute -top-4 -left-2 text-6xl text-primary/20 font-serif leading-none">"</div>
-                  <p className="text-muted-foreground leading-relaxed italic mb-6 relative z-10">
-                    {testimonial.quote}
-                  </p>
-                  <div className="border-t border-border/50 pt-4">
-                    <div className="font-serif font-bold text-foreground text-lg">{testimonial.author}</div>
-                    <div className="text-primary text-sm">{testimonial.role}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
         {/* Membership tiers */}
         <section className="py-24 px-6 md:px-12 lg:px-24">
           <div className="max-w-6xl mx-auto">
