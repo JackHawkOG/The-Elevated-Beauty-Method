@@ -51,8 +51,8 @@ async function assertRepair(repair: "migration" | "startup repair") {
     `);
     await client.query("SET search_path TO pg_temp, public");
     await client.query(`
-      INSERT INTO lessons (id, course_id, published_at) VALUES
-        (31, 7, '2022-01-01'), (41, 7, '2022-01-01'), (51, 8, '2022-01-01')
+      INSERT INTO lessons (id, course_id, published_at)
+      VALUES (31, 7, '2022-01-01'), (41, 7, '2022-01-01'), (51, 8, '2022-01-01')
     `);
     await client.query(`
       INSERT INTO enrollments (id, user_id, course_id, completed_lessons, last_lesson_id, enrolled_at)

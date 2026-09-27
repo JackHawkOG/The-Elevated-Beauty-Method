@@ -135,7 +135,7 @@ afterAll(async () => {
   }
 });
 
-test("failed activity insert rolls back enrollment; retry creates one enrollment and activity", async () => {
+test("failed activity insert rolls back enrollment; concurrent retries create one enrollment and activity", async () => {
   const failure = new Error("Injected enrollment activity failure");
   const transaction = db.transaction.bind(db);
   const transactionSpy = vi.spyOn(db, "transaction").mockImplementationOnce((callback, config) =>
@@ -165,13 +165,23 @@ test("failed activity insert rolls back enrollment; retry creates one enrollment
     transactionSpy.mockRestore();
   }
 
-  expect((await request(retryId, "/enrollments", "POST", { courseId })).status).toBe(201);
-  expect(await db.select().from(enrollmentsTable).where(and(
+  const retries = await Promise.all(
+    Array.from({ length: 16 }, () => request(retryId, "/enrollments", "POST", { courseId })),
+  );
+  expect(retries.map(result => result.status)).toEqual(Array(16).fill(201));
+  const ids = retries.map(result => (result.data as { id: number }).id);
+  expect(ids[0]).toEqual(expect.any(Number));
+  expect(new Set(ids).size).toBe(1);
+  const rows = await db.select().from(enrollmentsTable).where(and(
     eq(enrollmentsTable.userId, retryId), eq(enrollmentsTable.courseId, courseId),
-  ))).toHaveLength(1);
-  expect(await db.select().from(activityTable).where(and(
+  ));
+  expect(rows).toHaveLength(1);
+  expect(rows[0].id).toBe(ids[0]);
+  const activity = await db.select().from(activityTable).where(and(
     eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, retryActor),
-  ))).toHaveLength(1);
+  ));
+  expect(activity).toHaveLength(1);
+  expect(activity[0].type).toBe("enrollment");
 });
 
 test("simultaneous enrollment requests return one row and create one activity entry", async () => {
