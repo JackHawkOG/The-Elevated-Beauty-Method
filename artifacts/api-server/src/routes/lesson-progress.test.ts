@@ -27,6 +27,8 @@ const freeId = `test-free-${run}`;
 const concurrentId = `test-concurrent-${run}`;
 const retryId = `test-retry-${run}`;
 const retryActor = `Test Retry ${run}`;
+const blockedRetryId = `test-blocked-retry-${run}`;
+const blockedRetryActor = `Test Blocked Retry ${run}`;
 const courseTitle = `Accelerator progress test ${run}`;
 const requestError = vi.fn();
 let courseId: number;
@@ -96,6 +98,7 @@ beforeAll(async () => {
     { clerkId: freeId, displayName: "Test Free", email: `${freeId}@example.invalid`, membershipTier: "Free" },
     { clerkId: concurrentId, displayName: "Test Concurrent", email: `${concurrentId}@example.invalid`, membershipTier: "Elevated" },
     { clerkId: retryId, displayName: retryActor, email: `${retryId}@example.invalid`, membershipTier: "Elevated" },
+    { clerkId: blockedRetryId, displayName: blockedRetryActor, email: `${blockedRetryId}@example.invalid`, membershipTier: "Elevated" },
   ]);
 });
 
@@ -113,12 +116,14 @@ afterAll(async () => {
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Elevated")));
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Concurrent")));
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, retryActor)));
+      await db.delete(activityTable).where(and(eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, blockedRetryActor)));
     }
     if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, elevatedId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, freeId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, concurrentId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, retryId));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, blockedRetryId));
   } finally {
     await pool.end();
   }
@@ -174,6 +179,85 @@ test("failed activity insert rolls back enrollment; concurrent retries create on
   ));
   expect(activity).toHaveLength(1);
   expect(activity[0].type).toBe("enrollment");
+});
+
+test("retries waiting on an open enrollment recover after its activity write fails", async () => {
+  const failure = new Error("Injected delayed enrollment activity failure");
+  const transaction = db.transaction.bind(db);
+  let releaseFailure!: () => void;
+  const failureGate = new Promise<void>(resolve => { releaseFailure = resolve; });
+  let activityStarted!: () => void;
+  const activityReached = new Promise<void>(resolve => { activityStarted = resolve; });
+  let contendersStarted!: () => void;
+  const contendersReached = new Promise<void>(resolve => { contendersStarted = resolve; });
+  const contenderCount = 3;
+  let transactions = 0;
+  let waiting = 0;
+  const transactionSpy = vi.spyOn(db, "transaction").mockImplementation((callback, config) =>
+    transaction(async tx => {
+      if (transactions++ === 0) {
+        const insert = tx.insert.bind(tx);
+        vi.spyOn(tx, "insert").mockImplementation(((table: typeof activityTable) => {
+          if (table === activityTable) return {
+            values: async () => {
+              activityStarted();
+              await failureGate;
+              throw failure;
+            },
+          };
+          return insert(table);
+        }) as typeof tx.insert);
+      } else {
+        // The callback starts the insert before yielding; these requests then
+        // wait for the first transaction's uncommitted unique-index entry.
+        const pending = callback(tx);
+        if (++waiting === contenderCount) contendersStarted();
+        return pending;
+      }
+      return callback(tx);
+    }, config),
+  );
+
+  const requests: Array<Promise<Awaited<ReturnType<typeof request>>>> = [];
+  try {
+    const first = request(blockedRetryId, "/enrollments", "POST", { courseId });
+    requests.push(first);
+    await activityReached;
+    const contenders = Array.from({ length: contenderCount }, () =>
+      request(blockedRetryId, "/enrollments", "POST", { courseId }));
+    requests.push(...contenders);
+    await contendersReached;
+    // None can respond while the first insert is still uncommitted.
+    expect(await db.select().from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.userId, blockedRetryId), eq(enrollmentsTable.courseId, courseId),
+    ))).toHaveLength(0);
+    releaseFailure();
+
+    expect((await first).status).toBe(500);
+    expect(requestError).toHaveBeenCalledWith(
+      expect.objectContaining({ err: failure, courseId, enrollmentId: expect.any(Number) }),
+      "Enrollment activity write failed; rolling back enrollment",
+    );
+    const results = await Promise.all(contenders);
+    expect(results.map(result => result.status)).toEqual(Array(contenderCount).fill(201));
+    const ids = results.map(result => (result.data as { id: number }).id);
+    expect(new Set(ids).size).toBe(1);
+
+    const rows = await db.select().from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.userId, blockedRetryId), eq(enrollmentsTable.courseId, courseId),
+    ));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(ids[0]);
+    const activity = await db.select().from(activityTable).where(and(
+      eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, blockedRetryActor),
+    ));
+    expect(activity).toHaveLength(1);
+    expect(activity[0].type).toBe("enrollment");
+  } finally {
+    releaseFailure();
+    await Promise.allSettled(requests);
+    transactionSpy.mockRestore();
+  }
 });
 
 test("simultaneous enrollment requests return one row and create one activity entry", async () => {
