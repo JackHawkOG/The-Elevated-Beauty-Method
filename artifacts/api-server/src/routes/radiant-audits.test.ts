@@ -82,8 +82,8 @@ test("a committed save with a lost response can be retried without creating hist
   const answers = {
     routineChecks: ["skincare-consistency"],
     valuesChecks: ["quality-over-price"],
-    beautyTrend: "retry trend",
-    masteryGoal: "retry goal",
+    beautyTrend: "private trend",
+    masteryGoal: "private goal",
     researchTime: "one hour",
   };
   const firstId = randomUUID();
@@ -104,7 +104,7 @@ test("a committed save with a lost response can be retried without creating hist
   const secondAnswers = { ...answers, masteryGoal: "new goal" };
   const retake = await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount);
   expect(retake.data).toMatchObject({ completionKind: "retake", audit: secondAnswers });
-  const history = (await request("GET", undefined, retryAccount, "/history")).data;
+  const history = (await request("GET", undefined, retryAccount, "/history")).data as unknown as Array<Record<string, unknown>>;
   expect(history).toHaveLength(1);
   expect((await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount)).data).toEqual(retake.data);
   expect((await request("PUT", { ...answers, submissionId: firstId }, retryAccount)).data).toEqual(firstRetry.data);
@@ -135,9 +135,9 @@ test("first save and later retake are classified by persisted account history", 
   const answers = {
     routineChecks: ["skincare-consistency"],
     valuesChecks: ["quality-over-price"],
-    beautyTrend: "test trend",
-    masteryGoal: "test goal",
-    researchTime: "test time",
+    beautyTrend: "private trend",
+    masteryGoal: "private goal",
+    researchTime: "one hour",
   };
   const first = await request("PUT", answers);
   expect(first.status).toBe(200);
@@ -167,7 +167,7 @@ test("first save and later retake are classified by persisted account history", 
   expect(secondRetake.data).toHaveProperty("completionKind", "retake");
   const history = (await request("GET", undefined, account, "/history")).data as unknown as Array<Record<string, unknown>>;
   expect(history).toHaveLength(2);
-  expect(history.map(entry => entry.masteryGoal)).toEqual(["updated goal", "test goal"]);
+  expect(history.map(entry => entry.masteryGoal)).toEqual(["updated goal", "private goal"]);
   expect((await request("GET")).data).toHaveProperty("masteryGoal", "third goal");
 
   expect((await request("GET", undefined, otherAccount)).data).toBeNull();
@@ -190,7 +190,7 @@ test("first save and later retake are classified by persisted account history", 
   const finalHistory = (await request("GET", undefined, account, "/history")).data as unknown as Array<Record<string, unknown>>;
   expect(finalHistory).toHaveLength(4);
   expect(new Set([final.masteryGoal, ...finalHistory.map(entry => entry.masteryGoal)]))
-    .toEqual(new Set(["test goal", "updated goal", "third goal", "simultaneous A", "simultaneous B"]));
+    .toEqual(new Set(["private goal", "updated goal", "third goal", "simultaneous A", "simultaneous B"]));
 });
 
 test("members can remove earlier submissions without deleting the latest or another member's answers", async () => {
@@ -201,9 +201,12 @@ test("members can remove earlier submissions without deleting the latest or anot
     masteryGoal: "private goal",
     researchTime: "one hour",
   };
-  await request("PUT", answers, otherAccount);
-  const otherHistory = (await request("GET", undefined, otherAccount, "/history")).data as unknown as Array<{ id: number }>;
+  await request("PUT", { ...answers, masteryGoal: "other member's retake" }, otherAccount);
+  const otherHistory = (await request("GET", undefined, otherAccount, "/history")).data;
   expect(otherHistory).toHaveLength(1);
+  if (!Array.isArray(otherHistory) || typeof otherHistory[0]?.id !== "number") {
+    throw new Error("Expected an audit history entry with a numeric ID");
+  }
   const otherId = otherHistory[0].id;
 
   expect((await request("DELETE", undefined, account, `/history/${otherId}`)).status).toBe(404);
