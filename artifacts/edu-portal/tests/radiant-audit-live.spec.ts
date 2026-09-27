@@ -130,11 +130,11 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   const created: string[] = [];
   try {
     await setupClerkTestingToken({ page });
-    for (const account of accounts) {
-      const user = await client.users.createUser({
-        emailAddress: [account.email],
-        skipPasswordRequirement: true,
-      });
+    for (const email of [wrongEmail, stagedEmail]) {
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
       created.push(user.id);
     }
     await signIn(page, accounts[0].email);
@@ -180,10 +180,10 @@ test("a delayed Audit response from the previous member never appears after swit
 
   try {
     for (const account of [a, b]) {
-      const user = await client.users.createUser({
-        emailAddress: [account.email],
-        skipPasswordRequirement: true,
-      });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
       created.push(user.id);
     }
     await signIn(page, a.email);
@@ -256,10 +256,10 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   try {
     await setupClerkTestingToken({ page });
     for (const email of [wrongEmail, stagedEmail]) {
-      const user = await client.users.createUser({
-        emailAddress: [email],
-        skipPasswordRequirement: true,
-      });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
       created.push(user.id);
       expect(user.primaryEmailAddress?.verification.status).toBe("verified");
     }
@@ -405,15 +405,14 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
     await page.goto("/dashboard");
     await expect(dashboardAudit).toContainText("Begin with the scorecard and check-in worksheet");
     await expect(dashboardAudit.getByRole("link", { name: "Complete your Audit" })).toHaveAttribute("href", "/radiant-audit");
+    await expect(dashboardAudit).not.toContainText("Your reflection is saved.");
     await page.reload();
     await expect(dashboardAudit).toContainText("Begin with the scorecard and check-in worksheet");
     await expect(dashboardAudit.getByRole("link", { name: "Complete your Audit" })).toHaveAttribute("href", "/radiant-audit");
     expect(await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, userId))).toHaveLength(0);
     expect(await db.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, userId))).toHaveLength(2);
   } finally {
-    if (userId) {
-      await cleanUpAccounts(client, [userId]);
-    }
+    if (userId) await cleanUpAccounts(client, [userId]);
   }
 });
 

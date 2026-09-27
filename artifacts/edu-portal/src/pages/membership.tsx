@@ -40,6 +40,9 @@ export default function MembershipPage() {
     setError("");
     try {
       const result = await checkout.mutateAsync({ data: { kind } });
+      if (typeof result?.url !== "string" || !result.url.trim()) {
+        throw new Error("Checkout could not be started. Please try again.");
+      }
       trackMembershipCheckoutStarted(kind);
       window.location.assign(result.url);
     } catch (err) {
