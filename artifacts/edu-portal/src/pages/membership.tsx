@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
+import { useUser } from "@clerk/react";
 import { Link } from "wouter";
-import { useGetMembershipOffer, useGetMyMembership, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey } from "@workspace/api-client-react";
+import { useGetMembershipOffer, useGetMyMembership, useGetConfirmedMembershipCounts, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey, getGetConfirmedMembershipCountsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { trackConfirmedMembershipReturn, trackMembershipCheckoutStarted } from "@/lib/analytics";
 
 export default function MembershipPage() {
+  const { user } = useUser();
+  const isOwner = user?.publicMetadata.role === "owner" || user?.publicMetadata.role === "admin";
   const queryClient = useQueryClient();
+  const counts = useGetConfirmedMembershipCounts({ query: { queryKey: getGetConfirmedMembershipCountsQueryKey(), enabled: isOwner, staleTime: 30000, refetchInterval: 60000 } });
   const { data: offer, isLoading, isError } = useGetMembershipOffer({
     query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 15000, staleTime: 5000 },
   });
@@ -58,6 +62,15 @@ export default function MembershipPage() {
     <div className="mx-auto max-w-2xl space-y-6 py-10">
       <h1 className="font-serif text-4xl">The Elevated Method</h1>
       <p className="text-muted-foreground">Monthly membership is $48/month. During the October 1–7 founding window, $24/month is available only while one of the first 50 places can still be reserved at checkout.</p>
+      {isOwner && <section aria-label="Paid enrollment counts" className="rounded-2xl border border-border bg-card p-6">
+        <h2 className="font-serif text-2xl">Paid enrollments · owner view</h2>
+        <p className="mt-2 text-sm text-muted-foreground">Currently confirmed membership records, including buyers who never returned from Stripe checkout. Pending and forfeited memberships are not included.</p>
+        {counts.isPending ? <p className="mt-4">Loading confirmed counts…</p> : counts.isError ? <p role="alert" className="mt-4">Confirmed counts are unavailable right now.</p> : <div className="mt-4 grid grid-cols-2 gap-4">
+          <div><p className="text-sm text-muted-foreground">Founding</p><p className="text-3xl font-semibold">{counts.data.founding}</p></div>
+          <div><p className="text-sm text-muted-foreground">Standard</p><p className="text-3xl font-semibold">{counts.data.standard}</p></div>
+        </div>}
+        <p className="mt-4 text-sm text-muted-foreground">Compare these server-confirmed totals with the browser funnel events <code>membership_checkout_started</code> and <code>membership_enrollment_confirmed</code> in analytics. Checkout-start and confirmed-return event counts are not guaranteed to match these totals: a buyer can close the tab before returning, and browser tracking can be blocked. No member details are sent to analytics.</p>
+      </section>}
       {membershipError && <p role="alert" className="text-destructive">Your membership status could not be checked. Please try again later.</p>}
       {!membershipError && mine?.membership ? <div className="rounded-2xl border border-primary/40 bg-card p-6">
         {mine.membership.status === "confirmed" ? <>

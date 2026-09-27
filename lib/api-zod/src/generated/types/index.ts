@@ -17,6 +17,7 @@ export * from './beautyDiagnosticInputUndertone';
 export * from './beautyDiagnosticInputVisibilityGoal';
 export * from './beautyMethod';
 export * from './category';
+export * from './confirmedMembershipCounts';
 export * from './course';
 export * from './courseAccessTier';
 export * from './courseDetail';

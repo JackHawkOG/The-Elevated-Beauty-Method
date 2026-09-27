@@ -32,6 +32,21 @@ export const GetMyMembershipResponse = zod.object({
 
 
 /**
+ * @summary Owner-only counts of currently confirmed paid enrollments
+ */
+export const getConfirmedMembershipCountsResponseFoundingMin = 0;
+
+export const getConfirmedMembershipCountsResponseStandardMin = 0;
+
+
+
+export const GetConfirmedMembershipCountsResponse = zod.object({
+  "founding": zod.number().min(getConfirmedMembershipCountsResponseFoundingMin).describe('Whole count of confirmed founding members'),
+  "standard": zod.number().min(getConfirmedMembershipCountsResponseStandardMin).describe('Whole count of confirmed standard members')
+})
+
+
+/**
  * @summary Start a monthly membership checkout
  */
 export const CreateMembershipCheckoutBody = zod.object({

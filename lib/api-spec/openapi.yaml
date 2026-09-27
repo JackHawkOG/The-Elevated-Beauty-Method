@@ -51,6 +51,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MyMembership"
+  /membership/confirmed-counts:
+    get:
+      operationId: getConfirmedMembershipCounts
+      tags: [membership]
+      summary: Owner-only counts of currently confirmed paid enrollments
+      responses:
+        "200":
+          description: Confirmed founding and standard membership counts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfirmedMembershipCounts"
+        "401":
+          description: Sign-in required
+        "403":
+          description: Owner access required
   /membership/checkout:
     post:
       operationId: createMembershipCheckout
@@ -713,6 +729,12 @@ components:
         foundingAvailable: { type: boolean }
         foundingPrice: { type: number }
         standardPrice: { type: number }
+    ConfirmedMembershipCounts:
+      type: object
+      required: [founding, standard]
+      properties:
+        founding: { type: number, minimum: 0, description: Whole count of confirmed founding members }
+        standard: { type: number, minimum: 0, description: Whole count of confirmed standard members }
     MembershipCheckoutInput:
       type: object
       required: [kind]

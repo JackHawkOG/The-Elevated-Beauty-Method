@@ -26,6 +26,7 @@ import type {
   BeautyDiagnosticInput,
   BeautyMethod,
   Category,
+  ConfirmedMembershipCounts,
   Course,
   CourseDetail,
   CourseInput,
@@ -223,6 +224,83 @@ export function useGetMyMembership<TData = Awaited<ReturnType<typeof getMyMember
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMyMembershipQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetConfirmedMembershipCountsUrl = () => {
+
+
+
+
+  return `/api/membership/confirmed-counts`
+}
+
+/**
+ * @summary Owner-only counts of currently confirmed paid enrollments
+ */
+export const getConfirmedMembershipCounts = async ( options?: Parameters<typeof customFetch>[1]): Promise<ConfirmedMembershipCounts> => {
+
+  return customFetch<ConfirmedMembershipCounts>(getGetConfirmedMembershipCountsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConfirmedMembershipCountsQueryKey = () => {
+    return [
+    `/api/membership/confirmed-counts`
+    ] as const;
+    }
+
+
+export const getGetConfirmedMembershipCountsQueryOptions = <TData = Awaited<ReturnType<typeof getConfirmedMembershipCounts>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConfirmedMembershipCounts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConfirmedMembershipCountsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConfirmedMembershipCounts>>> = ({ signal }) => getConfirmedMembershipCounts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConfirmedMembershipCounts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetConfirmedMembershipCountsQueryResult = NonNullable<Awaited<ReturnType<typeof getConfirmedMembershipCounts>>>
+export type GetConfirmedMembershipCountsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Owner-only counts of currently confirmed paid enrollments
+ */
+
+export function useGetConfirmedMembershipCounts<TData = Awaited<ReturnType<typeof getConfirmedMembershipCounts>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getConfirmedMembershipCounts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetConfirmedMembershipCountsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

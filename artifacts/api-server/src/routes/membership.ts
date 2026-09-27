@@ -2,6 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { db, pool, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
+import { clerkClient } from "@clerk/express";
+import { GetConfirmedMembershipCountsResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
 import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "../lib/membership-reconciliation";
@@ -98,6 +100,28 @@ router.get("/membership/me", requireAuth, jitProvisionUser, async (req, res): Pr
   res.json(GetMyMembershipResponse.parse({
     membership: { kind: row.kind, status: row.status, cancellationDate: end === null ? null : new Date(end * 1000).toISOString() },
   }));
+});
+
+router.get("/membership/confirmed-counts", requireAuth, async (req, res): Promise<void> => {
+  let role: unknown;
+  try {
+    role = (await clerkClient.users.getUser(req.userId!)).publicMetadata.role;
+  } catch (error) {
+    req.log.error({ err: error }, "Could not verify membership counts access");
+    res.status(503).json({ error: "Unable to verify owner access" });
+    return;
+  }
+  if (role !== "owner" && role !== "admin") {
+    res.status(403).json({ error: "Owner access required" });
+    return;
+  }
+  const result = await pool.query<{ founding: number; standard: number }>(
+    `SELECT
+      COUNT(DISTINCT clerk_id) FILTER (WHERE kind = 'founding')::int AS founding,
+      COUNT(DISTINCT clerk_id) FILTER (WHERE kind = 'standard')::int AS standard
+     FROM membership_checkouts WHERE status = 'confirmed'`,
+  );
+  res.json(GetConfirmedMembershipCountsResponse.parse(result.rows[0]));
 });
 
 router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {

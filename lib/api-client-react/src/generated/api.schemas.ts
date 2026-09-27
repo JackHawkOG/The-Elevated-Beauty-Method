@@ -21,6 +21,19 @@ export interface MembershipOffer {
   standardPrice: number;
 }
 
+export interface ConfirmedMembershipCounts {
+  /**
+     * Whole count of confirmed founding members
+     * @minimum 0
+     */
+  founding: number;
+  /**
+     * Whole count of confirmed standard members
+     * @minimum 0
+     */
+  standard: number;
+}
+
 export type MembershipCheckoutInputKind = typeof MembershipCheckoutInputKind[keyof typeof MembershipCheckoutInputKind];
 
 
