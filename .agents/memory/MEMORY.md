@@ -3,3 +3,4 @@
 - [Audit browser test boundary](audit-browser-test-boundary.md) — the repeatable comparison browser test isolates auth/API; pair it with server isolation checks rather than treating it as live Clerk coverage.
 - [Clerk test tickets](clerk-test-tickets.md) — consumed sign-in tickets cannot be revoked; keep them short-lived and clean up disposable users.
 - [Audit checkbox browser interaction](audit-checkbox-browser-interaction.md) — live Playwright checks should click the visible label, not the visually hidden checkbox.
+- [Concurrent task merges](concurrent-task-merges.md) — a task completion check can see newly merged test code; reread the current worktree before addressing feedback.

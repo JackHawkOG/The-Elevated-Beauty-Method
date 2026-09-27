@@ -12,11 +12,14 @@ import {
 // mocked auth router. Run separately from the fast progress suite.
 test("Clerk members retain progress after reload; Free members cannot access it", async () => {
   if (process.env.NODE_ENV === "production" ||
+      process.env.REPLIT_DEPLOYMENT ||
       !process.env.CLERK_SECRET_KEY?.startsWith("sk_test_") ||
-      !process.env.REPLIT_DEV_DOMAIN) {
-    throw new Error("Browser progress check requires development Clerk keys and REPLIT_DEV_DOMAIN");
+      !process.env.REPLIT_DEV_DOMAIN ||
+      !process.env.DATABASE_URL) {
+    throw new Error("Browser progress check requires development Clerk keys, database, and REPLIT_DEV_DOMAIN; deployments are forbidden");
   }
-
+  // The local PG* variables identify the workspace development database.
+  // Check the URL used by the DB client before creating accounts or fixtures.
   const base = `https://${process.env.REPLIT_DEV_DOMAIN}`;
   const run = randomUUID();
   const identities: string[] = [];
@@ -177,3 +180,5 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     await pool.end();
   }
 }, 180_000);
+
+  const target = new URL(process.env.DATABASE_URL);

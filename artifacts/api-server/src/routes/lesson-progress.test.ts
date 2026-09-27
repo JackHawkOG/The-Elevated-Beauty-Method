@@ -29,6 +29,8 @@ let lessonIds: number[];
 let server: Server;
 let baseUrl: string;
 
+let fixturesStarted = false;
+
 async function request(user: string, path: string, method = "GET", body?: object) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
@@ -48,12 +50,20 @@ async function enrollment(user: string) {
 }
 
 beforeAll(async () => {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Progress integration tests must only run against a development database");
+  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT || !process.env.DATABASE_URL) {
+    throw new Error("Progress integration tests require a development database and cannot run in a deployment");
   }
+  // Replit supplies PG* and DATABASE_URL for the same development database.
+  // Reject a manually overridden DATABASE_URL before any schema changes or inserts.
+  const target = new URL(process.env.DATABASE_URL);
+  if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
+      target.hostname !== process.env.PGHOST ||
+      (target.port || "5432") !== process.env.PGPORT ||
+      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
+    throw new Error("Progress tests require the workspace development database URL");
+  }
+  fixturesStarted = true;
   await ensureEnrollmentSchema();
-  // Use the same routes and database as the app, but a private HTTP server and
-  // disposable fixtures. A new request reads from the DB, as after a reload.
   const { default: coursesRouter } = await import("./courses");
   const { default: enrollmentsRouter } = await import("./enrollments");
   const app = express();
@@ -89,21 +99,25 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-  // Remove only rows belonging to this run, even when an assertion failed.
-  if (courseId) {
-    await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, elevatedId));
-    await db.delete(enrollmentsTable).where(eq(enrollmentsTable.courseId, courseId));
-    await db.delete(lessonsTable).where(eq(lessonsTable.courseId, courseId));
-    await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
-    await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Elevated")));
-    await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Concurrent")));
+  try {
+    if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    // Remove only rows belonging to this run, even when setup or an assertion failed.
+    if (!fixturesStarted) return;
+    if (courseId) {
+      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, elevatedId));
+      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.courseId, courseId));
+      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, courseId));
+      await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
+      await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Elevated")));
+      await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Concurrent")));
+    }
+    if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, elevatedId));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, freeId));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, concurrentId));
+  } finally {
+    await pool.end();
   }
-  if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
-  await db.delete(usersTable).where(eq(usersTable.clerkId, elevatedId));
-  await db.delete(usersTable).where(eq(usersTable.clerkId, freeId));
-  await db.delete(usersTable).where(eq(usersTable.clerkId, concurrentId));
-  await pool.end();
 });
 
 test("simultaneous enrollment requests return one row and create one activity entry", async () => {
