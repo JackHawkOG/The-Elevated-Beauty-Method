@@ -39,6 +39,166 @@ async function submit(page: Page, tag: string) {
   await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
 }
 
+const stagedAnswers: Answers = {
+  routineChecks: ["skincare-consistency", "product-spending"],
+  valuesChecks: ["quality-over-price", "professional-results"],
+  beautyTrend: "my private trend",
+  masteryGoal: "my private goal",
+  researchTime: "my private research time",
+};
+const originalEmail = "original@example.invalid";
+const correctedEmail = "corrected@example.invalid";
+
+async function stageVisitorAnswers(page: Page) {
+  await page.goto("/tests/audit-harness.html");
+  await page.getByLabel("Skincare consistency").check();
+  await page.getByLabel("Product spending").check();
+  await page.getByLabel("Quality over price").check();
+  await page.getByLabel("Professional results").check();
+  await page.locator("#beauty-trend").fill(stagedAnswers.beautyTrend);
+  await page.locator("#mastery-goal").fill(stagedAnswers.masteryGoal);
+  await page.locator("#research-time").fill(stagedAnswers.researchTime);
+  await page.getByLabel("Email address").fill(originalEmail);
+  await page.getByRole("button", { name: "Continue to free account" }).click();
+  await expect.poll(() => page.evaluate(() =>
+    sessionStorage.getItem("tebm:radiant-audit:pending") !== null,
+  )).toBe(true);
+}
+
+async function stagedInBrowser(page: Page) {
+  return page.evaluate(() => JSON.parse(sessionStorage.getItem("tebm:radiant-audit:pending") || "null"));
+}
+
+test("a corrected verified email requires consent, retains every answer across reload and failed-save retry", async ({ page }) => {
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
+  let failWrites = true;
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    const request = route.request();
+    if (request.method() === "PUT") {
+      const answers = request.postDataJSON() as Answers;
+      writes.push({ account: request.headers().authorization, answers });
+      if (failWrites) return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+      return route.fulfill({
+        json: {
+          audit: { ...answers, routineScore: 2, valuesScore: 2, completedAt: "2026-09-02T12:00:00.000Z" },
+          completionKind: "first_time",
+        },
+      });
+    }
+    return route.fulfill({ json: request.url().endsWith("/history") ? [] : null });
+  });
+
+  await stageVisitorAnswers(page);
+  expect(await stagedInBrowser(page)).toEqual({ email: originalEmail, ...stagedAnswers });
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "corrected"));
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  await expect(page.getByText(originalEmail, { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Correct email and save my Audit" })).toBeDisabled();
+  expect(writes).toHaveLength(0);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  expect(await stagedInBrowser(page)).toEqual({ email: originalEmail, ...stagedAnswers });
+  expect(writes).toHaveLength(0);
+
+  await page.getByRole("checkbox", { name: /I confirm that these are my Audit answers/ }).check();
+  await page.getByRole("button", { name: "Correct email and save my Audit" }).click();
+  await expect(page.getByRole("button", { name: "Try saving again" })).toBeVisible();
+  expect(writes).toEqual([{ account: "Bearer corrected", answers: stagedAnswers }]);
+  expect(await stagedInBrowser(page)).toEqual({ email: correctedEmail, ...stagedAnswers });
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Try saving again" })).toBeVisible();
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toEqual({ account: "Bearer corrected", answers: stagedAnswers });
+  expect(await stagedInBrowser(page)).toEqual({ email: correctedEmail, ...stagedAnswers });
+
+  failWrites = false;
+  await page.getByRole("button", { name: "Try saving again" }).click();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  expect(writes).toHaveLength(3);
+  expect(writes[2]).toEqual({ account: "Bearer corrected", answers: stagedAnswers });
+  await expect(page.getByText(stagedAnswers.masteryGoal).first()).toBeVisible();
+  expect(await stagedInBrowser(page)).toBeNull();
+});
+
+test("an unverified account cannot save staged answers, even when its email matches", async ({ page }) => {
+  const writes: string[] = [];
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
+    return route.fulfill({ json: null });
+  });
+  await stageVisitorAnswers(page);
+  await page.evaluate(() => {
+    localStorage.setItem("audit-test-account", "original");
+    localStorage.setItem("audit-test-verified", "false");
+  });
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  await expect(page.getByText("Verify your account email before saving these answers")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Correct email and save my Audit" })).toHaveCount(0);
+  await page.reload();
+  expect(writes).toHaveLength(0);
+  expect(await stagedInBrowser(page)).toEqual({ email: originalEmail, ...stagedAnswers });
+});
+
+test("an unverified signed-in member cannot save directly from the Audit form", async ({ page }) => {
+  const writes: string[] = [];
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
+    return route.fulfill({ json: null });
+  });
+  await page.goto("/tests/audit-harness.html");
+  await page.evaluate(() => {
+    localStorage.setItem("audit-test-account", "original");
+    localStorage.setItem("audit-test-verified", "false");
+  });
+  await page.reload();
+  await page.getByLabel("Skincare consistency").check();
+  await page.getByLabel("Quality over price").check();
+  await page.locator("#beauty-trend").fill(stagedAnswers.beautyTrend);
+  await page.locator("#mastery-goal").fill(stagedAnswers.masteryGoal);
+  await page.locator("#research-time").fill(stagedAnswers.researchTime);
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Verify your account email before saving your Audit.");
+  expect(writes).toHaveLength(0);
+});
+
+test("signing out of the mismatched account preserves the staged answers for the original verified email", async ({ page }) => {
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    const request = route.request();
+    if (request.method() === "PUT") {
+      const answers = request.postDataJSON() as Answers;
+      writes.push({ account: request.headers().authorization, answers });
+      return route.fulfill({
+        json: {
+          audit: { ...answers, routineScore: 2, valuesScore: 2, completedAt: "2026-09-02T12:00:00.000Z" },
+          completionKind: "first_time",
+        },
+      });
+    }
+    return route.fulfill({ json: request.url().endsWith("/history") ? [] : null });
+  });
+  await stageVisitorAnswers(page);
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "corrected"));
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  await page.getByRole("button", { name: "Sign in with that email" }).click();
+  expect(await page.evaluate(() => ({
+    account: localStorage.getItem("audit-test-account"),
+    redirect: sessionStorage.getItem("audit-test-sign-out-redirect"),
+  }))).toEqual({ account: null, redirect: "/sign-in" });
+  expect(writes).toHaveLength(0);
+  expect(await stagedInBrowser(page)).toEqual({ email: originalEmail, ...stagedAnswers });
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "original"));
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  expect(writes).toEqual([{ account: "Bearer original", answers: stagedAnswers }]);
+  expect(await stagedInBrowser(page)).toBeNull();
+});
+
 test("signed-in member compares both earlier Audits after saving and reload, without another member or answers in tracking", async ({ page }) => {
   const latest = new Map<string, Audit>();
   const history = new Map<string, HistoryEntry[]>();

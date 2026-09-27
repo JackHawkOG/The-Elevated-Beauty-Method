@@ -39,6 +39,10 @@ export default function RadiantAuditPage() {
     setError(null);
     if (!isLoaded) return;
     if (isSignedIn) {
+      if (user?.primaryEmailAddress?.verification.status !== "verified") {
+        setError("Verify your account email before saving your Audit.");
+        return;
+      }
       if (!email || email.toLowerCase() !== audit.email.toLowerCase()) {
         setError(`You're signed in with ${email || "another account"}. Enter that email to save this Audit, or sign out first.`);
         return;
