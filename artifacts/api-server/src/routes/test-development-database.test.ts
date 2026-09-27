@@ -28,6 +28,7 @@ test.each([
   [{ DATABASE_URL: "postgresql://member@dev-db:5432/other" }, /development PG\* target/],
   [{ DATABASE_URL: "postgresql://other@dev-db:5432/memberdb" }, /development PG\* target/],
   [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?host=production-db" }, /development PG\* target/],
+  [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?hostaddr=192.0.2.1" }, /development PG\* target/],
   [{ PGHOST: undefined }, /development PG\* target/],
 ])("rejects unsafe database configuration before fixtures start", (change, error) => {
   expect(() => requireDevelopmentDatabase({ ...development, ...change })).toThrow(error);

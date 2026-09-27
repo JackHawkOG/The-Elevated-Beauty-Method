@@ -19,7 +19,7 @@ export function requireDevelopmentDatabase(env: NodeJS.ProcessEnv = process.env)
       decodeURIComponent(target.username) !== env.PGUSER ||
       // The pg parser accepts query parameters that override URL host/port/user.
       // Allow connection options such as sslmode, but never target overrides.
-      [...target.searchParams.keys()].some(key => ["host", "port", "user", "db", "database"].includes(key.toLowerCase()))) {
+      [...target.searchParams.keys()].some(key => ["host", "hostaddr", "port", "user", "db", "database"].includes(key.toLowerCase()))) {
     throw new Error("Integration tests require DATABASE_URL to match the workspace development PG* target");
   }
 }
