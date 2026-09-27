@@ -12,7 +12,7 @@ import {
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, CheckCircle, Circle, ChevronLeft, ChevronRight, Menu, Loader2 } from "lucide-react";
+import { ArrowLeft, CheckCircle, Circle, ChevronLeft, ChevronRight, Menu, Loader2, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -51,7 +51,7 @@ export default function LessonPage() {
     query: { queryKey: getGetCourseQueryKey(courseId), enabled: !!courseId } 
   });
   
-  const { data: lesson, isLoading } = useGetLesson(lessonId, {
+  const { data: lesson, isLoading, error } = useGetLesson(lessonId, {
     query: { queryKey: getGetLessonQueryKey(lessonId), enabled: !!lessonId }
   });
 
@@ -118,6 +118,21 @@ export default function LessonPage() {
           </main>
         </div>
       </div>
+    );
+  }
+
+  if (error?.status === 403) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-background px-6 text-foreground">
+        <div role="alert" className="max-w-md text-center">
+          <Lock aria-hidden="true" className="mx-auto mb-5 h-10 w-10 text-primary" />
+          <h1 className="font-serif text-3xl font-bold mb-4">Lesson access required</h1>
+          <p className="mb-8 text-muted-foreground">
+            This lesson is locked for your membership. Visit the course overview to see the access required.
+          </p>
+          <Button asChild><Link href={`/courses/${courseId}`}>Back to course</Link></Button>
+        </div>
+      </main>
     );
   }
 

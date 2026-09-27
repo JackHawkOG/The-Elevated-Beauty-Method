@@ -155,8 +155,12 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     expect((await api(free, "/enrollments", "POST", { courseId: course.id })).status).toBe(403);
     expect((await api(free, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: lessons[0].id })).status).toBe(403);
     await free.goto(`${base}/courses/${course.id}/lessons/${lessons[0].id}`);
+    await browserExpect(free.getByRole("heading", { name: "Lesson access required" })).toBeVisible();
+    await browserExpect(free.getByRole("link", { name: "Back to course" }))
+      .toHaveAttribute("href", `/courses/${course.id}`);
     await browserExpect(free.getByText(lessons[0].content!)).toHaveCount(0);
     await browserExpect(free.getByRole("button", { name: "Mark Complete" })).toHaveCount(0);
+    await browserExpect(free.getByRole("button", { name: /Finish Course|Complete & Continue|Return to Course/ })).toHaveCount(0);
     expect((await api(free, "/enrollments")).data).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ courseId: course.id })]),
     );
@@ -180,5 +184,3 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     await pool.end();
   }
 }, 180_000);
-
-  const target = new URL(process.env.DATABASE_URL);
