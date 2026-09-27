@@ -14,3 +14,9 @@ For lost-response POST checks, an intercepted form request can be mirrored from 
 **Why:** Playwright's `route.fetch()` replay of a Clerk-authenticated form request returned 401, while a signed-in browser fetch with the captured request data reached the real server.
 
 **How to apply:** Mark the browser-originated commit request so the route handler lets it pass; intercept only the intended first attempt, not the subsequent form retry. Assert the server committed before aborting, then check that the retry reused the key.
+
+For a late profile mutation, hold the return of the page's own `fetch` after the original response resolves. This allows the server to commit while the UI still awaits the response, without replaying a Clerk-authenticated request through Playwright's route fetch.
+
+**Why:** Replaying an authenticated write through `route.fetch()` can lose its Clerk session; delaying the request itself can also prevent the server-side save being tested.
+
+**How to apply:** Verify the server committed before switching identities in the same tab; release the held browser response only after the new member is active. Clerk's test sign-in may land on the dashboard, so reach the profile by an in-app link rather than reloading the document while the response is held.
