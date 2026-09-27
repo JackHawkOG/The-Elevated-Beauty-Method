@@ -1,15 +1,27 @@
-import { afterAll, beforeAll, expect, test, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 import type Stripe from "stripe";
 
-const { checkout, retrieveSubscription, queries } = vi.hoisted(() => ({
+const { checkout, otherCheckout, pendingCheckout, retrieveSubscription, queries } = vi.hoisted(() => ({
   checkout: {
     clerkId: "status-test-member",
     kind: "standard",
     status: "confirmed",
     stripeSubscriptionId: "sub_status_test",
     membershipTier: "Elevated",
+  },
+  otherCheckout: {
+    clerkId: "status-test-other-member",
+    kind: "founding",
+    status: "confirmed",
+    stripeSubscriptionId: "sub_status_other",
+  },
+  pendingCheckout: {
+    clerkId: "status-test-pending-member",
+    kind: "founding",
+    status: "pending",
+    stripeSubscriptionId: null,
   },
   retrieveSubscription: vi.fn(),
   queries: [] as string[],
@@ -56,8 +68,13 @@ vi.mock("@workspace/db", () => {
       query: async (sql: string, params?: unknown[]) => {
         queries.push(sql);
         if (!sql.includes("FROM membership_checkouts WHERE clerk_id = $1")) throw new Error(`Unexpected route query: ${sql}`);
-        expect(params).toEqual([checkout.clerkId]);
-        return { rows: [{ kind: checkout.kind, status: checkout.status, stripe_subscription_id: checkout.stripeSubscriptionId }] };
+        expect(params).toHaveLength(1);
+        const record = [checkout, otherCheckout, pendingCheckout].find(member => member.clerkId === params?.[0]);
+        return { rows: record ? [{
+          kind: record.kind,
+          status: record.status,
+          stripe_subscription_id: record.stripeSubscriptionId,
+        }] : [] };
       },
       connect: async () => client,
     },
@@ -91,6 +108,13 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+});
+
+beforeEach(() => {
+  checkout.status = "confirmed";
+  checkout.membershipTier = "Elevated";
+  retrieveSubscription.mockReset();
+  queries.length = 0;
 });
 
 test("authenticated membership status follows a scheduled cancellation, a portal resume, and an ended subscription", async () => {
@@ -151,4 +175,44 @@ test("authenticated membership status follows a scheduled cancellation, a portal
     body: { membership: { kind: "standard", status: "forfeited", cancellationDate: null } },
   });
   expect(retrieveSubscription).toHaveBeenCalledTimes(5);
+});
+
+test("membership status and cancellation date stay scoped to the signed-in member", async () => {
+  const stripeCalls = retrieveSubscription.mock.calls.length;
+  expect(await status()).toEqual({ code: 401, body: { error: "Unauthorized" } });
+  expect(retrieveSubscription).toHaveBeenCalledTimes(stripeCalls);
+
+  const scheduledEnd = Date.parse("2099-08-20T12:00:00Z") / 1000;
+  const otherEnd = Date.parse("2099-09-12T12:00:00Z") / 1000;
+  retrieveSubscription.mockImplementation(async (id: string) => {
+    const end = id === checkout.stripeSubscriptionId ? scheduledEnd
+      : id === otherCheckout.stripeSubscriptionId ? otherEnd : null;
+    if (end === null) throw new Error(`Unexpected subscription: ${id}`);
+    return {
+      id, status: "active", cancel_at: end, cancel_at_period_end: true,
+      items: { data: [{ current_period_end: end }] },
+    } as Stripe.Subscription;
+  });
+
+  expect(await status(checkout.clerkId)).toEqual({
+    code: 200,
+    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-08-20T12:00:00.000Z" } },
+  });
+  expect(await status(otherCheckout.clerkId)).toEqual({
+    code: 200,
+    body: { membership: { kind: "founding", status: "confirmed", cancellationDate: "2099-09-12T12:00:00.000Z" } },
+  });
+  expect(await status(pendingCheckout.clerkId)).toEqual({
+    code: 200,
+    body: { membership: { kind: "founding", status: "pending", cancellationDate: null } },
+  });
+  // Returning to the first account must still read its own checkout.
+  expect(await status(checkout.clerkId)).toEqual({
+    code: 200,
+    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-08-20T12:00:00.000Z" } },
+  });
+  expect(retrieveSubscription).toHaveBeenCalledTimes(stripeCalls + 3);
+  expect(retrieveSubscription.mock.calls.slice(stripeCalls).map(([id]) => id))
+    .toEqual([checkout.stripeSubscriptionId, otherCheckout.stripeSubscriptionId, checkout.stripeSubscriptionId]);
+  expect(retrieveSubscription).toHaveBeenLastCalledWith(checkout.stripeSubscriptionId);
 });
