@@ -7,6 +7,7 @@ import { ensurePublicationSchema } from "./lib/ensure-publication-schema";
 import { ensureRadiantAuditSchema } from "./lib/ensure-radiant-audit-schema";
 import { ensureMembershipSchema } from "./lib/ensure-membership-schema";
 import { getStripeSync } from "./lib/stripeClient";
+import { startMembershipReconciliation } from "./lib/membership-reconciliation";
 import { runMigrations } from "stripe-replit-sync";
 
 const rawPort = process.env["PORT"];
@@ -45,4 +46,5 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  startMembershipReconciliation();
 });

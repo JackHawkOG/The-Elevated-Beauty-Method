@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
+import { reconcileSubscription } from "../lib/membership-reconciliation";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
 
 const router = Router();
@@ -214,31 +215,13 @@ export async function handleMembershipWebhook(req: Request, res: Response): Prom
         }
       } else if (event.type === "checkout.session.expired" && object.object === "checkout.session") {
         await expireCheckout(client, object.id);
-      } else if (event.type === "customer.subscription.deleted" && object.object === "subscription") {
-        const result = await client.query<{ clerk_id: string }>(
-          "UPDATE membership_checkouts SET status = 'forfeited' WHERE stripe_subscription_id = $1 AND status = 'confirmed' RETURNING clerk_id",
-          [object.id],
-        );
-        if (result.rows[0]) await client.query("UPDATE users SET membership_tier = 'Free' WHERE clerk_id = $1", [result.rows[0].clerk_id]);
+      } else if (event.type.startsWith("customer.subscription.") && object.object === "subscription") {
+        await reconcileSubscription(client, object.id, await getUncachableStripeClient());
       } else if ((event.type === "invoice.payment_failed" || event.type === "invoice.payment_succeeded") && object.object === "invoice") {
         const invoice = object as Stripe.Invoice;
         const subscription = invoice.parent?.subscription_details?.subscription;
         const id = typeof subscription === "string" ? subscription : subscription?.id;
-        if (id) {
-          if (event.type === "invoice.payment_succeeded") {
-            await client.query("UPDATE membership_checkouts SET failed_months = 0, last_failed_invoice = NULL WHERE stripe_subscription_id = $1 AND status = 'confirmed'", [id]);
-          } else if (invoice.billing_reason === "subscription_cycle") {
-            const updated = await client.query<{ clerk_id: string; failed_months: number }>(
-              "UPDATE membership_checkouts SET failed_months = failed_months + 1, last_failed_invoice = $2 WHERE stripe_subscription_id = $1 AND kind = 'founding' AND status = 'confirmed' AND last_failed_invoice IS DISTINCT FROM $2 RETURNING clerk_id, failed_months",
-              [id, invoice.id],
-            );
-            if (updated.rows[0]?.failed_months >= 3) {
-              await (await getUncachableStripeClient()).subscriptions.cancel(id);
-              await client.query("UPDATE membership_checkouts SET status = 'forfeited' WHERE stripe_subscription_id = $1", [id]);
-              await client.query("UPDATE users SET membership_tier = 'Free' WHERE clerk_id = $1", [updated.rows[0].clerk_id]);
-            }
-          }
-        }
+        if (id) await reconcileSubscription(client, id, await getUncachableStripeClient());
       }
       await client.query("COMMIT");
     } catch (error) {
