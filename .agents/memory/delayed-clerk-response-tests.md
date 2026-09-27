@@ -3,8 +3,14 @@ name: Delayed Clerk response tests
 description: Testing late authenticated responses across same-tab account switches
 ---
 
-For account-switch race checks, use a response captured from the signed-in browser rather than a separate request context.
+For account-switch race checks, use a response captured from the signed-in browser rather than a separate request context. Hold and fulfill the matching route with that captured response after switching users.
 
-**Why:** A separate Playwright request context can receive a 401 for a Clerk-session request even when that request succeeds in the signed-in browser.
+**Why:** A separate Playwright request context or `route.fetch()` can receive a 401 for a Clerk-session request even when that request succeeds in the signed-in browser.
 
-**How to apply:** When simulating late authenticated responses, capture the first account's response in its own browser session; verify no first-account answers appear after switching identities.
+**How to apply:** Guard tests to development keys and database, capture the first account's response in its browser session, then release the held route after the second identity becomes active. A canceled former request is also safe; verify no first-account answers appear after switching identities.
+
+For lost-response POST checks, an intercepted form request can be mirrored from the signed-in page using its captured payload, authorization header, and idempotency key. Let that browser-originated request commit, then abort the intercepted form request so the UI sees a network failure.
+
+**Why:** Playwright's `route.fetch()` replay of a Clerk-authenticated form request returned 401, while a signed-in browser fetch with the captured request data reached the real server.
+
+**How to apply:** Mark the browser-originated commit request so the route handler lets it pass; intercept only the intended first attempt, not the subsequent form retry. Assert the server committed before aborting, then check that the retry reused the key.
