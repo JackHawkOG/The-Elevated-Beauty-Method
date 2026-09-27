@@ -129,6 +129,7 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   ];
   const created: string[] = [];
   try {
+    await setupClerkTestingToken({ page });
     for (const account of accounts) {
       const user = await client.users.createUser({
         emailAddress: [account.email],
@@ -371,6 +372,9 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
       response.request().method() === "DELETE" &&
       new URL(response.url()).pathname === "/api/users/me/radiant-audit",
     );
+
+    const [{ db, radiantAuditHistoryTable, radiantAuditsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
     await confirm.getByRole("button", { name: "Permanently delete current Audit" }).click();
     expect((await deleted).status()).toBe(204);
     expect(deletes).toBe(1);
@@ -404,6 +408,8 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
     await page.reload();
     await expect(dashboardAudit).toContainText("Begin with the scorecard and check-in worksheet");
     await expect(dashboardAudit.getByRole("link", { name: "Complete your Audit" })).toHaveAttribute("href", "/radiant-audit");
+    expect(await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, userId))).toHaveLength(0);
+    expect(await db.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, userId))).toHaveLength(2);
   } finally {
     if (userId) {
       await cleanUpAccounts(client, [userId]);

@@ -102,9 +102,9 @@ test("a committed save with a lost response can be retried without creating hist
 
   const secondId = randomUUID();
   const secondAnswers = { ...answers, masteryGoal: "new goal" };
-  const retake = await request("PUT", { ...answers, masteryGoal: "updated goal" });
+  const retake = await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount);
   expect(retake.data).toMatchObject({ completionKind: "retake", audit: secondAnswers });
-  const history = (await request("GET", undefined, account, "/history")).data as unknown as Array<Record<string, unknown>>;
+  const history = (await request("GET", undefined, retryAccount, "/history")).data as unknown as Array<Record<string, unknown>>;
   expect(history).toHaveLength(1);
   expect((await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount)).data).toEqual(retake.data);
   expect((await request("PUT", { ...answers, submissionId: firstId }, retryAccount)).data).toEqual(firstRetry.data);
