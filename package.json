@@ -16,6 +16,7 @@
     "test:membership-ui": "playwright test artifacts/edu-portal/tests/membership-conversion.spec.ts",
     "test:audit-live": "playwright test --config playwright.audit-live.config.ts",
     "test:community-live": "playwright test --config playwright.community-live.config.ts",
+    "test:member-stories-live": "playwright test --config playwright.member-stories-live.config.ts",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
