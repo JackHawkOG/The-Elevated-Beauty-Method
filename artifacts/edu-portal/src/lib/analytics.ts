@@ -17,3 +17,7 @@ export function trackEvent(name: string, data?: AnalyticsData): void {
     // Analytics must never interrupt the app.
   }
 }
+
+export function trackRadiantAuditSaved(completionKind: "first_time" | "retake"): void {
+  trackEvent("radiant_audit_saved", { completion_kind: completionKind });
+}

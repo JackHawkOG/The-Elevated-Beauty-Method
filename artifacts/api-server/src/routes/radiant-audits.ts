@@ -49,13 +49,23 @@ router.put("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req,
     masteryGoal: masteryGoal.trim(),
     researchTime: researchTime.trim(),
   };
-  const [saved] = await db.insert(radiantAuditsTable)
+  // Let the unique account key decide which save is first, even across concurrent requests.
+  const [inserted] = await db.insert(radiantAuditsTable)
     .values({ clerkId: req.userId!, ...answers })
-    .onConflictDoUpdate({
-      target: radiantAuditsTable.clerkId,
-      set: { ...answers, completedAt: new Date() },
-    }).returning();
-  res.json(SaveRadiantAuditResponse.parse(response(saved)));
+    .onConflictDoNothing({ target: radiantAuditsTable.clerkId })
+    .returning();
+  const saved = inserted ?? (await db.update(radiantAuditsTable)
+    .set({ ...answers, completedAt: new Date() })
+    .where(eq(radiantAuditsTable.clerkId, req.userId!))
+    .returning())[0];
+  if (!saved) {
+    res.status(503).json({ error: "We couldn't save your Audit. Please try again." });
+    return;
+  }
+  res.json(SaveRadiantAuditResponse.parse({
+    audit: response(saved),
+    completionKind: inserted ? "first_time" : "retake",
+  }));
 });
 
 export default router;

@@ -280,6 +280,19 @@ export type RadiantAudit = RadiantAuditInput & {
   completedAt: string;
 };
 
+export type RadiantAuditSaveResultCompletionKind = typeof RadiantAuditSaveResultCompletionKind[keyof typeof RadiantAuditSaveResultCompletionKind];
+
+
+export const RadiantAuditSaveResultCompletionKind = {
+  first_time: 'first_time',
+  retake: 'retake',
+} as const;
+
+export interface RadiantAuditSaveResult {
+  audit: RadiantAudit;
+  completionKind: RadiantAuditSaveResultCompletionKind;
+}
+
 export type BeautyDiagnosticInputSkinType = typeof BeautyDiagnosticInputSkinType[keyof typeof BeautyDiagnosticInputSkinType];
 
 

@@ -9,7 +9,7 @@ import {
   type RadiantAuditInput,
 } from "@workspace/api-client-react";
 import { RadiantAuditForm, type RadiantAuditSubmission } from "@/components/radiant-audit-form";
-import { trackEvent } from "@/lib/analytics";
+import { trackRadiantAuditSaved } from "@/lib/analytics";
 import { clearPendingAudit, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2 } from "lucide-react";
@@ -42,8 +42,8 @@ export default function RadiantAuditPage() {
       }
       try {
         const saved = await save.mutateAsync({ data: auditAnswers(audit) });
-        trackEvent("radiant_audit_saved", { flow: "signed_in" });
-        queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved);
+        trackRadiantAuditSaved(saved.completionKind);
+        queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
         navigate("/radiant-audit/complete");
       } catch {
         setError("We couldn't save your Audit. Your answers are still here; please try again.");
@@ -88,8 +88,8 @@ export function RadiantAuditCompletePage() {
     setError(null);
     try {
       const result = await save.mutateAsync({ data: auditAnswers(audit) });
-      trackEvent("radiant_audit_saved", { flow: "account_verification" });
-      queryClient.setQueryData(getGetRadiantAuditQueryKey(), result);
+      trackRadiantAuditSaved(result.completionKind);
+      queryClient.setQueryData(getGetRadiantAuditQueryKey(), result.audit);
       clearPendingAudit();
       setPending(null);
     } catch {

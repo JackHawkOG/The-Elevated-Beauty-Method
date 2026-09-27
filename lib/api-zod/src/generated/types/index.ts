@@ -44,6 +44,8 @@ export * from './radiantAudit';
 export * from './radiantAuditInput';
 export * from './radiantAuditInputRoutineChecksItem';
 export * from './radiantAuditInputValuesChecksItem';
+export * from './radiantAuditSaveResult';
+export * from './radiantAuditSaveResultCompletionKind';
 export * from './userProfile';
 export * from './userProfileMembershipTier';
 export * from './userProfileUpdate';

@@ -44,6 +44,7 @@ import type {
   ProgressUpdate,
   RadiantAudit,
   RadiantAuditInput,
+  RadiantAuditSaveResult,
   UserProfile,
   UserProfileUpdate
 } from './api.schemas';
@@ -1965,9 +1966,9 @@ export const getSaveRadiantAuditUrl = () => {
 /**
  * @summary Submit or update the signed-in member's Radiant Audit
  */
-export const saveRadiantAudit = async (radiantAuditInput: RadiantAuditInput, options?: Parameters<typeof customFetch>[1]): Promise<RadiantAudit> => {
+export const saveRadiantAudit = async (radiantAuditInput: RadiantAuditInput, options?: Parameters<typeof customFetch>[1]): Promise<RadiantAuditSaveResult> => {
 
-  return customFetch<RadiantAudit>(getSaveRadiantAuditUrl(),
+  return customFetch<RadiantAuditSaveResult>(getSaveRadiantAuditUrl(),
   {
     ...options,
     method: 'PUT',

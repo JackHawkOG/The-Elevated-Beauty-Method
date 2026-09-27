@@ -535,11 +535,11 @@ paths:
               $ref: "#/components/schemas/RadiantAuditInput"
       responses:
         "200":
-          description: Saved audit and section scores
+          description: Saved audit and whether this was the account's first save or a retake
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RadiantAudit"
+                $ref: "#/components/schemas/RadiantAuditSaveResult"
         "400":
           description: Invalid audit answers
         "401":
@@ -940,6 +940,16 @@ components:
             completedAt:
               type: string
               format: date-time
+
+    RadiantAuditSaveResult:
+      type: object
+      required: [audit, completionKind]
+      properties:
+        audit:
+          $ref: "#/components/schemas/RadiantAudit"
+        completionKind:
+          type: string
+          enum: [first_time, retake]
 
     BeautyDiagnosticInput:
       type: object

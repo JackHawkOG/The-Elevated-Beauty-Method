@@ -652,29 +652,32 @@ export const SaveRadiantAuditBody = zod.object({
   "researchTime": zod.string().min(1).max(saveRadiantAuditBodyResearchTimeMax)
 })
 
-export const saveRadiantAuditResponseOneRoutineChecksMax = 5;
+export const saveRadiantAuditResponseAuditOneRoutineChecksMax = 5;
 
-export const saveRadiantAuditResponseOneValuesChecksMax = 5;
+export const saveRadiantAuditResponseAuditOneValuesChecksMax = 5;
 
-export const saveRadiantAuditResponseOneBeautyTrendMax = 1000;
+export const saveRadiantAuditResponseAuditOneBeautyTrendMax = 1000;
 
-export const saveRadiantAuditResponseOneMasteryGoalMax = 1000;
+export const saveRadiantAuditResponseAuditOneMasteryGoalMax = 1000;
 
-export const saveRadiantAuditResponseOneResearchTimeMax = 1000;
+export const saveRadiantAuditResponseAuditOneResearchTimeMax = 1000;
 
 
 
 export const SaveRadiantAuditResponse = zod.object({
-  "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditResponseOneRoutineChecksMax),
-  "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditResponseOneValuesChecksMax),
-  "beautyTrend": zod.string().min(1).max(saveRadiantAuditResponseOneBeautyTrendMax),
-  "masteryGoal": zod.string().min(1).max(saveRadiantAuditResponseOneMasteryGoalMax),
-  "researchTime": zod.string().min(1).max(saveRadiantAuditResponseOneResearchTimeMax)
+  "audit": zod.object({
+  "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditResponseAuditOneRoutineChecksMax),
+  "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditResponseAuditOneValuesChecksMax),
+  "beautyTrend": zod.string().min(1).max(saveRadiantAuditResponseAuditOneBeautyTrendMax),
+  "masteryGoal": zod.string().min(1).max(saveRadiantAuditResponseAuditOneMasteryGoalMax),
+  "researchTime": zod.string().min(1).max(saveRadiantAuditResponseAuditOneResearchTimeMax)
 }).and(zod.object({
   "routineScore": zod.number(),
   "valuesScore": zod.number(),
   "completedAt": zod.coerce.date()
-}))
+})),
+  "completionKind": zod.enum(['first_time', 'retake'])
+})
 
 
 /**
