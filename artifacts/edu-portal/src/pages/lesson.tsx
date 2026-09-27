@@ -51,7 +51,7 @@ export default function LessonPage() {
     query: { queryKey: getGetCourseQueryKey(courseId), enabled: !!courseId } 
   });
   
-  const { data: lesson, isLoading, error } = useGetLesson(lessonId, {
+  const { data: lesson, isLoading, isFetching, error, refetch } = useGetLesson(lessonId, {
     query: { queryKey: getGetLessonQueryKey(lessonId), enabled: !!lessonId }
   });
 
@@ -131,6 +131,25 @@ export default function LessonPage() {
             This lesson is locked for your membership. Visit the course overview to see the access required.
           </p>
           <Button asChild><Link href={`/courses/${courseId}`}>Back to course</Link></Button>
+        </div>
+      </main>
+    );
+  }
+
+  if (error && error.status !== 404) {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-background px-6 text-foreground">
+        <div role="alert" data-testid="status-lesson-load-error" className="max-w-md text-center">
+          <h1 className="font-serif text-3xl font-bold mb-4">Lesson could not be loaded</h1>
+          <p className="mb-8 text-muted-foreground">
+            This may be temporary. Try loading the lesson again.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button data-testid="button-retry-lesson" onClick={() => { void refetch(); }} disabled={isFetching}>
+              {isFetching ? "Trying again..." : "Try again"}
+            </Button>
+            <Button asChild variant="outline"><Link href={`/courses/${courseId}`}>Back to course</Link></Button>
+          </div>
         </div>
       </main>
     );
