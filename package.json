@@ -7,6 +7,7 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "check": "pnpm run typecheck && pnpm run test:progress",
     "test:progress": "vitest run artifacts/api-server/src/routes/lesson-progress.test.ts artifacts/edu-portal/src/components/accelerator-dashboard.test.tsx artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
+    "test:progress:browser": "vitest run artifacts/api-server/src/routes/member-progress.browser.test.ts --maxWorkers=1",
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
     "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",
     "typecheck:libs": "tsc --build",
@@ -19,6 +20,7 @@
     "jspdf": "^4.2.1"
   },
   "devDependencies": {
+    "playwright": "^1.63.0",
     "prettier": "^3.9.6",
     "typescript": "~5.9.3",
     "vitest": "^5.0.2"
