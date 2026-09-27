@@ -18,6 +18,7 @@ export default function LandingPage() {
         >
           <span className="relative mx-auto block w-full">
             <img src={masterLogo} alt="The Elevated Beauty Method ™" className="block h-auto w-full object-contain" />
+            <img src={masterLogo} alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ clipPath: "inset(76% 0 12% 0)", filter: "brightness(2.2)" }} />
             <span aria-hidden="true" className="absolute bottom-[17%] right-[5.5%] translate-y-1/2 text-[clamp(5px,0.9vw,12px)] leading-none text-[#c9a478]/80">™</span>
           </span>
         </Link>
@@ -309,6 +310,7 @@ export default function LandingPage() {
         <div className="flex items-center text-muted-foreground">
           <span className="relative block w-[min(82vw,360px)]">
             <img src={masterLogo} alt="The Elevated Beauty Method ™" className="block h-auto w-full object-contain" />
+            <img src={masterLogo} alt="" aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full object-contain" style={{ clipPath: "inset(76% 0 12% 0)", filter: "brightness(2.2)" }} />
             <span aria-hidden="true" className="absolute bottom-[17%] right-[5.5%] translate-y-1/2 text-[clamp(5px,0.9vw,12px)] leading-none text-[#c9a478]/80">™</span>
           </span>
         </div>
