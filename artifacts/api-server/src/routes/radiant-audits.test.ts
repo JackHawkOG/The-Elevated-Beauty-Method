@@ -102,9 +102,9 @@ test("a committed save with a lost response can be retried without creating hist
 
   const secondId = randomUUID();
   const secondAnswers = { ...answers, masteryGoal: "new goal" };
-  const retake = await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount);
+  const retake = await request("PUT", { ...answers, masteryGoal: "updated goal" });
   expect(retake.data).toMatchObject({ completionKind: "retake", audit: secondAnswers });
-  const history = (await request("GET", undefined, retryAccount, "/history")).data as unknown as Array<Record<string, unknown>>;
+  const history = (await request("GET", undefined, account, "/history")).data as unknown as Array<Record<string, unknown>>;
   expect(history).toHaveLength(1);
   expect((await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount)).data).toEqual(retake.data);
   expect((await request("PUT", { ...answers, submissionId: firstId }, retryAccount)).data).toEqual(firstRetry.data);
@@ -207,7 +207,7 @@ test("members can remove earlier submissions without deleting the latest or anot
   if (!Array.isArray(otherHistory) || typeof otherHistory[0]?.id !== "number") {
     throw new Error("Expected an audit history entry with a numeric ID");
   }
-  const otherId = otherHistory[0].id;
+  const otherId = (otherHistory as unknown as Array<{ id: number }>)[0].id;
 
   expect((await request("DELETE", undefined, account, `/history/${otherId}`)).status).toBe(404);
   expect((await request("GET", undefined, otherAccount, "/history")).data).toHaveLength(1);

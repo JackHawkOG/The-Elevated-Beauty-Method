@@ -26,6 +26,14 @@ const retrieveSession = vi.fn(async (id: string) => {
   if (!session) throw new Error(`Unknown test session: ${id}`);
   return session;
 });
+const expireSession = vi.fn(async (id: string) => {
+  const session = sessions.get(id);
+  if (!session) throw new Error(`Unknown test session: ${id}`);
+  if (session.status !== "open") throw new Error(`Session is not open: ${id}`);
+  session.status = "expired";
+  session.url = "";
+  return session;
+});
 const processWebhook = vi.fn(async () => {});
 const invoiceHistory: Array<{ id: string; created: number; status: string; attempt_count: number; billing_reason: string }> = [];
 let subscriptionStatus = "active";
@@ -40,7 +48,7 @@ vi.mock("../lib/stripeClient", () => ({
       { id: "price_standard_test", unit_amount: 4800, currency: "usd", recurring: { interval: "month" } },
     ] }) },
     customers: { create: async () => ({ id: `cus_${randomUUID()}` }) },
-    checkout: { sessions: { create: createSession, retrieve: retrieveSession } },
+    checkout: { sessions: { create: createSession, retrieve: retrieveSession, expire: expireSession } },
     invoices: { list: async () => ({ data: [...invoiceHistory].sort((a, b) => b.created - a.created), has_more: false }) },
     subscriptions: {
       retrieve: async (id: string) => ({
@@ -165,6 +173,42 @@ test("opening is inclusive and closing is exclusive for the offer and founding c
   clock(closes);
   expect((await request("/membership/offer")).data.phase).toBe("closed");
   expect((await request("/membership/checkout", "POST", buyer, { kind: "founding" })).status).toBe(409);
+  vi.restoreAllMocks();
+});
+
+test("a database failure after Stripe session creation expires the untracked checkout", async () => {
+  clock(opens);
+  const buyer = await addUser(200);
+  const originalConnect = pool.connect.bind(pool);
+  let restoreQuery: (() => void) | undefined;
+  const connectSpy = vi.spyOn(pool, "connect").mockImplementationOnce(async () => {
+    const client = await originalConnect();
+    const originalQuery = client.query.bind(client);
+    const querySpy = vi.spyOn(client, "query").mockImplementation(((...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("UPDATE membership_checkouts SET stripe_session_id")) {
+        return Promise.reject(new Error("Simulated reservation update failure"));
+      }
+      return (originalQuery as (...queryArgs: unknown[]) => unknown)(...args);
+    }) as typeof client.query);
+    restoreQuery = () => querySpy.mockRestore();
+    return client;
+  });
+  const creationsBefore = createSession.mock.results.length;
+  let response: Awaited<ReturnType<typeof request>>;
+  try {
+    response = await request("/membership/checkout", "POST", buyer, { kind: "standard" });
+  } finally {
+    connectSpy.mockRestore();
+    restoreQuery?.();
+  }
+  expect(response.status).toBe(503);
+  expect(response.data.url).toBeUndefined();
+  const session = await createSession.mock.results[creationsBefore].value;
+  expect(expireSession).toHaveBeenCalledWith(session.id);
+  expect(sessions.get(session.id)).toMatchObject({ status: "expired", url: "" });
+  expect(await row(buyer)).toBeUndefined();
+  // Even if the URL were obtained separately, Stripe's expired session cannot accept payment.
+  expect(sessions.get(session.id)?.status).not.toBe("open");
   vi.restoreAllMocks();
 });
 

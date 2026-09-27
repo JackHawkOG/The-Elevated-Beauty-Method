@@ -135,6 +135,8 @@ router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, r
     return;
   }
   const client = await pool.connect();
+  let createdSessionId: string | undefined;
+  let checkoutStripe: Stripe | undefined;
   try {
     await reconcileStaleReservations();
     await client.query("BEGIN");
@@ -170,6 +172,7 @@ router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, r
     const [user] = await db.select().from(usersTable).where(eq(usersTable.clerkId, req.userId!)).limit(1);
     if (!user) throw new Error("Account not found");
     const stripe = await getUncachableStripeClient();
+    checkoutStripe = stripe;
     const key = kind === "founding" ? "founding_2026" : "standard_2026";
     const prices = await stripe.prices.list({ lookup_keys: [key], active: true, limit: 10 });
     const expected = kind === "founding" ? 2400 : 4800;
@@ -195,12 +198,24 @@ router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, r
       success_url: `${base}/membership?checkout=success`,
       cancel_url: `${base}/membership?checkout=cancel`,
     }, { idempotencyKey: `membership-${reservation.rows[0].id}` });
+    createdSessionId = session.id;
     if (!session.url) throw new Error("Stripe did not return a checkout URL");
     await client.query("UPDATE membership_checkouts SET stripe_session_id = $1 WHERE id = $2", [session.id, reservation.rows[0].id]);
     await client.query("COMMIT");
     res.json({ url: session.url });
   } catch (error) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      req.log.error({ err: rollbackError }, "Could not roll back membership checkout");
+    }
+    if (createdSessionId && checkoutStripe) {
+      try {
+        await checkoutStripe.checkout.sessions.expire(createdSessionId);
+      } catch (expirationError) {
+        req.log.error({ err: expirationError, stripeSessionId: createdSessionId }, "Could not expire checkout after reservation failure");
+      }
+    }
     req.log.error({ err: error }, "Could not create membership checkout");
     res.status(503).json({ error: "Checkout is unavailable right now. Please try again." });
   } finally {
