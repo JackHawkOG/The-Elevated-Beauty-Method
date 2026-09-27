@@ -8,6 +8,7 @@ import {
   lessonCompletionsTable, lessonsTable, usersTable,
 } from "@workspace/db";
 import { ensureEnrollmentSchema } from "../lib/ensure-enrollment-schema";
+import { approvedTopicLessons } from "../lib/approved-topic-lessons";
 
 // Only this isolated test router trusts the test identity header. The real
 // application and its Clerk middleware are never started by this suite.
@@ -255,6 +256,60 @@ test("resume never exposes a missing, unpublished, or other-course lesson", asyn
       await db.delete(coursesTable).where(eq(coursesTable.id, otherCourseId));
     }
     await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Resume Test")));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
+  }
+});
+
+test("standalone course resume hides published lessons that no longer match reviewed copy", async () => {
+  const userId = `test-reviewed-resume-${run}`;
+  const approved = approvedTopicLessons[0];
+  let reviewedCourseId: number | undefined;
+  try {
+    await db.insert(usersTable).values({
+      clerkId: userId, displayName: "Reviewed Resume Test",
+      email: `${userId}@example.invalid`, membershipTier: "Elevated",
+    });
+    const [course] = await db.insert(coursesTable).values({
+      title: approved.title, description: "Reviewed resume fixture", categoryId,
+      instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+    }).returning();
+    reviewedCourseId = course.id;
+    const [visible, hidden] = await db.insert(lessonsTable).values([
+      { courseId: course.id, title: approved.title, content: approved.content, sortOrder: 1, publishedAt: new Date() },
+      { courseId: course.id, title: approved.title, content: "Unreviewed copy", sortOrder: 1, publishedAt: new Date() },
+    ]).returning();
+    const listing = await request(userId, `/courses/${course.id}/lessons`);
+    expect(listing.status).toBe(200);
+    expect((listing.data as Array<{ id: number }>).map(lesson => lesson.id)).toEqual([visible.id]);
+    expect((await request(userId, `/lessons/${hidden.id}`)).status).toBe(404);
+
+    const initial = await request(userId, "/enrollments", "POST", { courseId: course.id });
+    expect(initial.status).toBe(201);
+    await db.update(enrollmentsTable).set({ lastLessonId: hidden.id })
+      .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id)));
+    const listed = await request(userId, "/enrollments");
+    expect(listed.status).toBe(200);
+    expect((listed.data as Array<{ courseId: number; lastLessonId: number | null }>)
+      .find(row => row.courseId === course.id)?.lastLessonId).toBeNull();
+    expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
+      .toMatchObject({ lastLessonId: null });
+
+    await db.update(enrollmentsTable).set({ lastLessonId: visible.id })
+      .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id)));
+    const resumed = await request(userId, "/enrollments");
+    expect((resumed.data as Array<{ courseId: number; lastLessonId: number | null }>)
+      .find(row => row.courseId === course.id)?.lastLessonId).toBe(visible.id);
+    expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
+      .toMatchObject({ lastLessonId: visible.id });
+  } finally {
+    if (reviewedCourseId) {
+      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.courseId, reviewedCourseId));
+      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, reviewedCourseId));
+      await db.delete(coursesTable).where(eq(coursesTable.id, reviewedCourseId));
+    }
+    await db.delete(activityTable).where(and(
+      eq(activityTable.entityTitle, approved.title), eq(activityTable.actorName, "Reviewed Resume Test"),
+    ));
     await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
   }
 });

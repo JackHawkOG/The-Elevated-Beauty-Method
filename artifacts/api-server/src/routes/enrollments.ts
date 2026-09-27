@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, enrollmentsTable, coursesTable, lessonsTable, lessonCompletionsTable, activityTable, usersTable } from "@workspace/db";
-import { eq, and, sql, isNotNull } from "drizzle-orm";
+import { eq, and, sql, isNotNull, inArray } from "drizzle-orm";
 import {
   ListEnrollmentsResponse,
   EnrollInCourseBody,
@@ -14,6 +14,24 @@ import { canAccessTier } from "../lib/beauty-method";
 import { isApprovedStandaloneCourse, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
 
 const router = Router();
+
+// Enrollment pointers are stored even if editorial review later hides the lesson.
+// Check them against the same ordered, published set used by the lesson listings.
+async function visibleResumeRows<T extends { courseId: number; courseTitle: string | null; lastLessonId: number | null }>(rows: T[]): Promise<T[]> {
+  const approvedRows = rows.filter(row => row.lastLessonId != null && row.courseTitle != null && isApprovedStandaloneCourse(row.courseTitle));
+  if (!approvedRows.length) return rows;
+
+  const lessons = await db.select().from(lessonsTable)
+    .where(and(inArray(lessonsTable.courseId, [...new Set(approvedRows.map(row => row.courseId))]), isNotNull(lessonsTable.publishedAt)))
+    .orderBy(lessonsTable.sortOrder);
+  const visibleByCourse = new Map(approvedRows.map(row => [
+    row.courseId,
+    publishedLessonsForCourse(row.courseTitle!, lessons.filter(lesson => lesson.courseId === row.courseId))[0]?.id,
+  ]));
+  return rows.map(row => visibleByCourse.has(row.courseId) && visibleByCourse.get(row.courseId) !== row.lastLessonId
+    ? { ...row, lastLessonId: null }
+    : row);
+}
 
 // GET /enrollments
 router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
@@ -39,7 +57,8 @@ router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(coursesTable, eq(enrollmentsTable.courseId, coursesTable.id))
     .where(and(eq(enrollmentsTable.userId, userId), isNotNull(coursesTable.publishedAt)));
 
-  res.json(ListEnrollmentsResponse.parse(rows.map(r => ({ ...r, enrolledAt: r.enrolledAt?.toISOString() }))));
+  const visibleRows = await visibleResumeRows(rows);
+  res.json(ListEnrollmentsResponse.parse(visibleRows.map(r => ({ ...r, enrolledAt: r.enrolledAt?.toISOString() }))));
 });
 
 // POST /enrollments
@@ -97,10 +116,13 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     .where(and(eq(lessonsTable.id, enrollment.lastLessonId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
     .limit(1);
 
-  res.status(201).json(EnrollInCourseResponse.parse({
+  const [visibleEnrollment] = await visibleResumeRows([{
     ...enrollment,
     lastLessonId: availableLesson?.id ?? null,
     courseTitle: course.title,
+  }]);
+  res.status(201).json(EnrollInCourseResponse.parse({
+    ...visibleEnrollment,
     totalLessons: totalRow?.count ?? 0,
     enrolledAt: enrollment.enrolledAt?.toISOString(),
   }));
