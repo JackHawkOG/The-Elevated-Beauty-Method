@@ -17,6 +17,9 @@ export function useUser() {
 
 export function useClerk() {
   return {
+    openUserProfile: () => {
+      window.sessionStorage.setItem("audit-test-profile-opened", "true");
+    },
     signOut: async ({ redirectUrl }: { redirectUrl: string }) => {
       window.localStorage.removeItem("audit-test-account");
       window.sessionStorage.setItem("audit-test-sign-out-redirect", redirectUrl);

@@ -88,20 +88,22 @@ async function stagedInBrowser(page: Page) {
 test("a corrected verified email requires consent, retains every answer across reload and failed-save retry", async ({ page }) => {
   const writes: Array<{ account: string | undefined; answers: Answers; submissionId: string }> = [];
   let failWrites = true;
+  let savedAudit: Audit | null = null;
   await page.route("**/api/users/me/radiant-audit**", async route => {
     const request = route.request();
     if (request.method() === "PUT") {
       const { submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
       writes.push({ account: request.headers().authorization, answers, submissionId });
       if (failWrites) return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+      savedAudit = { ...answers, routineScore: 2, valuesScore: 2, completedAt: "2026-09-02T12:00:00.000Z" };
       return route.fulfill({
         json: {
-          audit: { ...answers, routineScore: 2, valuesScore: 2, completedAt: "2026-09-02T12:00:00.000Z" },
+          audit: savedAudit,
           completionKind: "first_time",
         },
       });
     }
-    return route.fulfill({ json: request.url().endsWith("/history") ? [] : null });
+    return route.fulfill({ json: request.url().endsWith("/history") ? [] : savedAudit });
   });
 
   await stageVisitorAnswers(page);
@@ -162,7 +164,7 @@ test("an unverified account cannot save staged answers, even when its email matc
   });
   await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
   await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
-  await expect(page.getByText("Verify your account email before saving these answers")).toBeVisible();
+  await expect(page.getByText(/Verify your primary email in your account profile/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Correct email and save my Audit" })).toHaveCount(0);
   await page.reload();
   expect(writes).toHaveLength(0);
@@ -191,6 +193,110 @@ test("an unverified signed-in member cannot save directly from the Audit form", 
   expect(writes).toHaveLength(0);
 });
 
+test("partial answers staged for email verification return to the form and never auto-save", async ({ page }) => {
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    if (route.request().method() === "PUT") {
+      const request = route.request();
+      const { submissionId: _submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
+      writes.push({ account: request.headers().authorization, answers });
+      return route.fulfill({ json: {
+        audit: { ...answers, routineScore: 1, valuesScore: 0, completedAt: "2026-09-02T12:00:00.000Z" },
+        completionKind: "first_time",
+      } });
+    }
+    return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
+  });
+
+  await signInAs(page, "original");
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "false"));
+  await page.reload();
+  await page.getByLabel("Skincare consistency").locator("..").click();
+  await page.locator("#beauty-trend").fill("unfinished verification trend");
+  await page.getByRole("button", { name: "Verify my email" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("audit-test-profile-opened"))).toBe("true");
+  expect(await stagedInBrowser(page)).toMatchObject({
+    email: originalEmail,
+    routineChecks: ["skincare-consistency"],
+    beautyTrend: "unfinished verification trend",
+    masteryGoal: "",
+    researchTime: "",
+  });
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  expect(writes).toHaveLength(0);
+
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "true"));
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Finish your Radiant Audit" })).toBeVisible();
+  await page.reload();
+  expect(writes).toHaveLength(0);
+  await page.getByRole("link", { name: "Continue my Audit" }).click();
+  await expect(page.getByLabel("Skincare consistency")).toBeChecked();
+  await expect(page.locator("#beauty-trend")).toHaveValue("unfinished verification trend");
+  await expect(page.locator("#mastery-goal")).toHaveValue("");
+  await expect(page.locator("#research-time")).toHaveValue("");
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  expect(writes).toHaveLength(0);
+  await page.locator("#mastery-goal").fill("completed verification goal");
+  await page.locator("#research-time").fill("one hour");
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  expect(writes).toEqual([{ account: "Bearer original", answers: {
+    routineChecks: ["skincare-consistency"],
+    valuesChecks: [],
+    beautyTrend: "unfinished verification trend",
+    masteryGoal: "completed verification goal",
+    researchTime: "one hour",
+  } }]);
+});
+
+test("partial answers staged before an account switch need consent, completion and a verified primary email", async ({ page }) => {
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
+    return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
+  });
+
+  await signInAs(page, "original");
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "false"));
+  await page.reload();
+  await page.getByLabel("Quality over price").locator("..").click();
+  await page.locator("#mastery-goal").fill("unfinished switch goal");
+  await page.getByRole("button", { name: "Use another account" }).click();
+  expect(await stagedInBrowser(page)).toMatchObject({
+    email: originalEmail,
+    routineChecks: [],
+    valuesChecks: ["quality-over-price"],
+    beautyTrend: "",
+    masteryGoal: "unfinished switch goal",
+    researchTime: "",
+  });
+  expect(await page.evaluate(() => localStorage.getItem("audit-test-account"))).toBeNull();
+
+  await page.evaluate(() => {
+    localStorage.setItem("audit-test-account", "corrected");
+    localStorage.setItem("audit-test-verified", "true");
+  });
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  expect(writes).toHaveLength(0);
+  await page.getByRole("checkbox", { name: /I confirm that these are my Audit answers/ }).check();
+  await page.getByRole("button", { name: "Correct email and save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Finish your Radiant Audit" })).toBeVisible();
+  expect(await stagedInBrowser(page)).toMatchObject({ email: correctedEmail, masteryGoal: "unfinished switch goal" });
+  await page.reload();
+  expect(writes).toHaveLength(0);
+  await page.getByRole("link", { name: "Continue my Audit" }).click();
+  await expect(page.getByLabel("Quality over price")).toBeChecked();
+  await expect(page.locator("#mastery-goal")).toHaveValue("unfinished switch goal");
+  await expect(page.locator("#beauty-trend")).toHaveValue("");
+  await expect(page.locator("#research-time")).toHaveValue("");
+  await expect(page.getByLabel("Email address")).toHaveValue(correctedEmail);
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  expect(writes).toHaveLength(0);
+});
+
 test("signing out of the mismatched account preserves the staged answers for the original verified email", async ({ page }) => {
   const writes: Array<{ account: string | undefined; answers: Answers }> = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
@@ -211,7 +317,7 @@ test("signing out of the mismatched account preserves the staged answers for the
   await page.evaluate(() => localStorage.setItem("audit-test-account", "corrected"));
   await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
   await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
-  await page.getByRole("button", { name: "Sign in with that email" }).click();
+  await page.getByRole("button", { name: "Use another account" }).click();
   expect(await page.evaluate(() => ({
     account: localStorage.getItem("audit-test-account"),
     redirect: sessionStorage.getItem("audit-test-sign-out-redirect"),
@@ -259,11 +365,11 @@ test("signed-in member compares both earlier Audits after saving and reload, wit
     if (request.method() !== "PUT" || isHistory) return route.fulfill({ status: 405 });
     const previous = latest.get(account);
     if (previous) history.set(account, [{ id: nextId++, ...previous }, ...(history.get(account) ?? [])]);
-    const answers = request.postDataJSON() as Answers;
+    const input = request.postDataJSON() as Answers;
     const audit: Audit = {
-      ...answers,
-      routineScore: answers.routineChecks.length,
-      valuesScore: answers.valuesChecks.length,
+      ...input,
+      routineScore: input.routineChecks.length,
+      valuesScore: input.valuesChecks.length,
       completedAt: new Date(Date.UTC(2026, 8, 2, 12, nextMinute++)).toISOString(),
     };
     latest.set(account, audit);
