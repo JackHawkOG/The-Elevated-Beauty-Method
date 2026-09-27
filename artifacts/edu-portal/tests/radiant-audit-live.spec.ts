@@ -100,6 +100,7 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
+
   const accounts = [
     { email: auditFixtureEmail("a", tag), markers: [`a-first-${tag}`, `a-retake-${tag}`] },
     { email: auditFixtureEmail("b", tag), markers: [`b-first-${tag}`, `b-retake-${tag}`] },
@@ -143,6 +144,7 @@ test("a delayed Audit response from the previous member never appears after swit
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
+
   const a = { email: auditFixtureEmail("late-a", tag), marker: `late-a-${tag}` };
   const b = { email: auditFixtureEmail("late-b", tag) };
   const created: string[] = [];
@@ -152,6 +154,7 @@ test("a delayed Audit response from the previous member never appears after swit
   const requested = new Promise<void>(resolve => { captured = resolve; });
   let held = false;
   let delayed: Promise<void> | undefined;
+
   const isAuditGet = (route: Route) =>
     route.request().method() === "GET" &&
     new URL(route.request().url()).pathname === "/api/users/me/radiant-audit";
@@ -222,12 +225,110 @@ test("a delayed Audit response from the previous member never appears after swit
   }
 });
 
+test("a delayed dashboard membership response cannot show the former member's details after switching accounts", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const aEmail = auditFixtureEmail("dashboard-late-a", tag);
+  const bEmail = auditFixtureEmail("dashboard-late-b", tag);
+  const created: string[] = [];
+  let release!: () => void;
+  let captured!: () => void;
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const requested = new Promise<void>(resolve => { captured = resolve; });
+  let held = false;
+  let delayed: Promise<void> | undefined;
+  const membershipPanel = page.getByRole("heading", { name: /Your Accelerator is not available right now|The Beauty Mindset Accelerator/ });
+
+  try {
+    for (const email of [aEmail, bEmail]) {
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
+      });
+      created.push(user.id);
+    }
+    await setupClerkTestingToken({ page });
+    await signIn(page, aEmail);
+    const [{ db, usersTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    await db.update(usersTable).set({ membershipTier: "Elevated" }).where(eq(usersTable.clerkId, created[0]));
+    // Capture an authenticated browser response; replaying with route.fetch can lose Clerk auth.
+    const aResponse = await page.evaluate(async () => {
+      const response = await fetch("/api/users/me");
+      return { status: response.status, body: await response.text() };
+    });
+    expect(aResponse.status).toBe(200);
+    expect(JSON.parse(aResponse.body).membershipTier).toBe("Elevated");
+
+    await page.goto("/radiant-audit");
+    await page.route("**/api/users/me", async route => {
+      if (route.request().method() !== "GET" ||
+          new URL(route.request().url()).pathname !== "/api/users/me" || held) {
+        return route.continue();
+      }
+      held = true;
+      delayed = (async () => {
+        captured();
+        await released;
+        // Cancellation on account change is a safe outcome too.
+        await route.fulfill({ status: 200, contentType: "application/json", body: aResponse.body }).catch(error => {
+          if (!/aborted|closed|cancelled|canceled|intercept/i.test(String(error))) throw error;
+        });
+      })();
+      await delayed;
+    });
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await requested;
+    expect(held).toBe(true);
+
+    await clerk.signOut({ page });
+    await expect(membershipPanel).toHaveCount(0);
+    // Session storage survives Clerk redirects. Observe each document, so a
+    // brief leak during sign-in is not missed by a final-screen assertion.
+    const watchDashboard = () => {
+      const check = () => {
+        if (document.body.innerText.includes("Your Accelerator is not available right now.") ||
+            document.querySelector("#accelerator-heading")) {
+          sessionStorage.setItem("dashboard-switch-leak", "former member's Elevated panel");
+        }
+      };
+      const observer = new MutationObserver(() => { if (document.body) check(); });
+      observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      if (document.body) check();
+    };
+    await page.addInitScript(watchDashboard);
+    await page.evaluate(watchDashboard);
+    await clerk.signIn({ page, emailAddress: bEmail });
+    await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
+    release();
+    await delayed;
+    await expect(membershipPanel).toHaveCount(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("dashboard-switch-leak"))).toBeNull();
+
+    await page.getByRole("link", { name: "Membership and billing" }).click();
+    await expect(page).toHaveURL(/\/membership$/);
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
+    await expect(membershipPanel).toHaveCount(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("dashboard-switch-leak"))).toBeNull();
+  } finally {
+    release();
+    await page.unroute("**/api/users/me");
+    await cleanUpAccounts(client, created);
+  }
+});
+
 test("staged answers survive real sign-out and sign-in without saving to the wrong verified account", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
+
   const wrongEmail = auditFixtureEmail("wrong", tag);
   const stagedEmail = auditFixtureEmail("staged", tag);
   const marker = `recovery-${tag}`;
@@ -303,6 +404,7 @@ test("a visitor's staged Audit saves only after the new account verifies its ema
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
+
   const email = auditFixtureEmail("signup", tag);
   const answers = reflections(`signup-${tag}`);
   const created: string[] = [];
@@ -405,6 +507,7 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
+
   const email = auditFixtureEmail("delete-failure", tag);
   let userId: string | undefined;
   try {
@@ -413,6 +516,7 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
       skipPasswordRequirement: true,
       privateMetadata: auditFixturePrivateMetadata,
     });
+
     userId = user.id;
     await signIn(page, email);
     for (const marker of [`first-${tag}`, `second-${tag}`, `current-${tag}`]) {
@@ -498,13 +602,13 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
     if (userId) await cleanUpAccounts(client, [userId]);
   }
 });
-
 test("selected and clear-all earlier Audit confirmations remove only requested history, never current", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
+
   const email = auditFixtureEmail("delete-failure", tag);
   const first = `history-first-${tag}`;
   const second = `history-second-${tag}`;
@@ -517,6 +621,7 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
       skipPasswordRequirement: true,
       privateMetadata: auditFixturePrivateMetadata,
     });
+
     created.push(user.id);
     await signIn(page, email);
     for (const marker of [first, second, current]) {
@@ -621,6 +726,7 @@ test("failed current Audit deletion keeps saved answers and history through relo
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
+
   const email = auditFixtureEmail("delete-failure", tag);
   const markers = [`first-${tag}`, `second-${tag}`, `current-${tag}`];
   let userId: string | undefined;
@@ -630,6 +736,7 @@ test("failed current Audit deletion keeps saved answers and history through relo
       skipPasswordRequirement: true,
       privateMetadata: auditFixturePrivateMetadata,
     });
+
     userId = user.id;
     await signIn(page, email);
     for (const [index, marker] of markers.entries()) {
