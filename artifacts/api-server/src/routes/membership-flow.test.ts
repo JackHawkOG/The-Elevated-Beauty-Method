@@ -14,6 +14,7 @@ vi.mock("../middlewares/requireAuth", () => ({
   },
   jitProvisionUser: (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
 }));
+import { recoverQueuedCheckoutExpirations } from "../lib/membership-checkout-expirations";
 
 type TestSession = {
   id: string; status: string; url: string; created: number;
@@ -164,7 +165,7 @@ afterAll(async () => {
 });
 
 test("opening is inclusive and closing is exclusive for the offer and founding checkout", async () => {
-  const buyer = await addUser(200);
+  const buyer = await addUser(0);
   clock(opens - 1);
   expect((await request("/membership/offer")).data.phase).toBe("upcoming");
   expect((await request("/membership/checkout", "POST", buyer, { kind: "founding" })).status).toBe(409);
@@ -207,13 +208,69 @@ test("a database failure after Stripe session creation expires the untracked che
     connectSpy.mockRestore();
     restoreQuery?.();
   }
+  const session = await createSession.mock.results[creationsBefore].value;
   expect(response.status).toBe(503);
   expect(response.data.url).toBeUndefined();
-  const session = await createSession.mock.results[creationsBefore].value;
   expect(expireSession).toHaveBeenCalledWith(session.id);
   expect(sessions.get(session.id)).toMatchObject({ status: "expired", url: "" });
   expect(await row(buyer)).toBeUndefined();
   vi.restoreAllMocks();
+});
+
+test("failed Stripe cleanup is queued and retried without returning a checkout URL", async () => {
+  clock(opens);
+  const buyer = await addUser(202);
+  const originalConnect = pool.connect.bind(pool);
+  let restoreQuery: (() => void) | undefined;
+  const connectSpy = vi.spyOn(pool, "connect").mockImplementationOnce(async () => {
+    const client = await originalConnect();
+    const originalQuery = client.query.bind(client);
+    const querySpy = vi.spyOn(client, "query").mockImplementation(((...args: unknown[]) => {
+      if (typeof args[0] === "string" && args[0].startsWith("UPDATE membership_checkouts SET stripe_session_id")) {
+        return Promise.reject(new Error("Simulated reservation update failure"));
+      }
+      return (originalQuery as (...queryArgs: unknown[]) => unknown)(...args);
+    }) as typeof client.query);
+    restoreQuery = () => querySpy.mockRestore();
+    return client;
+  });
+  const creationsBefore = createSession.mock.results.length;
+  expireSession.mockRejectedValueOnce(new Error("Stripe temporarily unavailable"));
+  let response: Awaited<ReturnType<typeof request>>;
+  try {
+    response = await request("/membership/checkout", "POST", buyer, { kind: "standard" });
+  } finally {
+    connectSpy.mockRestore();
+    restoreQuery?.();
+  }
+  const session = await createSession.mock.results[creationsBefore].value;
+  const queued = async () => (await pool.query(
+    "SELECT stripe_session_id FROM membership_checkout_expirations WHERE stripe_session_id = $1", [session.id],
+  )).rows;
+  expect(response.status).toBe(503);
+  expect(response.data.url).toBeUndefined();
+  expect(await row(buyer)).toBeUndefined();
+  expect(sessions.get(session.id)?.status).toBe("open");
+  expect(await queued()).toHaveLength(1);
+  await recoverQueuedCheckoutExpirations();
+  expect(sessions.get(session.id)).toMatchObject({ status: "expired", url: "" });
+  expect(await queued()).toHaveLength(0);
+  const expirations = expireSession.mock.calls.filter(([id]) => id === session.id).length;
+  await recoverQueuedCheckoutExpirations();
+  expect(expireSession.mock.calls.filter(([id]) => id === session.id)).toHaveLength(expirations);
+  vi.restoreAllMocks();
+});
+
+test("recovery does not expire a checkout that completed while cleanup was unavailable", async () => {
+  const id = `cs_${randomUUID()}`;
+  sessions.set(id, { id, status: "complete", payment_status: "paid", url: "", created: Math.floor(Date.now() / 1000) });
+  await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
+  const before = expireSession.mock.calls.length;
+  await recoverQueuedCheckoutExpirations();
+  expect(expireSession.mock.calls).toHaveLength(before);
+  expect(sessions.get(id)?.status).toBe("complete");
+  expect((await pool.query("SELECT 1 FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id])).rows).toHaveLength(0);
+  sessions.delete(id);
 });
 
 test("lost Stripe responses leave recoverable sessions; recovery expires only untracked open checkouts", async () => {

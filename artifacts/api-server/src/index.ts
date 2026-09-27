@@ -12,6 +12,7 @@ import { ensureMemberStoriesSchema } from "./lib/ensure-member-stories-schema";
 import { getStripeSync } from "./lib/stripeClient";
 import { startMembershipReconciliation } from "./lib/membership-reconciliation";
 import { runMigrations } from "stripe-replit-sync";
+import { startCheckoutExpirationRecovery } from "./lib/membership-checkout-expirations";
 
 const rawPort = process.env["PORT"];
 
@@ -55,4 +56,5 @@ app.listen(port, (err) => {
   startRadiantAuditReceiptCleanup();
   startRadiantAuditDraftPruning();
   startMembershipReconciliation();
+  startCheckoutExpirationRecovery();
 });

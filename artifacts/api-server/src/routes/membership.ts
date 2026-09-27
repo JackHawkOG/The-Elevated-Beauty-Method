@@ -9,6 +9,7 @@ import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
 import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "../lib/membership-reconciliation";
 import { GetMyMembershipResponse } from "@workspace/api-zod";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
+import { queueCheckoutExpiration, recoverCheckoutExpiration } from "../lib/membership-checkout-expirations";
 
 const router = Router();
 const OPENS = Date.parse("2026-10-01T14:00:00Z"); // 9 AM Central (CDT)
@@ -248,7 +249,12 @@ router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, r
     }
     if (createdSessionId && checkoutStripe) {
       try {
-        await checkoutStripe.checkout.sessions.expire(createdSessionId);
+        await queueCheckoutExpiration(createdSessionId);
+      } catch (queueError) {
+        req.log.error({ err: queueError, stripeSessionId: createdSessionId }, "Could not queue checkout expiration");
+      }
+      try {
+        await recoverCheckoutExpiration(createdSessionId, checkoutStripe);
       } catch (expirationError) {
         req.log.error({ err: expirationError, stripeSessionId: createdSessionId }, "Could not expire checkout after reservation failure");
       }
