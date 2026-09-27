@@ -14,4 +14,6 @@ import type { MyMembershipMembershipStatus } from './myMembershipMembershipStatu
 export type MyMembershipMembership = {
   kind: MyMembershipMembershipKind;
   status: MyMembershipMembershipStatus;
+  /** @nullable */
+  cancellationDate: Date | null;
 } | null;

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type Stripe from "stripe";
 import type { PoolClient } from "@workspace/db";
-import { failedBillingMonths, isSubscriptionEnded, reconcileSubscription } from "./membership-reconciliation";
+import { failedBillingMonths, isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "./membership-reconciliation";
 
 const time = (date: string) => Date.parse(date) / 1000;
 function invoice(id: string, date: string, status: Stripe.Invoice.Status, reason: Stripe.Invoice.BillingReason = "subscription_cycle"): Stripe.Invoice {
@@ -23,9 +23,14 @@ test("counts each failed renewal month once and stops at the latest successful r
 
 test("scheduled cancellation preserves access through the end date", () => {
   const sub = { status: "active", cancel_at: time("2026-04-01"), cancel_at_period_end: true } as Stripe.Subscription;
+  expect(scheduledCancellationTimestamp(sub)).toBe(time("2026-04-01"));
   expect(isSubscriptionEnded(sub, Date.parse("2026-03-31"))).toBe(false);
   expect(isSubscriptionEnded(sub, Date.parse("2026-04-01"))).toBe(true);
   expect(isSubscriptionEnded({ ...sub, status: "canceled" }, Date.parse("2026-03-31"))).toBe(true);
+  const periodEnd = { status: "active", cancel_at: null, cancel_at_period_end: true, items: { data: [{ current_period_end: time("2026-04-02") }] } } as Stripe.Subscription;
+  expect(scheduledCancellationTimestamp(periodEnd)).toBe(time("2026-04-02"));
+  expect(isSubscriptionEnded(periodEnd, Date.parse("2026-04-01"))).toBe(false);
+  expect(scheduledCancellationTimestamp({ ...periodEnd, cancel_at_period_end: false })).toBeNull();
 });
 
 test("a third distinct failed month cancels once; a later event never restores forfeited status", async () => {

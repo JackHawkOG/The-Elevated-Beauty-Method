@@ -729,10 +729,11 @@ components:
       properties:
         membership:
           type: ["object", "null"]
-          required: [kind, status]
+          required: [kind, status, cancellationDate]
           properties:
             kind: { type: string, enum: [founding, standard] }
-            status: { type: string, enum: [pending, confirmed] }
+            status: { type: string, enum: [pending, confirmed, forfeited] }
+            cancellationDate: { type: ["string", "null"], format: date-time }
     HealthStatus:
       type: object
       properties:

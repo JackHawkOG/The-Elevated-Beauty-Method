@@ -11,7 +11,9 @@ export default function MembershipPage() {
   const { data: offer, isLoading, isError } = useGetMembershipOffer({
     query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 15000, staleTime: 5000 },
   });
-  const { data: mine } = useGetMyMembership({ query: { queryKey: getGetMyMembershipQueryKey(), refetchInterval: 10000 } });
+  const { data: mine, isError: membershipError, isPending: membershipPending } = useGetMyMembership({
+    query: { queryKey: getGetMyMembershipQueryKey(), refetchInterval: 10000, refetchOnMount: "always", refetchOnWindowFocus: "always" },
+  });
   const checkout = useCreateMembershipCheckout();
   const portal = useCreateMembershipPortal();
   const [error, setError] = useState("");
@@ -21,6 +23,14 @@ export default function MembershipPage() {
   useEffect(() => {
     trackConfirmedMembershipReturn(mine?.membership);
   }, [mine?.membership?.kind, mine?.membership?.status]);
+
+  useEffect(() => {
+    const refreshAfterPortal = () => {
+      queryClient.invalidateQueries({ queryKey: getGetMyMembershipQueryKey() });
+    };
+    window.addEventListener("pageshow", refreshAfterPortal);
+    return () => window.removeEventListener("pageshow", refreshAfterPortal);
+  }, [queryClient]);
 
   async function begin(kind: "founding" | "standard") {
     setError("");
@@ -48,16 +58,24 @@ export default function MembershipPage() {
     <div className="mx-auto max-w-2xl space-y-6 py-10">
       <h1 className="font-serif text-4xl">The Elevated Method</h1>
       <p className="text-muted-foreground">Monthly membership is $48/month. During the October 1–7 founding window, $24/month is available only while one of the first 50 places can still be reserved at checkout.</p>
-      {mine?.membership ? <div className="rounded-2xl border border-primary/40 bg-card p-6">
+      {membershipError && <p role="alert" className="text-destructive">Your membership status could not be checked. Please try again later.</p>}
+      {!membershipError && mine?.membership ? <div className="rounded-2xl border border-primary/40 bg-card p-6">
         {mine.membership.status === "confirmed" ? <>
-          <p className="font-semibold">Your {mine.membership.kind === "founding" ? "Founding Member" : "Elevated Method"} membership is active.</p>
+          <p className="font-semibold">Your {mine.membership.kind === "founding" ? "Founding Member" : "Elevated Method"} membership is {mine.membership.cancellationDate ? "active until your scheduled cancellation." : "active."}</p>
+          {mine.membership.cancellationDate && <p className="mt-2 text-sm text-muted-foreground">
+            Your cancellation takes effect on {new Date(mine.membership.cancellationDate).toLocaleString(undefined, { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}. You keep access until then.
+          </p>}
           <Button className="mt-4" onClick={manage} disabled={portal.isPending}>Manage billing or cancel</Button>
+        </> : mine.membership.status === "forfeited" ? <>
+          <p className="font-semibold">Your {mine.membership.kind === "founding" ? "Founding Member" : "Elevated Method"} membership has ended.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Access is no longer active. A Founding Member place cannot be restored after it is forfeited.</p>
         </> : <>
           <p className="font-semibold">Your checkout is awaiting payment confirmation.</p>
           <p className="mt-2 text-sm text-muted-foreground">If you have already paid, this page will update shortly. Otherwise, you can return to your existing checkout.</p>
           <Button className="mt-4" onClick={() => begin(mine.membership!.kind)} disabled={checkout.isPending}>Continue checkout</Button>
         </>}
-      </div> : <>
+      </div> : null}
+      {!membershipError && !membershipPending && (!mine?.membership || mine.membership.status === "forfeited") && <>
         {isLoading && <p>Checking availability…</p>}
         {isError && <p role="alert">Enrollment availability could not be checked. Please try again later.</p>}
         {offer?.phase === "upcoming" && <p>Enrollment opens October 1, 2026 at 9 AM Central. Founding enrollment closes October 7 at 11:59 PM Central.</p>}

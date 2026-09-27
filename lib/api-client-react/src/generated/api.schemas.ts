@@ -51,6 +51,7 @@ export type MyMembershipMembershipStatus = typeof MyMembershipMembershipStatus[k
 export const MyMembershipMembershipStatus = {
   pending: 'pending',
   confirmed: 'confirmed',
+  forfeited: 'forfeited',
 } as const;
 
 /**
@@ -59,6 +60,8 @@ export const MyMembershipMembershipStatus = {
 export type MyMembershipMembership = {
   kind: MyMembershipMembershipKind;
   status: MyMembershipMembershipStatus;
+  /** @nullable */
+  cancellationDate: string | null;
 } | null;
 
 export interface MyMembership {

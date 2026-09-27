@@ -31,7 +31,7 @@ export function trackMembershipEnrollmentConfirmed(kind: "founding" | "standard"
 }
 
 export function trackConfirmedMembershipReturn(
-  membership: { kind: "founding" | "standard"; status: "pending" | "confirmed" } | null | undefined,
+  membership: { kind: "founding" | "standard"; status: "pending" | "confirmed" | "forfeited" } | null | undefined,
 ): void {
   if (typeof window === "undefined" || membership?.status !== "confirmed") return;
   const url = new URL(window.location.href);

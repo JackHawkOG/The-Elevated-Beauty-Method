@@ -12,4 +12,5 @@ export type MyMembershipMembershipStatus = typeof MyMembershipMembershipStatus[k
 export const MyMembershipMembershipStatus = {
   pending: 'pending',
   confirmed: 'confirmed',
+  forfeited: 'forfeited',
 } as const;

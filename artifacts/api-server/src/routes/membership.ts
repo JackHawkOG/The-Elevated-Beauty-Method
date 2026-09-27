@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
-import { reconcileSubscription } from "../lib/membership-reconciliation";
+import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "../lib/membership-reconciliation";
+import { GetMyMembershipResponse } from "@workspace/api-zod";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
 
 const router = Router();
@@ -61,11 +62,42 @@ router.get("/membership/offer", async (_req, res): Promise<void> => {
 });
 
 router.get("/membership/me", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
-  const result = await pool.query<{ kind: string; status: string }>(
-    "SELECT kind, status FROM membership_checkouts WHERE clerk_id = $1 AND status IN ('pending', 'confirmed') ORDER BY id DESC LIMIT 1",
+  const result = await pool.query<{ kind: string; status: string; stripe_subscription_id: string | null }>(
+    "SELECT kind, status, stripe_subscription_id FROM membership_checkouts WHERE clerk_id = $1 AND status IN ('pending', 'confirmed', 'forfeited') ORDER BY CASE WHEN status IN ('pending', 'confirmed') THEN 0 ELSE 1 END, id DESC LIMIT 1",
     [req.userId],
   );
-  res.json({ membership: result.rows[0] ?? null });
+  const row = result.rows[0];
+  if (!row) {
+    res.json(GetMyMembershipResponse.parse({ membership: null }));
+    return;
+  }
+  if (row.status !== "confirmed") {
+    res.json(GetMyMembershipResponse.parse({ membership: { kind: row.kind, status: row.status, cancellationDate: null } }));
+    return;
+  }
+  if (!row.stripe_subscription_id) throw new Error("Confirmed membership has no Stripe subscription");
+  const stripe = await getUncachableStripeClient();
+  const subscription = await stripe.subscriptions.retrieve(row.stripe_subscription_id);
+  if (isSubscriptionEnded(subscription)) {
+    // Keep the access tier and founding-place bookkeeping in step with the displayed status.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await reconcileSubscription(client, row.stripe_subscription_id, stripe);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    res.json(GetMyMembershipResponse.parse({ membership: { kind: row.kind, status: "forfeited", cancellationDate: null } }));
+    return;
+  }
+  const end = scheduledCancellationTimestamp(subscription);
+  res.json(GetMyMembershipResponse.parse({
+    membership: { kind: row.kind, status: row.status, cancellationDate: end === null ? null : new Date(end * 1000).toISOString() },
+  }));
 });
 
 router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {

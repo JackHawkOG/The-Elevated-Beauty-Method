@@ -25,7 +25,8 @@ export const GetMembershipOfferResponse = zod.object({
 export const GetMyMembershipResponse = zod.object({
   "membership": zod.object({
   "kind": zod.enum(['founding', 'standard']),
-  "status": zod.enum(['pending', 'confirmed'])
+  "status": zod.enum(['pending', 'confirmed', 'forfeited']),
+  "cancellationDate": zod.coerce.date().nullable()
 }).nullable()
 })
 

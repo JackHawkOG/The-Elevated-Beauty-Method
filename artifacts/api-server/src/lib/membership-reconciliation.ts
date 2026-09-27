@@ -22,12 +22,16 @@ export function failedBillingMonths(invoices: Stripe.Invoice[]): { count: number
   return { count: months.size, lastId };
 }
 
+export function scheduledCancellationTimestamp(subscription: Stripe.Subscription): number | null {
+  return subscription.cancel_at ?? (subscription.cancel_at_period_end && subscription.items.data.length
+    ? Math.max(...subscription.items.data.map(item => item.current_period_end))
+    : null);
+}
+
 export function isSubscriptionEnded(subscription: Stripe.Subscription, now = Date.now()): boolean {
   if (subscription.status === "canceled" || subscription.status === "incomplete_expired" || subscription.status === "unpaid") return true;
   // A scheduled cancellation does not end access until its effective date.
-  const end = subscription.cancel_at ?? (subscription.cancel_at_period_end && subscription.items.data.length
-    ? Math.max(...subscription.items.data.map(item => item.current_period_end))
-    : null);
+  const end = scheduledCancellationTimestamp(subscription);
   return end !== null && end * 1000 <= now;
 }
 
