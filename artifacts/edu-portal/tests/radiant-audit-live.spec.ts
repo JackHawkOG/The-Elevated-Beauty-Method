@@ -296,7 +296,7 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
 
     // This is the app's actual Clerk sign-out and sign-in redirect, not a
     // programmatic session swap; sessionStorage must survive both navigations.
-    await page.getByRole("button", { name: "Sign in with that email" }).click();
+    await page.getByRole("button", { name: "Use another account" }).click();
     await signInThroughClerk(page, stagedEmail);
     await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
     for (const answer of Object.values(reflections(marker))) {
@@ -414,5 +414,120 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
     if (userId) {
       await cleanUpAccounts(client, [userId]);
     }
+  }
+});
+
+test("selected and clear-all earlier Audit confirmations remove only requested history, never current", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = `audit-history-delete-${tag}+clerk_test@example.com`;
+  const first = `history-first-${tag}`;
+  const second = `history-second-${tag}`;
+  const current = `history-current-${tag}`;
+  const created: string[] = [];
+  try {
+    await setupClerkTestingToken({ page });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
+    created.push(user.id);
+    await signIn(page, email);
+    for (const marker of [first, second, current]) {
+      if (marker !== first) await page.goto("/radiant-audit");
+      await save(page, email, marker);
+    }
+
+    const [{ db, radiantAuditsTable, radiantAuditHistoryTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const historyRows = () => db.select().from(radiantAuditHistoryTable)
+      .where(eq(radiantAuditHistoryTable.clerkId, user.id));
+    const currentRows = () => db.select().from(radiantAuditsTable)
+      .where(eq(radiantAuditsTable.clerkId, user.id));
+    const original = await historyRows();
+    expect(original.map(row => row.masteryGoal).sort())
+      .toEqual([reflections(first).masteryGoal, reflections(second).masteryGoal].sort());
+    expect((await currentRows()).map(row => row.masteryGoal)).toEqual([reflections(current).masteryGoal]);
+
+    const comparison = page.getByRole("region", { name: "How your answers have changed" });
+    const selector = comparison.getByRole("combobox", { name: "Compare with" });
+    await expect(selector.locator("option")).toHaveCount(2);
+    const firstId = original.find(row => row.masteryGoal === reflections(first).masteryGoal)!.id;
+    await selector.selectOption(String(firstId));
+    await expect(comparison).toContainText(reflections(first).masteryGoal);
+
+    const deletePaths: string[] = [];
+    page.on("request", request => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "DELETE" && path.startsWith("/api/users/me/radiant-audit")) {
+        deletePaths.push(path);
+      }
+    });
+
+    await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    const selectedDialog = page.getByRole("alertdialog", { name: "Delete this earlier Audit?" });
+    await expect(selectedDialog).toContainText("Your latest Audit will remain saved.");
+    await selectedDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(selectedDialog).toHaveCount(0);
+    expect(deletePaths).toEqual([]);
+    await page.reload();
+    await expect(selector).toHaveValue(String(firstId));
+    await expect(comparison).toContainText(reflections(first).masteryGoal);
+    expect((await historyRows()).map(row => row.id).sort()).toEqual(original.map(row => row.id).sort());
+
+    await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    const selectedResponse = page.waitForResponse(response =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname === `/api/users/me/radiant-audit/history/${firstId}`,
+    );
+    await selectedDialog.getByRole("button", { name: "Delete earlier Audit" }).click();
+    expect((await selectedResponse).status()).toBe(204);
+    await expect(selector.locator("option")).toHaveCount(1);
+    await expect(comparison).toContainText(reflections(second).masteryGoal);
+    await expect(comparison).not.toContainText(reflections(first).masteryGoal);
+    await expect(page.locator("main")).toContainText(reflections(current).masteryGoal);
+    await page.reload();
+    await expect(selector.locator("option")).toHaveCount(1);
+    await expect(comparison).toContainText(reflections(second).masteryGoal);
+    await expect(page.locator("body")).not.toContainText(reflections(first).masteryGoal);
+    expect((await historyRows()).map(row => row.masteryGoal)).toEqual([reflections(second).masteryGoal]);
+    expect((await currentRows()).map(row => row.masteryGoal)).toEqual([reflections(current).masteryGoal]);
+    expect(deletePaths).toEqual([`/api/users/me/radiant-audit/history/${firstId}`]);
+
+    await comparison.getByRole("button", { name: "Clear earlier history" }).click();
+    const clearDialog = page.getByRole("alertdialog", { name: "Clear all earlier Audits?" });
+    await expect(clearDialog).toContainText("Your latest Audit will remain saved.");
+    await clearDialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(clearDialog).toHaveCount(0);
+    await page.reload();
+    await expect(selector.locator("option")).toHaveCount(1);
+    expect((await historyRows()).map(row => row.masteryGoal)).toEqual([reflections(second).masteryGoal]);
+    expect(deletePaths).toEqual([`/api/users/me/radiant-audit/history/${firstId}`]);
+
+    await comparison.getByRole("button", { name: "Clear earlier history" }).click();
+    const clearResponse = page.waitForResponse(response =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname === "/api/users/me/radiant-audit/history",
+    );
+    await clearDialog.getByRole("button", { name: "Clear earlier history" }).click();
+    expect((await clearResponse).status()).toBe(204);
+    await expect(comparison).toHaveCount(0);
+    await expect(page.locator("main")).toContainText(reflections(current).masteryGoal);
+    await page.reload();
+    await expect(comparison).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText(reflections(second).masteryGoal);
+    await expect(page.locator("body")).not.toContainText(reflections(first).masteryGoal);
+    await expect(page.locator("main")).toContainText(reflections(current).masteryGoal);
+    expect(await historyRows()).toHaveLength(0);
+    expect((await currentRows()).map(row => row.masteryGoal)).toEqual([reflections(current).masteryGoal]);
+    expect(deletePaths).toEqual([
+      `/api/users/me/radiant-audit/history/${firstId}`,
+      "/api/users/me/radiant-audit/history",
+    ]);
+  } finally {
+    await cleanUpAccounts(client, created);
   }
 });
