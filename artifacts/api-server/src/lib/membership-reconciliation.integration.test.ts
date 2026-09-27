@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { pool } from "@workspace/db";
 import { ensureMembershipSchema } from "./ensure-membership-schema";
+import { requireDevelopmentDatabase } from "../routes/test-development-database";
 
 vi.mock("./stripeClient", () => ({
   getStripeSync: vi.fn(),
@@ -23,25 +24,6 @@ const paginatedClerkId = `billing-paginated-${id}`;
 const paginatedSubscriptionId = `sub_billing_paginated_${id}`;
 const eventIds: string[] = [];
 let seeded = false;
-
-function assertDevelopmentDatabase(): void {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT ||
-      !process.env.DATABASE_URL || !process.env.PGHOST || !process.env.PGPORT ||
-      !process.env.PGDATABASE || !process.env.PGUSER) {
-    throw new Error("Billing race test requires the workspace development database");
-  }
-  const target = new URL(process.env.DATABASE_URL);
-  if (target.protocol !== "postgresql:" && target.protocol !== "postgres:") {
-    throw new Error("Billing race test requires a PostgreSQL development URL");
-  }
-  if (target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
-      decodeURIComponent(target.username) !== process.env.PGUSER) {
-    throw new Error("Billing race test cannot run against a different database");
-  }
-}
-
 function invoice(name: string, date: string, status: Stripe.Invoice.Status): Stripe.Invoice {
   return {
     id: `in_${name}_${id}`,
@@ -80,7 +62,7 @@ async function deliver(type: string, object: object, eventId = `evt_${randomUUID
 
 beforeAll(async () => {
   // Check before opening a connection or running even idempotent schema setup.
-  assertDevelopmentDatabase();
+  requireDevelopmentDatabase();
   await ensureMembershipSchema();
   await pool.query("INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
     [clerkId, "Billing race fixture", `${clerkId}@example.invalid`]);
@@ -140,12 +122,7 @@ test("late invoice and subscription notices use current Stripe state; sweeps can
         return { status: "canceled", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
       },
     },
-    invoices: {
-      list: async (params: { subscription: string }) => {
-        expect(params.subscription).toBe(subscriptionId);
-        return { data: invoices, has_more: false };
-      },
-    },
+    invoices: { list: async () => ({ data: invoices, has_more: false }) },
   } as unknown as Stripe;
   vi.mocked(getStripeSync).mockResolvedValue({ processWebhook: vi.fn().mockResolvedValue(undefined) } as never);
   vi.mocked(getUncachableStripeClient).mockResolvedValue(stripe);

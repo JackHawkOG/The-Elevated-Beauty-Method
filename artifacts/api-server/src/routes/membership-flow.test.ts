@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { pool, type PoolClient } from "@workspace/db";
 import { ensureMembershipSchema } from "../lib/ensure-membership-schema";
 import { FOUNDING_LIMIT } from "../lib/membership-reservations";
+import { requireDevelopmentDatabase } from "./test-development-database";
 
 vi.mock("../middlewares/requireAuth", () => ({
   requireAuth: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
@@ -66,6 +67,7 @@ const events: string[] = [];
 let server: Server;
 let baseUrl: string;
 let fixtureLock: PoolClient | undefined;
+let safeToCleanup = false;
 const realNow = Date.now;
 const opens = Date.parse("2026-10-01T14:00:00Z");
 const closes = Date.parse("2026-10-08T05:00:00Z");
@@ -109,16 +111,8 @@ async function row(id: string) {
 }
 
 beforeAll(async () => {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT ||
-      !process.env.DATABASE_URL || !process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE || !process.env.PGUSER) {
-    throw new Error("Membership flow tests require the workspace development database");
-  }
-  const target = new URL(process.env.DATABASE_URL);
-  if (target.hostname !== process.env.PGHOST || (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
-      decodeURIComponent(target.username) !== process.env.PGUSER) {
-    throw new Error("Membership flow tests cannot run against a different database");
-  }
+  requireDevelopmentDatabase();
+  safeToCleanup = true;
   // Prevent separate Vitest processes from filling the same 50-place inventory.
   fixtureLock = await pool.connect();
   await fixtureLock.query("SELECT pg_advisory_lock(20261001, 55)");
@@ -143,8 +137,8 @@ afterAll(async () => {
   vi.restoreAllMocks();
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-    if (events.length) await pool.query("DELETE FROM membership_webhook_events WHERE id = ANY($1::text[])", [events]);
-    if (users.length) {
+    if (safeToCleanup && events.length) await pool.query("DELETE FROM membership_webhook_events WHERE id = ANY($1::text[])", [events]);
+    if (safeToCleanup && users.length) {
       await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [users]);
       await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [users]);
     }

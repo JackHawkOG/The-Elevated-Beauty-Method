@@ -9,6 +9,7 @@ import {
 } from "@workspace/db";
 import { ensureEnrollmentSchema } from "../lib/ensure-enrollment-schema";
 import { approvedTopicLessons } from "../lib/approved-topic-lessons";
+import { requireDevelopmentDatabase } from "./test-development-database";
 
 // Only this isolated test router trusts the test identity header. The real
 // application and its Clerk middleware are never started by this suite.
@@ -53,20 +54,8 @@ async function enrollment(user: string) {
     totalLessons: number; lastLessonId: number | null;
   }>).find(row => row.courseId === courseId);
 }
-
 beforeAll(async () => {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT || !process.env.DATABASE_URL) {
-    throw new Error("Progress integration tests require a development database and cannot run in a deployment");
-  }
-  // Replit supplies PG* and DATABASE_URL for the same development database.
-  // Reject a manually overridden DATABASE_URL before any schema changes or inserts.
-  const target = new URL(process.env.DATABASE_URL);
-  if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
-      target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
-    throw new Error("Progress tests require the workspace development database URL");
-  }
+  requireDevelopmentDatabase();
   fixturesStarted = true;
   await ensureEnrollmentSchema();
   const { default: coursesRouter } = await import("./courses");
@@ -91,9 +80,8 @@ beforeAll(async () => {
   }).returning();
   categoryId = category.id;
   const [course] = await db.insert(coursesTable).values({
-    title: courseTitle, description: "Isolated progress fixture",
-    categoryId: category.id, instructorName: "Test", accessTier: "Elevated",
-    publishedAt: new Date(),
+    title: courseTitle, description: "Isolated progress fixture", categoryId: category.id,
+    instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
   }).returning();
   courseId = course.id;
   const lessons = await db.insert(lessonsTable).values(
@@ -171,15 +159,18 @@ test("failed activity insert rolls back enrollment; concurrent retries create on
   );
   expect(retries.map(result => result.status)).toEqual(Array(16).fill(201));
   const ids = retries.map(result => (result.data as { id: number }).id);
-  expect(ids[0]).toEqual(expect.any(Number));
   expect(new Set(ids).size).toBe(1);
-  const rows = await db.select().from(enrollmentsTable).where(and(
-    eq(enrollmentsTable.userId, retryId), eq(enrollmentsTable.courseId, courseId),
-  ));
+
+  const rows = await db.select().from(enrollmentsTable)
+    .where(and(eq(enrollmentsTable.userId, retryId), eq(enrollmentsTable.courseId, courseId)));
   expect(rows).toHaveLength(1);
   expect(rows[0].id).toBe(ids[0]);
+  expect(((await request(retryId, "/enrollments")).data as Array<{ courseId: number }>).filter(
+    (row: { courseId: number }) => row.courseId === courseId,
+  )).toHaveLength(1);
   const activity = await db.select().from(activityTable).where(and(
-    eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, retryActor),
+    eq(activityTable.entityTitle, courseTitle),
+    eq(activityTable.actorName, retryActor),
   ));
   expect(activity).toHaveLength(1);
   expect(activity[0].type).toBe("enrollment");
@@ -215,7 +206,7 @@ test("simultaneous enrollment requests return one row and create one activity en
 });
 
 test("resume never exposes a missing, unpublished, or other-course lesson", async () => {
-  const userId = `test-resume-${run}`;
+  const userId = `test-reviewed-resume-${run}`;
   let otherCourseId: number | undefined;
   try {
     await db.insert(usersTable).values({

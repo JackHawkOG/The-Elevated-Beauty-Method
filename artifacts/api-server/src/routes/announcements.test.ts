@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { activityTable, announcementsTable, db, pool, usersTable } from "@workspace/db";
 import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
+import { requireDevelopmentDatabase } from "./test-development-database";
 
 vi.mock("@clerk/express", () => ({
   getAuth: (req: express.Request) => ({ userId: req.header("x-test-user") ?? null }),
@@ -30,15 +31,7 @@ async function post(key: string | null, body = { title, body: "An update" }, act
 }
 
 beforeAll(async () => {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT || !process.env.DATABASE_URL) {
-    throw new Error("Announcement tests require a development database");
-  }
-  const target = new URL(process.env.DATABASE_URL);
-  if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
-    target.hostname !== process.env.PGHOST || (target.port || "5432") !== process.env.PGPORT ||
-    decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
-    throw new Error("Announcement tests require the workspace development database URL");
-  }
+  requireDevelopmentDatabase();
   await ensureAnnouncementSchema();
   started = true;
   const { default: router } = await import("./announcements");

@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
 import { pool, type PoolClient } from "@workspace/db";
 import { ensureMembershipSchema } from "../lib/ensure-membership-schema";
+import { requireDevelopmentDatabase } from "./test-development-database";
 import {
   FOUNDING_LIMIT, lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry,
 } from "../lib/membership-reservations";
@@ -9,6 +10,7 @@ import {
 const prefix = `founder-test-${randomUUID()}`;
 const generated: string[] = [];
 let fixtureLock: PoolClient | undefined;
+let safeToCleanup = false;
 
 test("Checkout expiry leaves a margin above Stripe's 30-minute minimum", () => {
   const startedAt = Date.now();
@@ -19,7 +21,7 @@ test("Checkout expiry leaves a margin above Stripe's 30-minute minimum", () => {
 
 afterAll(async () => {
   try {
-    if (generated.length) {
+    if (safeToCleanup && generated.length) {
       await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [generated]);
       await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [generated]);
     }
@@ -33,17 +35,8 @@ afterAll(async () => {
 
 test("the final place can be reserved once; expiration releases it but confirmed or forfeited places never return", async () => {
   // This integration test may only mutate the workspace's development database.
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT ||
-      !process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE || !process.env.PGUSER) {
-    throw new Error("Founding capacity test requires the development database");
-  }
-  const target = new URL(process.env.DATABASE_URL || "");
-  if (target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
-      decodeURIComponent(target.username) !== process.env.PGUSER) {
-    throw new Error("Founding capacity test cannot run against a different database");
-  }
+  requireDevelopmentDatabase();
+  safeToCleanup = true;
   // Hold the same test-only lock as the HTTP flow suite until fixture cleanup.
   fixtureLock = await pool.connect();
   await fixtureLock.query("SELECT pg_advisory_lock(20261001, 55)");

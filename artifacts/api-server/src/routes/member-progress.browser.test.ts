@@ -9,18 +9,13 @@ import {
 } from "@workspace/db";
 import { progressBrowserEnvironment } from "./member-progress-browser-environment";
 import { runWithCleanup } from "./member-progress-browser-cleanup";
+import { requireDevelopmentDatabase } from "./test-development-database";
 
 // This intentionally goes through the running web and API workflows, not a
 // mocked auth router. Run separately from the fast progress suite.
 test("Clerk members retain progress after reload; Free members cannot access it", async () => {
+  requireDevelopmentDatabase();
   const { base, chromiumPath } = progressBrowserEnvironment();
-  const target = new URL(process.env.DATABASE_URL || "");
-  if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
-      target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
-    throw new Error("Browser progress check requires the workspace development database URL");
-  }
   const run = randomUUID();
   const identities: string[] = [];
   const contexts: BrowserContext[] = [];

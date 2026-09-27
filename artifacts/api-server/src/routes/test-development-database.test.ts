@@ -9,7 +9,6 @@ const development = {
   PGDATABASE: "memberdb",
   PGUSER: "member",
 };
-
 test("accepts the workspace development database target", () => {
   expect(() => requireDevelopmentDatabase(development)).not.toThrow();
   expect(() => requireDevelopmentDatabase({
@@ -29,6 +28,10 @@ test.each([
   [{ DATABASE_URL: "postgresql://other@dev-db:5432/memberdb" }, /development PG\* target/],
   [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?host=production-db" }, /development PG\* target/],
   [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?hostaddr=192.0.2.1" }, /development PG\* target/],
+  [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?port=5555" }, /development PG\* target/],
+  [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?user=other" }, /development PG\* target/],
+  [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?database=other" }, /development PG\* target/],
+  [{ DATABASE_URL: "postgresql://member@dev-db:5432/memberdb?db=other" }, /development PG\* target/],
   [{ PGHOST: undefined }, /development PG\* target/],
 ])("rejects unsafe database configuration before fixtures start", (change, error) => {
   expect(() => requireDevelopmentDatabase({ ...development, ...change })).toThrow(error);
