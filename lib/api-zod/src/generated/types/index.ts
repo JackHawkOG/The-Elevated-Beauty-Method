@@ -44,6 +44,8 @@ export * from './membershipOffer';
 export * from './membershipOfferPhase';
 export * from './membershipRedirect';
 export * from './memberStoryInput';
+export * from './memberStoryRemovalInput';
+export * from './memberStoryRemovalReceipt';
 export * from './methodStep';
 export * from './methodStepAccessTier';
 export * from './myMembership';

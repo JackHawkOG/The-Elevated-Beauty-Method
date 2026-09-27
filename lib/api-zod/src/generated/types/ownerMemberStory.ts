@@ -18,4 +18,12 @@ export interface OwnerMemberStory {
   withdrawnAt: string | null;
   /** @nullable */
   withdrawnBy: string | null;
+  /** @nullable */
+  removalRequestedAt: string | null;
+  /** @nullable */
+  removalRequestedBy: string | null;
+  /** @nullable */
+  removalRequesterEmail: string | null;
+  /** @nullable */
+  removalRequestNote: string | null;
 }

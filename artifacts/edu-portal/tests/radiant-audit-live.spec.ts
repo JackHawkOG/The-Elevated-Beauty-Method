@@ -131,10 +131,11 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   const created: string[] = [];
   try {
     await setupClerkTestingToken({ page });
-    const user = await client.users.createUser({
-      emailAddress: [email],
-      skipPasswordRequirement: true,
-    });
+    for (const account of accounts) {
+      const user = await client.users.createUser({
+        emailAddress: [account.email],
+        skipPasswordRequirement: true,
+      });
       created.push(user.id);
     }
     await signIn(page, accounts[0].email);
@@ -180,10 +181,10 @@ test("a delayed Audit response from the previous member never appears after swit
 
   try {
     for (const account of [a, b]) {
-    const user = await client.users.createUser({
-      emailAddress: [email],
-      skipPasswordRequirement: true,
-    });
+      const user = await client.users.createUser({
+        emailAddress: [account.email],
+        skipPasswordRequirement: true,
+      });
       created.push(user.id);
     }
     await signIn(page, a.email);
@@ -255,10 +256,11 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   const created: string[] = [];
   try {
     await setupClerkTestingToken({ page });
-    const user = await client.users.createUser({
-      emailAddress: [email],
-      skipPasswordRequirement: true,
-    });
+    for (const email of [wrongEmail, stagedEmail]) {
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+      });
       created.push(user.id);
       expect(user.primaryEmailAddress?.verification.status).toBe("verified");
     }

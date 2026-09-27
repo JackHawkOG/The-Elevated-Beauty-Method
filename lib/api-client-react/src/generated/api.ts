@@ -43,6 +43,8 @@ import type {
   ListAnnouncementsParams,
   ListCoursesParams,
   MemberStoryInput,
+  MemberStoryRemovalInput,
+  MemberStoryRemovalReceipt,
   MembershipCheckoutInput,
   MembershipOffer,
   MembershipRedirect,
@@ -312,6 +314,78 @@ export function useListManagedMemberStories<TData = Awaited<ReturnType<typeof li
 
 
 
+
+export const getRequestMemberStoryRemovalUrl = (storyId: number,) => {
+
+
+
+
+  return `/api/member-stories/${storyId}/removal-request`
+}
+
+/**
+ * @summary A signed-in member claims a published story and requests its removal; the story is hidden immediately for owner review
+ */
+export const requestMemberStoryRemoval = async (storyId: number,
+    memberStoryRemovalInput: MemberStoryRemovalInput, options?: Parameters<typeof customFetch>[1]): Promise<MemberStoryRemovalReceipt> => {
+
+  return customFetch<MemberStoryRemovalReceipt>(getRequestMemberStoryRemovalUrl(storyId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(memberStoryRemovalInput)
+  }
+);}
+
+
+
+
+
+export const getRequestMemberStoryRemovalMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestMemberStoryRemoval>>, TError,{storyId: number;data: BodyType<MemberStoryRemovalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof requestMemberStoryRemoval>>, TError,{storyId: number;data: BodyType<MemberStoryRemovalInput>}, TContext> => {
+
+const mutationKey = ['requestMemberStoryRemoval'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof requestMemberStoryRemoval>>, {storyId: number;data: BodyType<MemberStoryRemovalInput>}> = (props) => {
+          const {storyId,data} = props ?? {};
+
+          return  requestMemberStoryRemoval(storyId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RequestMemberStoryRemovalMutationResult = NonNullable<Awaited<ReturnType<typeof requestMemberStoryRemoval>>>
+    export type RequestMemberStoryRemovalMutationBody = BodyType<MemberStoryRemovalInput>
+    export type RequestMemberStoryRemovalMutationError = ErrorType<void>
+
+    /**
+ * @summary A signed-in member claims a published story and requests its removal; the story is hidden immediately for owner review
+ */
+export const useRequestMemberStoryRemoval = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestMemberStoryRemoval>>, TError,{storyId: number;data: BodyType<MemberStoryRemovalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof requestMemberStoryRemoval>>,
+        TError,
+        {storyId: number;data: BodyType<MemberStoryRemovalInput>},
+        TContext
+      > => {
+      return useMutation(getRequestMemberStoryRemovalMutationOptions(options));
+    }
 
 export const getWithdrawMemberStoryUrl = (storyId: number,) => {
 

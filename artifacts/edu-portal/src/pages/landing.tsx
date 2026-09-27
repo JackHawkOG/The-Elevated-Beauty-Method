@@ -281,6 +281,7 @@ export default function LandingPage() {
               {stories.map(story => <figure key={story.id} className="rounded-2xl border border-primary/20 bg-background/70 p-8">
                 <blockquote className="whitespace-pre-wrap break-words font-serif text-xl leading-relaxed">“{story.quote}”</blockquote>
                 <figcaption className="mt-6 break-words text-sm text-primary">— {story.attribution}</figcaption>
+                <Link href="/sign-in?stories=1" className="mt-5 block text-sm text-muted-foreground underline underline-offset-4 hover:text-primary">Is this your story? Sign in to request removal</Link>
               </figure>)}
             </div>
           </div>

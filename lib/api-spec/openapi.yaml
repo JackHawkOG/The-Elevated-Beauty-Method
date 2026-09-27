@@ -78,6 +78,38 @@ paths:
                   $ref: "#/components/schemas/OwnerMemberStory"
         "403":
           description: Owner access required
+  /member-stories/{storyId}/removal-request:
+    post:
+      operationId: requestMemberStoryRemoval
+      tags: [member-stories]
+      summary: A signed-in member claims a published story and requests its removal; the story is hidden immediately for owner review
+      parameters:
+        - in: path
+          name: storyId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberStoryRemovalInput"
+      responses:
+        "200":
+          description: Story hidden and request recorded privately
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberStoryRemovalReceipt"
+        "400":
+          description: Invalid request
+        "401":
+          description: Sign-in required
+        "404":
+          description: Story is not published
+        "429":
+          description: This account has already requested a removal within 24 hours
   /member-stories/{storyId}/withdraw:
     post:
       operationId: withdrawMemberStory
@@ -867,7 +899,7 @@ components:
         attribution: { type: string }
     OwnerMemberStory:
       type: object
-      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy]
+      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote]
       properties:
         id: { type: number }
         quote: { type: string }
@@ -878,6 +910,21 @@ components:
         publishedAt: { type: string }
         withdrawnAt: { type: ["string", "null"] }
         withdrawnBy: { type: ["string", "null"] }
+        removalRequestedAt: { type: ["string", "null"] }
+        removalRequestedBy: { type: ["string", "null"] }
+        removalRequesterEmail: { type: ["string", "null"] }
+        removalRequestNote: { type: ["string", "null"] }
+    MemberStoryRemovalInput:
+      type: object
+      required: [note]
+      properties:
+        note: { type: string, minLength: 1, description: "How the requester is connected to the story, for private owner review; at most 500 characters" }
+    MemberStoryRemovalReceipt:
+      type: object
+      required: [storyId, hidden]
+      properties:
+        storyId: { type: number }
+        hidden: { type: boolean }
     MemberStoryInput:
       type: object
       required: [quote, attribution, permissionRecord, permissionConfirmed]

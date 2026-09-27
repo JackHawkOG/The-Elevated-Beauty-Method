@@ -23,6 +23,27 @@ export interface OwnerMemberStory {
   withdrawnAt: string | null;
   /** @nullable */
   withdrawnBy: string | null;
+  /** @nullable */
+  removalRequestedAt: string | null;
+  /** @nullable */
+  removalRequestedBy: string | null;
+  /** @nullable */
+  removalRequesterEmail: string | null;
+  /** @nullable */
+  removalRequestNote: string | null;
+}
+
+export interface MemberStoryRemovalInput {
+  /**
+     * How the requester is connected to the story, for private owner review; at most 500 characters
+     * @minLength 1
+     */
+  note: string;
+}
+
+export interface MemberStoryRemovalReceipt {
+  storyId: number;
+  hidden: boolean;
 }
 
 export interface MemberStoryInput {

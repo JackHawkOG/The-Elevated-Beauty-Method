@@ -1,7 +1,7 @@
 import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 
-// Keep in sync with lib/db/migrations/0008_member_stories.sql.
+// Keep in sync with lib/db/migrations/0008_member_stories.sql and 0010_member_story_removal_requests.sql.
 export async function ensureMemberStoriesSchema(): Promise<void> {
   await db.execute(sql`CREATE TABLE IF NOT EXISTS "member_stories" (
     "id" serial PRIMARY KEY,
@@ -14,4 +14,8 @@ export async function ensureMemberStoriesSchema(): Promise<void> {
     "withdrawn_at" timestamptz,
     "withdrawn_by" text
   )`);
+  await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "removal_requested_at" timestamptz`);
+  await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "removal_requested_by" text`);
+  await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "removal_requester_email" text`);
+  await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "removal_request_note" text`);
 }

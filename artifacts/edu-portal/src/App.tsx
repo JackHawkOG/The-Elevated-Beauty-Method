@@ -91,13 +91,14 @@ function MemberQuerySession() {
 function SignInPage() {
   const pendingAudit = readPendingAudit();
   const joiningMembership = new URLSearchParams(window.location.search).get("membership") === "1";
+  const viewingStories = new URLSearchParams(window.location.search).get("stories") === "1";
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
       <SignIn
         routing="path"
         path={`${basePath}/sign-in`}
         signUpUrl={`${basePath}/sign-up${joiningMembership ? "?membership=1" : ""}`}
-        forceRedirectUrl={joiningMembership ? `${basePath}/membership` : pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
+        forceRedirectUrl={viewingStories ? `${basePath}/stories` : joiningMembership ? `${basePath}/membership` : pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
       />
     </div>
   );
@@ -142,6 +143,7 @@ import CommunityPage from '@/pages/community';
 import ProfilePage from '@/pages/profile';
 import EditorialPage from '@/pages/editorial';
 import MemberStoriesPage from '@/pages/member-stories';
+import PublicStoriesPage from '@/pages/public-stories';
 import RadiantAuditPage, { RadiantAuditCompletePage } from '@/pages/radiant-audit';
 import { readPendingAudit } from '@/lib/radiant-audit-session';
 
@@ -190,6 +192,7 @@ function Router() {
       <Route path="/profile" component={() => <ProtectedRoute component={ProfilePage} />} />
       <Route path="/editorial" component={() => <ProtectedRoute component={EditorialRoute} />} />
       <Route path="/member-stories" component={() => <ProtectedRoute component={MemberStoriesRoute} />} />
+      <Route path="/stories" component={() => <ProtectedRoute component={PublicStoriesPage} />} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -49,6 +49,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               </SidebarMenuItem>}
               <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={location === "/stories"}>
+                  <Link href="/stories"><Quote /> <span>View stories &amp; request removal</span></Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={location.startsWith("/community")}>
                   <Link href="/community"><MessageSquare /> <span>Community</span></Link>
                 </SidebarMenuButton>

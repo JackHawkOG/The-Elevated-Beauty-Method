@@ -11,6 +11,7 @@ vi.mock("@clerk/express", () => ({
   getAuth: (req: express.Request) => ({ userId: req.header("x-test-user") ?? null }),
   clerkClient: { users: { getUser: async (id: string) => ({
     publicMetadata: { role: id.startsWith("test-owner-") ? "owner" : "member" },
+    primaryEmailAddress: { emailAddress: `${id}@example.test` },
   }) } },
 }));
 
@@ -27,7 +28,9 @@ async function request(path: string, user?: string, method = "GET", body?: objec
     headers: { ...(user ? { "x-test-user": user } : {}), ...(body ? { "content-type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return { status: response.status, data: await response.json() as any, cache: response.headers.get("cache-control") };
+  const text = await response.text();
+  if (!response.headers.get("content-type")?.includes("application/json")) throw new Error(`${method} ${path}: ${response.status} ${text.slice(0, 1200)}`);
+  return { status: response.status, data: JSON.parse(text) as any, cache: response.headers.get("cache-control") };
 }
 
 beforeAll(async () => {
@@ -80,4 +83,35 @@ test("only explicitly permitted stories reach the public feed and withdrawal iso
   const publicAfter = await request("/member-stories");
   expect(publicAfter.data.some((story: { id: number }) => story.id === first.data.id)).toBe(false);
   expect(publicAfter.data.some((story: { id: number }) => story.id === second.data.id)).toBe(true);
+});
+
+test("signed-in removal requests hide the identified story and keep the claim private for owner review", async () => {
+  const input = { quote: `Removal claim ${run}`, attribution: "Member name", permissionRecord: "Recorded permission", permissionConfirmed: true };
+  const published = await request("/member-stories", owner, "POST", input);
+  expect(published.status).toBe(201);
+  created.push(published.data.id);
+  const path = `/member-stories/${published.data.id}/removal-request`;
+  expect((await request(path, undefined, "POST", { note: "This is me" })).status).toBe(401);
+  expect((await request(path, member, "POST", { note: "   " })).status).toBe(400);
+  expect((await request("/member-stories/not-a-number/removal-request", member, "POST", { note: "Mine" })).status).toBe(400);
+  expect((await request(path, member, "POST", { note: "x".repeat(501) })).status).toBe(400);
+  const removal = await request(path, member, "POST", { note: "I withdrew my permission" });
+  expect(removal.status).toBe(200);
+  expect(removal.data).toEqual({ storyId: published.data.id, hidden: true });
+  expect(removal.data).not.toHaveProperty("permissionRecord");
+  expect((await request(path, member, "POST", { note: "Again" })).status).toBe(429);
+  const other = await request("/member-stories", owner, "POST", { ...input, quote: `Other story ${run}` });
+  created.push(other.data.id);
+  expect((await request(`/member-stories/${other.data.id}/removal-request`, member, "POST", { note: "Another claim" })).status).toBe(429);
+  const publicList = await request("/member-stories");
+  expect(publicList.data.some((story: { id: number }) => story.id === published.data.id)).toBe(false);
+  expect(publicList.data.some((story: { id: number }) => story.id === other.data.id)).toBe(true);
+  expect(JSON.stringify(publicList.data)).not.toContain("I withdrew my permission");
+  expect((await request("/member-stories/manage", member)).status).toBe(403);
+  const managed = await request("/member-stories/manage", owner);
+  const story = managed.data.find((row: { id: number }) => row.id === published.data.id);
+  expect(story.removalRequestNote).toBe("I withdrew my permission");
+  expect(story.removalRequestedBy).toBe(member);
+  expect(story.removalRequesterEmail).toBe(`${member}@example.test`);
+  expect(story.withdrawnAt).toBeTruthy();
 });

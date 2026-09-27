@@ -45,7 +45,7 @@ export default function MemberStoriesPage() {
     <main className="mx-auto w-full max-w-4xl space-y-10 px-6 py-12">
       <div>
         <h1 className="font-serif text-4xl">Member stories</h1>
-        <p className="mt-2 text-muted-foreground">Publish only a quote and attribution the member explicitly approved. Keep the permission record here so you can find and withdraw a story later.</p>
+        <p className="mt-2 text-muted-foreground">Publish only a quote and attribution the member explicitly approved. Keep the permission record here so you can find and withdraw a story later. A member’s removal request hides their story immediately; review the private claim and permission record below promptly.</p>
       </div>
       <form onSubmit={submit} className="space-y-5 rounded-2xl border border-border bg-card p-6">
         <h2 className="font-serif text-2xl">Publish an approved story</h2>
@@ -78,6 +78,11 @@ export default function MemberStoriesPage() {
                   <blockquote className="mt-3 whitespace-pre-wrap break-words">“{story.quote}”</blockquote>
                   <p className="mt-2 break-words text-primary">— {story.attribution}</p>
                   <p className="mt-4 break-words text-xs text-muted-foreground">Permission recorded {new Date(story.permissionRecordedAt).toLocaleString()}: {story.permissionRecord}</p>
+                  {story.removalRequestedAt && <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm">
+                    <p className="font-semibold">Member removal request · Hidden immediately · Review needed</p>
+                    <p className="mt-2 break-words">Received {new Date(story.removalRequestedAt).toLocaleString()} from {story.removalRequesterEmail || story.removalRequestedBy} (account {story.removalRequestedBy})</p>
+                    <p className="mt-2 whitespace-pre-wrap break-words">Member’s note: {story.removalRequestNote}</p>
+                  </div>}
                 </div>
                 {!story.withdrawnAt && (withdrawId === story.id
                   ? <div className="flex gap-2"><Button variant="ghost" onClick={() => setWithdrawId(null)} disabled={withdraw.isPending}>Cancel</Button><Button variant="destructive" onClick={() => withdraw.mutate({ storyId: story.id })} disabled={withdraw.isPending}>Confirm withdrawal</Button></div>

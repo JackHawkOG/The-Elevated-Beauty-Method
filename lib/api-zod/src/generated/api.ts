@@ -46,7 +46,11 @@ export const PublishMemberStoryResponse = zod.object({
   "permissionRecordedBy": zod.string(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
-  "withdrawnBy": zod.string().nullable()
+  "withdrawnBy": zod.string().nullable(),
+  "removalRequestedAt": zod.string().nullable(),
+  "removalRequestedBy": zod.string().nullable(),
+  "removalRequesterEmail": zod.string().nullable(),
+  "removalRequestNote": zod.string().nullable()
 })
 
 
@@ -62,9 +66,33 @@ export const ListManagedMemberStoriesResponseItem = zod.object({
   "permissionRecordedBy": zod.string(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
-  "withdrawnBy": zod.string().nullable()
+  "withdrawnBy": zod.string().nullable(),
+  "removalRequestedAt": zod.string().nullable(),
+  "removalRequestedBy": zod.string().nullable(),
+  "removalRequesterEmail": zod.string().nullable(),
+  "removalRequestNote": zod.string().nullable()
 })
 export const ListManagedMemberStoriesResponse = zod.array(ListManagedMemberStoriesResponseItem)
+
+
+/**
+ * @summary A signed-in member claims a published story and requests its removal; the story is hidden immediately for owner review
+ */
+export const RequestMemberStoryRemovalParams = zod.object({
+  "storyId": zod.coerce.number()
+})
+
+
+
+
+export const RequestMemberStoryRemovalBody = zod.object({
+  "note": zod.string().min(1).describe('How the requester is connected to the story, for private owner review; at most 500 characters')
+})
+
+export const RequestMemberStoryRemovalResponse = zod.object({
+  "storyId": zod.number(),
+  "hidden": zod.boolean()
+})
 
 
 /**
@@ -83,7 +111,11 @@ export const WithdrawMemberStoryResponse = zod.object({
   "permissionRecordedBy": zod.string(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
-  "withdrawnBy": zod.string().nullable()
+  "withdrawnBy": zod.string().nullable(),
+  "removalRequestedAt": zod.string().nullable(),
+  "removalRequestedBy": zod.string().nullable(),
+  "removalRequesterEmail": zod.string().nullable(),
+  "removalRequestNote": zod.string().nullable()
 })
 
 
