@@ -42,6 +42,8 @@ async function assertRepair(repair: "migration" | "startup repair") {
         enrolled_at timestamp NOT NULL
       )
     `);
+    // The repair keeps a resume link only when its lesson exists, belongs to
+    // the enrolled course, and is published. Isolate these fixtures from live content.
     await client.query(`
       CREATE TEMP TABLE lessons (
         id integer PRIMARY KEY,
@@ -50,24 +52,9 @@ async function assertRepair(repair: "migration" | "startup repair") {
       )
     `);
     await client.query("SET search_path TO pg_temp, public");
-    // Shadow the live lessons table so the selected lesson IDs are valid
-    // without depending on (or changing) development catalog data.
-    await client.query(`
-      CREATE TEMP TABLE lessons (
-        id integer PRIMARY KEY,
-        course_id integer NOT NULL,
-        published_at timestamp
-      )
-    `);
     await client.query(`
       INSERT INTO lessons (id, course_id, published_at) VALUES
         (31, 7, '2022-01-01'), (41, 7, '2022-01-01'), (51, 8, '2022-01-01')
-    `);
-    await client.query(`
-      INSERT INTO lessons (id, course_id, published_at) VALUES
-        (31, 7, '2022-01-01'),
-        (41, 7, '2022-01-01'),
-        (51, 8, '2022-01-01')
     `);
     await client.query(`
       INSERT INTO enrollments (id, user_id, course_id, completed_lessons, last_lesson_id, enrolled_at)

@@ -530,3 +530,87 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
     await cleanUpAccounts(client, created);
   }
 });
+
+test("failed current Audit deletion keeps saved answers and history through reload, then retry succeeds", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = `audit-delete-failure-${tag}+clerk_test@example.com`;
+  const markers = [`first-${tag}`, `second-${tag}`, `current-${tag}`];
+  let userId: string | undefined;
+  try {
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
+    userId = user.id;
+    await signIn(page, email);
+    for (const [index, marker] of markers.entries()) {
+      if (index) await page.goto("/radiant-audit");
+      await save(page, email, marker);
+    }
+
+    const deletePath = "/api/users/me/radiant-audit";
+    let failedRequests = 0;
+    await page.route("**/api/users/me/radiant-audit", async route => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      failedRequests++;
+      await route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+    });
+    await page.getByRole("button", { name: "Delete current Audit" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Delete your current Audit?" });
+    const failure = page.waitForResponse(response =>
+      response.request().method() === "DELETE" && new URL(response.url()).pathname === deletePath,
+    );
+    await dialog.getByRole("button", { name: "Permanently delete current Audit" }).click();
+    expect((await failure).status()).toBe(503);
+    expect(failedRequests).toBe(1);
+    await expect(dialog.getByRole("alert")).toHaveText("We couldn't delete your current Audit. Please try again.");
+    await expect(dialog.getByRole("button", { name: "Permanently delete current Audit" })).toBeEnabled();
+    await expect(page.locator("main")).toContainText(reflections(markers[2]).masteryGoal);
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    for (const answer of Object.values(reflections(markers[2]))) {
+      await expect(page.locator("main")).toContainText(answer);
+    }
+    const comparison = page.getByRole("region", { name: "How your answers have changed" });
+    const choices = comparison.getByRole("combobox", { name: "Compare with" });
+    await expect(choices.locator("option")).toHaveCount(2);
+    for (const [index, marker] of [markers[1], markers[0]].entries()) {
+      await choices.selectOption({ index });
+      for (const answer of Object.values(reflections(marker))) {
+        await expect(comparison).toContainText(answer);
+      }
+    }
+
+    await page.goto("/dashboard");
+    const dashboardAudit = page.locator("section").filter({ has: page.getByRole("heading", { name: "Your Radiant Audit" }) });
+    await expect(dashboardAudit).toContainText("Your reflection is saved.");
+    await expect(dashboardAudit.getByRole("link", { name: "Review your Audit" })).toHaveAttribute("href", "/radiant-audit/complete");
+    await page.reload();
+    await expect(dashboardAudit).toContainText("Your reflection is saved.");
+
+    await page.unroute("**/api/users/me/radiant-audit");
+    await page.goto("/radiant-audit/complete");
+    await page.getByRole("button", { name: "Delete current Audit" }).click();
+    const retryDialog = page.getByRole("alertdialog", { name: "Delete your current Audit?" });
+    const success = page.waitForResponse(response =>
+      response.request().method() === "DELETE" && new URL(response.url()).pathname === deletePath,
+    );
+    await retryDialog.getByRole("button", { name: "Permanently delete current Audit" }).click();
+    expect((await success).status()).toBe(204);
+    await expect(retryDialog).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Start your Radiant Audit" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Start your Radiant Audit" })).toBeVisible();
+    await expect(page.locator("main")).not.toContainText(reflections(markers[2]).masteryGoal);
+    await expect(comparison.getByRole("combobox", { name: "Compare with" }).locator("option")).toHaveCount(2);
+    await page.goto("/dashboard");
+    await expect(dashboardAudit).not.toContainText("Your reflection is saved.");
+  } finally {
+    if (userId) await cleanUpAccounts(client, [userId]);
+  }
+});
