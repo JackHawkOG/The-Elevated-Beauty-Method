@@ -130,3 +130,76 @@ test("signed-in member compares both earlier Audits after saving and reload, wit
     { name: "radiant_audit_saved", data: { completion_kind: "retake" } },
   ]);
 });
+
+test("failed signed-in save preserves answers and checks until a successful retry", async ({ page }) => {
+  const answers = fixture("retry");
+  const submitted: Answers[] = [];
+  const saved: Audit[] = [];
+  await page.addInitScript(() => {
+    (window as unknown as { __auditTracking: Array<{ name: string; data?: unknown }> }).__auditTracking = [];
+    (window as unknown as { umami: { track: (name: string, data?: unknown) => void } }).umami = {
+      track: (name, data) => {
+        (window as unknown as { __auditTracking: Array<{ name: string; data?: unknown }> })
+          .__auditTracking.push({ name, data });
+      },
+    };
+  });
+  const tracking = () => page.evaluate(() =>
+    (window as unknown as { __auditTracking: Array<{ name: string; data?: unknown }> }).__auditTracking,
+  );
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    const request = route.request();
+    if (request.headers().authorization !== "Bearer member-a") {
+      return route.fulfill({ status: 401, json: { error: "Sign in required" } });
+    }
+    if (request.method() === "GET") {
+      return route.fulfill({ json: new URL(request.url()).pathname.endsWith("/history") ? [] : saved.at(-1) ?? null });
+    }
+    if (request.method() !== "PUT") return route.fulfill({ status: 405 });
+    const input = request.postDataJSON() as Answers;
+    submitted.push(input);
+    if (submitted.length === 1) {
+      return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+    }
+    const audit = {
+      ...input,
+      routineScore: input.routineChecks.length,
+      valuesScore: input.valuesChecks.length,
+      completedAt: "2026-09-02T12:00:00.000Z",
+    };
+    saved.push(audit);
+    return route.fulfill({ json: { audit, completionKind: "first_time" } });
+  });
+
+  await signInAs(page, "member-a");
+  await page.getByLabel("Skincare consistency").check();
+  await page.getByLabel("Quality over price").check();
+  await page.getByLabel("Professional results").check();
+  await page.locator("#beauty-trend").fill(answers.beautyTrend);
+  await page.locator("#mastery-goal").fill(answers.masteryGoal);
+  await page.locator("#research-time").fill(answers.researchTime);
+  await page.getByLabel("Email address").fill("member-a@example.invalid");
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+
+  await expect(page.getByRole("alert")).toContainText("We couldn't save your Audit");
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toHaveCount(0);
+  await expect(page.getByLabel("Skincare consistency")).toBeChecked();
+  await expect(page.getByLabel("Quality over price")).toBeChecked();
+  await expect(page.getByLabel("Professional results")).toBeChecked();
+  await expect(page.locator("#beauty-trend")).toHaveValue(answers.beautyTrend);
+  await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
+  await expect(page.locator("#research-time")).toHaveValue(answers.researchTime);
+  await expect(page.getByLabel("Email address")).toHaveValue("member-a@example.invalid");
+  expect(submitted).toEqual([answers]);
+  expect(saved).toHaveLength(0);
+  expect(await tracking()).toEqual([]);
+
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
+  expect(submitted).toEqual([answers, answers]);
+  expect(saved).toHaveLength(1);
+  expect(await tracking()).toEqual([
+    { name: "radiant_audit_saved", data: { completion_kind: "first_time" } },
+  ]);
+});
