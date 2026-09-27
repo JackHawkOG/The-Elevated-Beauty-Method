@@ -1,4 +1,5 @@
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
+import { clerkClient } from "@clerk/express";
 import { db, coursesTable, categoriesTable, lessonsTable, enrollmentsTable } from "@workspace/db";
 import { eq, ilike, sql, and } from "drizzle-orm";
 import {
@@ -19,8 +20,25 @@ import {
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { usersTable } from "@workspace/db";
 import { canAccessTier } from "../lib/beauty-method";
+import { isApprovedStandaloneCourse, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
 
 const router = Router();
+
+// Authenticated members are not content editors. Clerk public metadata is
+// server-managed; if no editor role is configured, authoring fails closed.
+async function requireContentEditor(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const user = await clerkClient.users.getUser(req.userId!);
+    if (user.publicMetadata.role !== "admin" && user.publicMetadata.role !== "editor") {
+      res.status(403).json({ error: "Editor access required" });
+      return;
+    }
+    next();
+  } catch (err) {
+    req.log.error({ err }, "Could not verify content editor");
+    res.status(503).json({ error: "Unable to verify editor access" });
+  }
+}
 
 // Course with aggregated counts
 async function buildCourseRow(courseId: number) {
@@ -44,7 +62,9 @@ async function buildCourseRow(courseId: number) {
     .from(coursesTable)
     .leftJoin(categoriesTable, eq(coursesTable.categoryId, categoriesTable.id))
     .where(eq(coursesTable.id, courseId));
-  return row;
+  return row && isApprovedStandaloneCourse(row.title)
+    ? { ...row, lessonCount: 1 }
+    : row;
 }
 
 // GET /courses
@@ -85,14 +105,22 @@ router.get("/courses", async (req, res): Promise<void> => {
     .offset(offset ?? 0)
     .orderBy(coursesTable.createdAt);
 
-  res.json(ListCoursesResponse.parse(rows.map(r => ({ ...r, createdAt: r.createdAt?.toISOString() }))));
+  res.json(ListCoursesResponse.parse(rows.map(r => ({
+    ...r,
+    lessonCount: isApprovedStandaloneCourse(r.title) ? 1 : r.lessonCount,
+    createdAt: r.createdAt?.toISOString(),
+  }))));
 });
 
 // POST /courses
-router.post("/courses", requireAuth, async (req, res): Promise<void> => {
+router.post("/courses", requireAuth, requireContentEditor, async (req, res): Promise<void> => {
   const parsed = CreateCourseBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  if (isApprovedStandaloneCourse(parsed.data.title)) {
+    res.status(403).json({ error: "Approved standalone courses are managed through editorial review" });
     return;
   }
   const [course] = await db.insert(coursesTable).values(parsed.data).returning();
@@ -112,7 +140,10 @@ router.get("/courses/:courseId", async (req, res): Promise<void> => {
   const row = await buildCourseRow(courseId);
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
 
-  const lessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, courseId)).orderBy(lessonsTable.sortOrder);
+  const lessons = publishedLessonsForCourse(
+    row.title,
+    await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, courseId)).orderBy(lessonsTable.sortOrder),
+  );
 
   res.json(GetCourseResponse.parse({
     ...row,
@@ -139,15 +170,25 @@ router.get("/courses/:courseId/lessons", requireAuth, jitProvisionUser, async (r
     return;
   }
 
-  const lessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, courseId)).orderBy(lessonsTable.sortOrder);
+  const lessons = publishedLessonsForCourse(
+    course.title,
+    await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, courseId)).orderBy(lessonsTable.sortOrder),
+  );
   res.json(ListLessonsResponse.parse(lessons.map(l => ({ ...l, content: null, videoUrl: null, createdAt: l.createdAt?.toISOString() }))));
 });
 
 // POST /courses/:courseId/lessons
-router.post("/courses/:courseId/lessons", requireAuth, async (req, res): Promise<void> => {
+router.post("/courses/:courseId/lessons", requireAuth, requireContentEditor, async (req, res): Promise<void> => {
   const rawId = Array.isArray(req.params.courseId) ? req.params.courseId[0] : req.params.courseId;
   const courseId = parseInt(rawId, 10);
   if (isNaN(courseId)) { res.status(400).json({ error: "Invalid courseId" }); return; }
+
+  const [targetCourse] = await db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1);
+  if (!targetCourse) { res.status(404).json({ error: "Not found" }); return; }
+  if (isApprovedStandaloneCourse(targetCourse.title)) {
+    res.status(403).json({ error: "Approved standalone lesson copy cannot be changed through this route" });
+    return;
+  }
 
   const paramsParsed = CreateLessonParams.safeParse({ courseId });
   if (!paramsParsed.success) { res.status(400).json({ error: paramsParsed.error.message }); return; }
@@ -177,6 +218,14 @@ router.get("/lessons/:lessonId", requireAuth, jitProvisionUser, async (req, res)
   if (!course || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
     res.status(403).json({ error: `${course?.accessTier ?? "Required"} membership required` });
     return;
+  }
+
+  if (isApprovedStandaloneCourse(course.title)) {
+    const courseLessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.sortOrder);
+    if (publishedLessonsForCourse(course.title, courseLessons)[0]?.id !== lesson.id) {
+      res.status(404).json({ error: "Lesson not published" });
+      return;
+    }
   }
 
   res.json(GetLessonResponse.parse({ ...lesson, createdAt: lesson.createdAt?.toISOString() }));

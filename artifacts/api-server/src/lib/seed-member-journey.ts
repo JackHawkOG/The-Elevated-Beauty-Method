@@ -1,6 +1,8 @@
 import { db, categoriesTable, coursesTable, lessonsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { acceleratorLessons } from "./accelerator-lessons";
+import { approvedTopicLessons } from "./approved-topic-lessons";
+import { logger } from "./logger";
 
 const courseTitle = "The Elevated Everyday Face";
 const acceleratorTitle = "The Beauty Mindset Accelerator";
@@ -59,6 +61,47 @@ export async function ensureMemberJourneyContent() {
       }
     } else {
       await db.insert(lessonsTable).values({ courseId: course.id, sortOrder: index + 1, ...lesson });
+    }
+  }
+
+  // Standalone owner-approved lessons; never append to the four-module Accelerator.
+  for (const topic of approvedTopicLessons) {
+    let [topicCategory] = await db.select().from(categoriesTable).where(eq(categoriesTable.slug, topic.category.slug)).limit(1);
+    if (!topicCategory) {
+      [topicCategory] = await db.insert(categoriesTable).values(topic.category).returning();
+    }
+
+    let [topicCourse] = await db.select().from(coursesTable).where(eq(coursesTable.title, topic.title)).limit(1);
+    if (!topicCourse) {
+      [topicCourse] = await db.insert(coursesTable).values({
+        title: topic.title,
+        description: topic.description,
+        categoryId: topicCategory.id,
+        difficulty: "Beginner",
+        instructorName: "Nikki — Blushing Beauty By Nikki",
+        isFeatured: false,
+        accessTier: "Elevated",
+      }).returning();
+    } else if (topicCourse.accessTier !== "Elevated" || topicCourse.categoryId !== topicCategory.id || topicCourse.description !== topic.description) {
+      logger.error({ title: topic.title }, "Approved topic course has unexpected metadata; skipping seed");
+      continue;
+    }
+
+    const topicLessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, topicCourse.id));
+    if (topicLessons.length > 1) {
+      logger.error({ title: topic.title }, "Approved topic course has extra lessons; only approved copy is served");
+    }
+    const existingTopicLesson = topicLessons.find(lesson => lesson.title === topic.title && lesson.sortOrder === 1);
+    if (!existingTopicLesson) {
+      await db.insert(lessonsTable).values({
+        courseId: topicCourse.id,
+        sortOrder: 1,
+        title: topic.title,
+        durationMinutes: topic.durationMinutes,
+        content: topic.content,
+      });
+    } else if (existingTopicLesson.content !== topic.content) {
+      await db.update(lessonsTable).set({ content: topic.content }).where(eq(lessonsTable.id, existingTopicLesson.id));
     }
   }
 }
