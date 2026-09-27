@@ -48,6 +48,7 @@ async function assertRepair(repair: "migration" | "startup repair") {
     await client.query(`
       INSERT INTO lessons (id, course_id, published_at) VALUES
         (31, 7, '2022-01-01'),
+        (32, 7, NULL),
         (41, 7, '2022-01-01'),
         (51, 8, '2022-01-01')
     `);
@@ -56,9 +57,14 @@ async function assertRepair(repair: "migration" | "startup repair") {
       VALUES
         (12, 'legacy-member', 7, 4, 31, '2023-06-01'),
         (11, 'legacy-member', 7, 1, NULL, '2022-01-01'),
+        (13, 'legacy-member', 7, 8, 32, '2023-07-01'),
+        (14, 'legacy-member', 7, 9, 51, '2023-08-01'),
         (22, 'another-member', 7, 5, NULL, '2023-06-01'),
         (21, 'another-member', 7, 2, 41, '2022-01-01'),
-        (30, 'legacy-member', 8, 3, 51, '2022-03-01')
+        (30, 'legacy-member', 8, 3, 51, '2022-03-01'),
+        (61, 'no-valid-lesson', 7, 2, 32, '2022-01-01'),
+        (62, 'no-valid-lesson', 7, 8, 51, '2023-01-01'),
+        (63, 'no-valid-lesson', 7, 4, NULL, '2024-01-01')
     `);
     const migration = await readFile(migrationUrl, "utf8");
     const rows = async () => (await client.query(`
@@ -116,9 +122,10 @@ async function assertRepair(repair: "migration" | "startup repair") {
     await runRepair();
     const merged = await rows();
     expect(merged).toEqual([
-      { id: 11, user_id: "legacy-member", course_id: 7, completed_lessons: 4, last_lesson_id: 31, enrolled_at: "2022-01-01" },
+      { id: 11, user_id: "legacy-member", course_id: 7, completed_lessons: 9, last_lesson_id: 31, enrolled_at: "2022-01-01" },
       { id: 21, user_id: "another-member", course_id: 7, completed_lessons: 5, last_lesson_id: 41, enrolled_at: "2022-01-01" },
       { id: 30, user_id: "legacy-member", course_id: 8, completed_lessons: 3, last_lesson_id: 51, enrolled_at: "2022-03-01" },
+      { id: 61, user_id: "no-valid-lesson", course_id: 7, completed_lessons: 8, last_lesson_id: null, enrolled_at: "2022-01-01" },
     ]);
     // The installed index must prevent future duplicates as well.
     await expect(client.query(`
