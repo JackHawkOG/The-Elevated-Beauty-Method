@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, enrollmentsTable, coursesTable, lessonsTable, activityTable, usersTable } from "@workspace/db";
+import { db, enrollmentsTable, coursesTable, lessonsTable, lessonCompletionsTable, activityTable, usersTable } from "@workspace/db";
 import { eq, and, sql } from "drizzle-orm";
 import {
   ListEnrollmentsResponse,
@@ -107,24 +107,47 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
 
   const { lessonId } = bodyParsed.data;
 
-  const [enrollment] = await db.select().from(enrollmentsTable)
-    .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
-    .limit(1);
-  if (!enrollment) { res.status(404).json({ error: "Not enrolled" }); return; }
+  const [[lesson], [course], [member]] = await Promise.all([
+    db.select().from(lessonsTable).where(and(eq(lessonsTable.id, lessonId), eq(lessonsTable.courseId, courseId))).limit(1),
+    db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1),
+    db.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1),
+  ]);
+  if (!lesson) { res.status(400).json({ error: "Lesson does not belong to this course" }); return; }
+  if (!course || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
+    res.status(403).json({ error: "Membership required" }); return;
+  }
 
-  const [updated] = await db.update(enrollmentsTable)
-    .set({ lastLessonId: lessonId, completedLessons: enrollment.completedLessons + 1 })
-    .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    // Lock this member's enrollment before reading or updating its progress.
+    // Concurrent completions and retries then serialize on the same row.
+    const [enrollment] = await tx.select().from(enrollmentsTable)
+      .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
+      .for("update")
+      .limit(1);
+    if (!enrollment) return null;
 
-  const [course] = await db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1);
-  const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(eq(lessonsTable.courseId, courseId));
+    await tx.insert(lessonCompletionsTable)
+      .values({ userId, lessonId })
+      .onConflictDoNothing();
+    const [[totalRow], [completedRow]] = await Promise.all([
+      tx.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(eq(lessonsTable.courseId, courseId)),
+      tx.select({ count: sql<number>`count(*)::int` }).from(lessonCompletionsTable)
+        .innerJoin(lessonsTable, eq(lessonCompletionsTable.lessonId, lessonsTable.id))
+        .where(and(eq(lessonCompletionsTable.userId, userId), eq(lessonsTable.courseId, courseId))),
+    ]);
+    const [updated] = await tx.update(enrollmentsTable)
+      .set({ lastLessonId: lessonId, completedLessons: completedRow.count })
+      .where(eq(enrollmentsTable.id, enrollment.id))
+      .returning();
+    return { updated, totalLessons: totalRow.count };
+  });
+  if (!result) { res.status(404).json({ error: "Not enrolled" }); return; }
 
   res.json(UpdateProgressResponse.parse({
-    ...updated,
+    ...result.updated,
     courseTitle: course?.title ?? "",
-    totalLessons: totalRow?.count ?? 0,
-    enrolledAt: updated.enrolledAt?.toISOString(),
+    totalLessons: result.totalLessons,
+    enrolledAt: result.updated.enrolledAt?.toISOString(),
   }));
 });
 

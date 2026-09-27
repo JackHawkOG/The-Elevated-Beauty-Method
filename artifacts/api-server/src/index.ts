@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureMemberJourneyContent } from "./lib/seed-member-journey";
+import { ensureProgressSchema } from "./lib/ensure-progress-schema";
 
 const rawPort = process.env["PORT"];
 
@@ -16,6 +17,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+await ensureProgressSchema();
 await ensureMemberJourneyContent();
 
 app.listen(port, (err) => {

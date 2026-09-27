@@ -6,7 +6,8 @@ import {
   getListLessonsQueryKey,
   useUpdateProgress,
   useGetCourse,
-  getGetCourseQueryKey
+  getGetCourseQueryKey,
+  getListEnrollmentsQueryKey
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,6 +39,7 @@ export default function LessonPage() {
   const updateProgress = useUpdateProgress({
     mutation: {
       onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListEnrollmentsQueryKey() });
         toast({ title: "Progress saved", description: "Lesson marked as complete." });
         // Find next lesson and redirect if exists
         const currentIndex = lessons?.findIndex(l => l.id === lessonId) ?? -1;

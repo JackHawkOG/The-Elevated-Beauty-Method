@@ -5,7 +5,12 @@ import {
   useGetFeaturedCourses, 
   useGetRecentActivity, 
   useListEnrollments,
-  useGetBeautyMethod
+  useGetBeautyMethod,
+  useGetMe,
+  useListCourses,
+  useGetCourse,
+  getListCoursesQueryKey,
+  getGetCourseQueryKey
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,8 +19,22 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { formatDistanceToNow } from "date-fns";
 import { BeautyDiagnostic, BeautyDiagnosticSkeleton } from "@/components/beauty-diagnostic";
+import { AcceleratorDashboard } from "@/components/accelerator-dashboard";
 
 export default function Dashboard() {
+  const { data: member, isLoading: memberLoading } = useGetMe();
+  // Existing Premium accounts retain access to Elevated courses, even though
+  // only Free and Elevated are currently offered to new members.
+  const isElevated = member?.membershipTier === "Elevated" || member?.membershipTier === "Premium";
+  const acceleratorSearch = { search: "The Beauty Mindset Accelerator" };
+  const { data: acceleratorCourses, isLoading: coursesLoading } = useListCourses(
+    acceleratorSearch,
+    { query: { queryKey: getListCoursesQueryKey(acceleratorSearch), enabled: isElevated } }
+  );
+  const acceleratorId = acceleratorCourses?.find(course => course.title === "The Beauty Mindset Accelerator")?.id;
+  const { data: accelerator, isLoading: acceleratorLoading } = useGetCourse(acceleratorId ?? 0, {
+    query: { queryKey: getGetCourseQueryKey(acceleratorId ?? 0), enabled: isElevated && !!acceleratorId }
+  });
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
   const { data: featured, isLoading: featuredLoading } = useGetFeaturedCourses();
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
@@ -29,6 +48,14 @@ export default function Dashboard() {
           <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Welcome back.</h1>
           <p className="text-muted-foreground text-lg">Here's what's happening in The Elevated Beauty Method community today.</p>
         </header>
+
+        {(memberLoading || isElevated) && (
+          <AcceleratorDashboard
+            course={accelerator}
+            enrollment={enrollments?.find(item => item.courseId === acceleratorId)}
+            loading={memberLoading || coursesLoading || acceleratorLoading || enrollmentsLoading}
+          />
+        )}
 
         {/* Primary New Member Experience */}
         <section>
