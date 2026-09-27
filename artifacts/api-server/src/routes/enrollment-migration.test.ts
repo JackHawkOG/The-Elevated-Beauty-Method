@@ -35,9 +35,9 @@ async function assertRepair(repair: "migration" | "startup repair") {
         enrolled_at timestamp NOT NULL
       )
     `);
-    // The repair keeps a resume link only when its lesson exists, belongs to
-    // the enrolled course, and is published. Isolate these fixtures from live content.
     await client.query("SET search_path TO pg_temp, public");
+    // Shadow the live lessons table so the selected lesson IDs are valid
+    // without depending on (or changing) development catalog data.
     await client.query(`
       CREATE TEMP TABLE lessons (
         id integer PRIMARY KEY,
@@ -75,6 +75,44 @@ async function assertRepair(repair: "migration" | "startup repair") {
       }
     };
 
+    const original = await rows();
+    // A deleted legacy row adds two new copies. The DELETE succeeds, but the
+    // final unique index cannot be built; neither the merge nor the deletion
+    // should survive that failure.
+    await client.query(`
+      CREATE FUNCTION pg_temp.inject_enrollment_index_conflict() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF OLD.id = 12 THEN
+          INSERT INTO enrollments (id, user_id, course_id, enrolled_at)
+          VALUES (91, 'index-conflict-member', 7, '2024-01-01'),
+                 (92, 'index-conflict-member', 7, '2024-01-01');
+        END IF;
+        RETURN NULL;
+      END
+      $$
+    `);
+    await client.query(`
+      CREATE TRIGGER inject_enrollment_index_conflict
+      AFTER DELETE ON enrollments FOR EACH ROW
+      EXECUTE FUNCTION pg_temp.inject_enrollment_index_conflict()
+    `);
+    const indexFailure = {
+      code: "23505",
+      constraint: "enrollments_user_id_course_id_unique",
+    };
+    await expect(runRepair()).rejects.toMatchObject(
+      repair === "migration" ? indexFailure : { cause: indexFailure },
+    );
+    // A multi-statement SQL migration leaves the session in a failed explicit
+    // transaction; the startup repair rolls its transaction back itself.
+    await client.query("ROLLBACK");
+    expect(await rows()).toEqual(original);
+    expect((await client.query(
+      "SELECT to_regclass('pg_temp.enrollments_user_id_course_id_unique') AS index_name",
+    )).rows[0].index_name).toBeNull();
+    await client.query("DROP TRIGGER inject_enrollment_index_conflict ON enrollments");
+
     await runRepair();
     const merged = await rows();
     expect(merged).toEqual([
@@ -90,9 +128,11 @@ async function assertRepair(repair: "migration" | "startup repair") {
     await runRepair();
     expect(await rows()).toEqual(merged);
   } finally {
+    await client.query("ROLLBACK");
     await client.query("RESET search_path");
     await client.query("DROP TABLE IF EXISTS pg_temp.enrollments");
     await client.query("DROP TABLE IF EXISTS pg_temp.lessons");
+    await client.query("DROP FUNCTION IF EXISTS pg_temp.inject_enrollment_index_conflict()");
     client.release();
   }
 }
