@@ -545,6 +545,23 @@ paths:
         "401":
           description: Unauthorized
 
+  /users/me/radiant-audit/history:
+    get:
+      operationId: getRadiantAuditHistory
+      tags: [method]
+      summary: List the signed-in member's earlier Radiant Audit submissions, newest first
+      responses:
+        "200":
+          description: Earlier submissions, excluding the current Audit
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RadiantAuditHistoryEntry"
+        "401":
+          description: Unauthorized
+
   /dashboard/stats:
     get:
       operationId: getDashboardStats
@@ -950,6 +967,15 @@ components:
         completionKind:
           type: string
           enum: [first_time, retake]
+
+    RadiantAuditHistoryEntry:
+      allOf:
+        - $ref: "#/components/schemas/RadiantAudit"
+        - type: object
+          required: [id]
+          properties:
+            id:
+              type: number
 
     BeautyDiagnosticInput:
       type: object

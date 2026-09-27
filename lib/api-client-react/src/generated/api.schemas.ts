@@ -293,6 +293,10 @@ export interface RadiantAuditSaveResult {
   completionKind: RadiantAuditSaveResultCompletionKind;
 }
 
+export type RadiantAuditHistoryEntry = RadiantAudit & {
+  id: number;
+};
+
 export type BeautyDiagnosticInputSkinType = typeof BeautyDiagnosticInputSkinType[keyof typeof BeautyDiagnosticInputSkinType];
 
 

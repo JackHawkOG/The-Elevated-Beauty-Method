@@ -681,6 +681,37 @@ export const SaveRadiantAuditResponse = zod.object({
 
 
 /**
+ * @summary List the signed-in member's earlier Radiant Audit submissions, newest first
+ */
+export const getRadiantAuditHistoryResponseOneOneRoutineChecksMax = 5;
+
+export const getRadiantAuditHistoryResponseOneOneValuesChecksMax = 5;
+
+export const getRadiantAuditHistoryResponseOneOneBeautyTrendMax = 1000;
+
+export const getRadiantAuditHistoryResponseOneOneMasteryGoalMax = 1000;
+
+export const getRadiantAuditHistoryResponseOneOneResearchTimeMax = 1000;
+
+
+
+export const GetRadiantAuditHistoryResponseItem = zod.object({
+  "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditHistoryResponseOneOneRoutineChecksMax),
+  "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(getRadiantAuditHistoryResponseOneOneValuesChecksMax),
+  "beautyTrend": zod.string().min(1).max(getRadiantAuditHistoryResponseOneOneBeautyTrendMax),
+  "masteryGoal": zod.string().min(1).max(getRadiantAuditHistoryResponseOneOneMasteryGoalMax),
+  "researchTime": zod.string().min(1).max(getRadiantAuditHistoryResponseOneOneResearchTimeMax)
+}).and(zod.object({
+  "routineScore": zod.number(),
+  "valuesScore": zod.number(),
+  "completedAt": zod.coerce.date()
+})).and(zod.object({
+  "id": zod.number()
+}))
+export const GetRadiantAuditHistoryResponse = zod.array(GetRadiantAuditHistoryResponseItem)
+
+
+/**
  * @summary Get summary stats for the portal home dashboard
  */
 export const GetDashboardStatsResponse = zod.object({

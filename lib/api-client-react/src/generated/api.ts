@@ -43,6 +43,7 @@ import type {
   ListCoursesParams,
   ProgressUpdate,
   RadiantAudit,
+  RadiantAuditHistoryEntry,
   RadiantAuditInput,
   RadiantAuditSaveResult,
   UserProfile,
@@ -2025,6 +2026,83 @@ export const useSaveRadiantAudit = <TError = ErrorType<void>,
       > => {
       return useMutation(getSaveRadiantAuditMutationOptions(options));
     }
+
+export const getGetRadiantAuditHistoryUrl = () => {
+
+
+
+
+  return `/api/users/me/radiant-audit/history`
+}
+
+/**
+ * @summary List the signed-in member's earlier Radiant Audit submissions, newest first
+ */
+export const getRadiantAuditHistory = async ( options?: Parameters<typeof customFetch>[1]): Promise<RadiantAuditHistoryEntry[]> => {
+
+  return customFetch<RadiantAuditHistoryEntry[]>(getGetRadiantAuditHistoryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRadiantAuditHistoryQueryKey = () => {
+    return [
+    `/api/users/me/radiant-audit/history`
+    ] as const;
+    }
+
+
+export const getGetRadiantAuditHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getRadiantAuditHistory>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRadiantAuditHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRadiantAuditHistoryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRadiantAuditHistory>>> = ({ signal }) => getRadiantAuditHistory({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRadiantAuditHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetRadiantAuditHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getRadiantAuditHistory>>>
+export type GetRadiantAuditHistoryQueryError = ErrorType<void>
+
+
+/**
+ * @summary List the signed-in member's earlier Radiant Audit submissions, newest first
+ */
+
+export function useGetRadiantAuditHistory<TData = Awaited<ReturnType<typeof getRadiantAuditHistory>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRadiantAuditHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetRadiantAuditHistoryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetDashboardStatsUrl = () => {
 

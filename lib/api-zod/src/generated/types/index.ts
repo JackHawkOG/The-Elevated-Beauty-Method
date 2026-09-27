@@ -41,6 +41,7 @@ export * from './methodStep';
 export * from './methodStepAccessTier';
 export * from './progressUpdate';
 export * from './radiantAudit';
+export * from './radiantAuditHistoryEntry';
 export * from './radiantAuditInput';
 export * from './radiantAuditInputRoutineChecksItem';
 export * from './radiantAuditInputValuesChecksItem';

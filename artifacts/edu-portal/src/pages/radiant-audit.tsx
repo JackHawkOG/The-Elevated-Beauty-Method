@@ -4,12 +4,15 @@ import { useLocation, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetRadiantAudit,
+  useGetRadiantAuditHistory,
   useSaveRadiantAudit,
   getGetRadiantAuditQueryKey,
+  getGetRadiantAuditHistoryQueryKey,
   type RadiantAuditInput,
 } from "@workspace/api-client-react";
 import { RadiantAuditForm, type RadiantAuditSubmission } from "@/components/radiant-audit-form";
-import { trackRadiantAuditSaved } from "@/lib/analytics";
+import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
+import { trackEvent, trackRadiantAuditSaved } from "@/lib/analytics";
 import { clearPendingAudit, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2 } from "lucide-react";
@@ -44,6 +47,7 @@ export default function RadiantAuditPage() {
         const saved = await save.mutateAsync({ data: auditAnswers(audit) });
         trackRadiantAuditSaved(saved.completionKind);
         queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
+        void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
         navigate("/radiant-audit/complete");
       } catch {
         setError("We couldn't save your Audit. Your answers are still here; please try again.");
@@ -81,6 +85,9 @@ export function RadiantAuditCompletePage() {
   const { data: saved, isLoading, isError } = useGetRadiantAudit({
     query: { queryKey: getGetRadiantAuditQueryKey(), enabled: !pending },
   });
+  const { data: history, isLoading: historyLoading, isError: historyError } = useGetRadiantAuditHistory({
+    query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !!saved },
+  });
   const email = user?.primaryEmailAddress?.emailAddress;
   const mismatch = !!pending && !!isLoaded &&
     (!email || email.toLowerCase() !== pending.email.toLowerCase());
@@ -91,6 +98,7 @@ export function RadiantAuditCompletePage() {
       const result = await save.mutateAsync({ data: auditAnswers(audit) });
       trackRadiantAuditSaved(result.completionKind);
       queryClient.setQueryData(getGetRadiantAuditQueryKey(), result.audit);
+      void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
       clearPendingAudit();
       setPending(null);
     } catch {
@@ -167,6 +175,13 @@ export function RadiantAuditCompletePage() {
                 </div>
               ))}
             </dl>
+            {historyLoading ? (
+              <p className="mt-8" role="status">Loading earlier Audits…</p>
+            ) : historyError ? (
+              <p className="mt-8 text-destructive" role="alert">We couldn't load your earlier Audits. Please refresh and try again.</p>
+            ) : (
+              <RadiantAuditComparison latest={saved} history={history ?? []} />
+            )}
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild><Link href="/dashboard">Explore your free dashboard</Link></Button>
               <Button asChild variant="outline"><Link href="/radiant-audit">Retake the Audit</Link></Button>
