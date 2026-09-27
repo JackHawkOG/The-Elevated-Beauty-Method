@@ -7,6 +7,7 @@ import {
   activityTable, categoriesTable, coursesTable, db, enrollmentsTable,
   lessonCompletionsTable, lessonsTable, pool, usersTable,
 } from "@workspace/db";
+import { requireDevelopmentDatabase } from "./test-development-database";
 
 // Exercise the actual requireAuth middleware and route guards. Only the isolated
 // test server replaces Clerk's session lookup and public-metadata lookup.
@@ -81,18 +82,7 @@ async function assertCourseHidden(courseId: number, lessonId?: number) {
 }
 
 beforeAll(async () => {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT || !process.env.DATABASE_URL) {
-    throw new Error("Publication integration tests require a development database and cannot run in a deployment");
-  }
-  // Replit supplies PG* and DATABASE_URL for the same development database.
-  // Reject a manually overridden DATABASE_URL (for example, a production URL).
-  const target = new URL(process.env.DATABASE_URL);
-  if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
-      target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
-    throw new Error("Publication tests require the workspace development database URL");
-  }
+  requireDevelopmentDatabase();
   fixturesStarted = true;
   const [{ default: courses }, { default: enrollments }, { default: dashboard }] = await Promise.all([
     import("./courses"), import("./enrollments"), import("./dashboard"),

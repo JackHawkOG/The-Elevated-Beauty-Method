@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db, pool, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, usersTable } from "@workspace/db";
 import { ensureRadiantAuditSchema } from "../lib/ensure-radiant-audit-schema";
+import { requireDevelopmentDatabase } from "./test-development-database";
 
 vi.mock("../middlewares/requireAuth", () => ({
   requireAuth: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
@@ -22,6 +23,7 @@ const otherAccount = `audit-test-${randomUUID()}`;
 const retryAccount = `audit-test-${randomUUID()}`;
 let server: Server;
 let baseUrl: string;
+let databaseSafe = false;
 
 async function request(method: string, body?: object, user = account, path = "") {
   const response = await fetch(`${baseUrl}/users/me/radiant-audit${path}`, {
@@ -33,9 +35,8 @@ async function request(method: string, body?: object, user = account, path = "")
 }
 
 beforeAll(async () => {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Audit integration tests must only run against a development database");
-  }
+  requireDevelopmentDatabase();
+  databaseSafe = true;
   await ensureRadiantAuditSchema();
   const { default: router } = await import("./radiant-audits");
   const app = express();
@@ -63,14 +64,18 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-  for (const user of [account, otherAccount, retryAccount]) {
-    await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, user));
-    await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, user));
-    await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user));
-    await db.delete(usersTable).where(eq(usersTable.clerkId, user));
+  try {
+    if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    if (!databaseSafe) return;
+    for (const user of [account, otherAccount, retryAccount]) {
+      await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, user));
+      await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, user));
+      await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user));
+      await db.delete(usersTable).where(eq(usersTable.clerkId, user));
+    }
+  } finally {
+    await pool.end();
   }
-  await pool.end();
 });
 
 test("a committed save with a lost response can be retried without creating history", async () => {
@@ -197,7 +202,7 @@ test("members can remove earlier submissions without deleting the latest or anot
     researchTime: "one hour",
   };
   await request("PUT", answers, otherAccount);
-  const otherHistory = (await request("GET", undefined, otherAccount, "/history")).data as unknown as Array<{ id: number }>;
+  const otherHistory = (await request("GET", undefined, otherAccount, "/history")).data;
   expect(otherHistory).toHaveLength(1);
   const otherId = otherHistory[0].id;
 
@@ -210,7 +215,7 @@ test("members can remove earlier submissions without deleting the latest or anot
 
   const before = (await request("GET", undefined, account, "/history")).data as unknown as Array<{ id: number }>;
   expect(before.length).toBeGreaterThan(1);
-  const latest = (await request("GET", undefined, account)).data;
+  const latest = (await request("GET")).data;
   expect((await request("DELETE", undefined, account, `/history/${before[0].id}`)).status).toBe(204);
   expect(await db.select().from(radiantAuditSubmissionsTable)
     .where(eq(radiantAuditSubmissionsTable.clerkId, account))).toEqual([]);

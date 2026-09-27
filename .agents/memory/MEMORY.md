@@ -8,3 +8,4 @@
 - [Stripe checkout test fixtures](stripe-checkout-test-fixtures.md) — keep session identity intact when changing mocked Stripe status; incomplete fixtures can hide failed reservation release.
 - [Membership capacity test isolation](membership-capacity-test-isolation.md) — test runs share one development inventory; serialize full fixture lifetimes, not just individual reservations.
 - [Audit retry receipts and privacy](audit-retry-receipts.md) — retry receipts retain answer snapshots; erase them when Audit data is explicitly deleted.
+- [Development DB URL guard](development-db-url-guard.md) — workspace DB URLs can include SSL options; reject target-changing URL options without rejecting legitimate connection settings.
