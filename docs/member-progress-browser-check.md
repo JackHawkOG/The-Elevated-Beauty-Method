@@ -38,8 +38,11 @@ records before rerunning the gate.
 An interrupted process cannot perform cleanup. In the **development validation
 workspace only**, run `pnpm run inspect:progress-leftovers` from the root. This
 read-only dry run lists matching disposable Clerk identities, provisioned
-members and fixture categories older than one hour, with their run UUIDs
-and the associated course and lesson IDs.
+members, fixture categories and enrollment activity older than one hour, with
+their run UUIDs and the associated course and lesson IDs. Activity is reported
+even when the accounts and curriculum were already removed, but only when its
+actor name contains the exact run UUID and its type, description and course
+title match the browser check's enrollment post.
 It requires the same development database, test Clerk keys, preview and
 Chromium safeguards as the browser check. No production keys or deployment
 environment are permitted. It does not discover records whose original marker
@@ -49,9 +52,10 @@ Check the reported IDs against the interrupted run before deleting. To remove
 one confirmed run, run
 `pnpm run inspect:progress-leftovers --delete <run-uuid> <same-run-uuid>`.
 The repeated UUID is an intentional confirmation, not a wildcard. Deletion
-refuses records less than an hour old, mismatched names/emails, or curriculum
+refuses records less than an hour old (including activity), mismatched markers, or curriculum
 with non-fixture lessons or unrelated enrollments/completions. It removes only
-the run's member progress, course/category (if present), activity and Clerk
+the run's member progress, course/category (if present), matched activity rows
+(including activity-only leftovers) and Clerk
 users. If a database reference blocks deletion, it stops without cascading;
 investigate before retrying. If Clerk deletion fails after database cleanup,
 the dry run will still list the remaining Clerk identity for another attempt.

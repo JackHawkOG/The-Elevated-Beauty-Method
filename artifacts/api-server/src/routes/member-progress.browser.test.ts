@@ -170,7 +170,12 @@ test("Clerk members retain progress after reload; Free members cannot access it"
         { name: "Delete fixture category", run: () =>
           db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId)) },
       ] : []),
-      { name: "Delete activity", run: () => db.delete(activityTable).where(eq(activityTable.actorName, names[0])) },
+      { name: "Delete activity", run: () => db.delete(activityTable).where(and(
+        eq(activityTable.actorName, names[0]),
+        eq(activityTable.entityTitle, "The Beauty Mindset Accelerator"),
+        eq(activityTable.type, "enrollment"),
+        eq(activityTable.description, "enrolled in a course"),
+      )) },
       { name: "Close database pool", run: () => pool.end() },
     ];
   });

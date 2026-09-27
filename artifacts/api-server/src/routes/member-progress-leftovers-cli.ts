@@ -2,14 +2,14 @@
 // Import the clients only after validating the development environment.
 import { progressBrowserEnvironment } from "./member-progress-browser-environment";
 import {
-  categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate,
+  activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate,
 } from "./member-progress-leftovers";
 
 async function main() {
   const run = confirmedRun(process.argv.slice(2));
   progressBrowserEnvironment();
   const { clerkClient } = await import("@clerk/express");
-  const { and, eq } = await import("drizzle-orm");
+  const { and, eq, like, lte } = await import("drizzle-orm");
   const {
     db, pool, categoriesTable, coursesTable, lessonsTable, usersTable,
     enrollmentsTable, lessonCompletionsTable, activityTable,
@@ -18,6 +18,8 @@ async function main() {
     const now = new Date();
     const categories = await db.select().from(categoriesTable);
     const members = await db.select().from(usersTable);
+    const activities = await db.select().from(activityTable)
+      .where(like(activityTable.actorName, "Progress Elevated %"));
     const identities: Array<{ id: string; email: string; name: string; createdAt: Date }> = [];
     for (let offset = 0; ; offset += 100) {
       const page = await clerkClient.users.getUserList({ limit: 100, offset });
@@ -45,6 +47,12 @@ async function main() {
         return id ? [{ kind: "clerk" as const, id: identity.id, run: id,
           createdAt: identity.createdAt, marker: identity.email, name: identity.name }] : [];
       }),
+      ...activities.flatMap(activity => {
+        const id = activityRun(activity.actorName, activity.entityTitle, activity.type, activity.description);
+        return id ? [{ kind: "activity" as const, id: String(activity.id), run: id,
+          createdAt: activity.createdAt, marker: activity.actorName, name: activity.entityTitle,
+          type: activity.type, description: activity.description }] : [];
+      }),
     ];
     const stale = staleCandidates(candidates, now);
     if (!run) {
@@ -59,8 +67,8 @@ async function main() {
           }))) };
       }));
       console.log(JSON.stringify({
-        candidates: stale.map(({ kind, id, run, createdAt, marker }) =>
-          ({ kind, id, run, createdAt, marker })),
+        candidates: stale.map(({ kind, id, run, createdAt, marker, type, description }) =>
+          ({ kind, id, run, createdAt, marker, ...(kind === "activity" ? { type, description } : {}) })),
         curriculum,
       }, null, 2));
       console.log(`${stale.length} stale disposable record(s). Dry run only; nothing deleted.`);
@@ -70,6 +78,7 @@ async function main() {
     const categoriesForRun = selected.filter(c => c.kind === "category");
     const identitiesForRun = selected.filter(c => c.kind === "clerk");
     const membersForRun = selected.filter(c => c.kind === "member");
+    const activitiesForRun = selected.filter(c => c.kind === "activity");
     if (categoriesForRun.length > 1 || identitiesForRun.length > 2 || membersForRun.length > 2 ||
         membersForRun.some(m => identitiesForRun.some(i => i.id === m.id && i.marker !== m.marker))) {
       throw new Error("Unexpected run records; review manually rather than deleting");
@@ -131,9 +140,16 @@ async function main() {
         await tx.delete(coursesTable).where(eq(coursesTable.id, course.id));
       }
       if (category) await tx.delete(categoriesTable).where(eq(categoriesTable.id, Number(category.id)));
-      await tx.delete(activityTable).where(and(
-        eq(activityTable.actorName, `Progress Elevated ${run}`),
-        eq(activityTable.entityTitle, "The Beauty Mindset Accelerator")));
+      for (const activity of activitiesForRun) {
+        const removed = await tx.delete(activityTable).where(and(
+          eq(activityTable.id, Number(activity.id)),
+          eq(activityTable.actorName, activity.marker),
+          eq(activityTable.entityTitle, activity.name!),
+          eq(activityTable.type, activity.type!),
+          eq(activityTable.description, activity.description!),
+          lte(activityTable.createdAt, new Date(cutoff)))).returning({ id: activityTable.id });
+        if (removed.length !== 1) throw new Error("Activity changed during cleanup; refusing partial deletion");
+      }
     });
     for (const identity of identitiesForRun) await clerkClient.users.deleteUser(identity.id);
     console.log(`Removed confirmed disposable records for ${run}. Re-run dry run to check for remaining Clerk users.`);

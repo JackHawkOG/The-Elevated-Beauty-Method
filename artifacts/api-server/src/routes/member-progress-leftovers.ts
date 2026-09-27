@@ -4,12 +4,14 @@ const EMAIL = new RegExp(`^progress-([01])-(${UUID})@example\\.com$`, "i");
 export const MIN_AGE_MS = 60 * 60 * 1000;
 
 export type Candidate = {
-  kind: "category" | "clerk" | "member";
+  kind: "category" | "clerk" | "member" | "activity";
   id: string;
   run: string;
   createdAt: Date;
   marker: string;
   name?: string;
+  type?: string;
+  description?: string;
 };
 
 export function categoryRun(slug: string, name: string): string | undefined {
@@ -24,6 +26,13 @@ export function identityRun(email: string, name: string): string | undefined {
     ? run : undefined;
 }
 
+export function activityRun(actorName: string, entityTitle: string, type: string, description: string): string | undefined {
+  const match = new RegExp(`^Progress Elevated (${UUID})$`).exec(actorName);
+  const run = match?.[1];
+  return run && entityTitle === "The Beauty Mindset Accelerator" &&
+    type === "enrollment" && description === "enrolled in a course" ? run : undefined;
+}
+
 export function staleCandidates(candidates: Candidate[], now: Date, ageMs = MIN_AGE_MS): Candidate[] {
   if (!Number.isFinite(ageMs) || ageMs < MIN_AGE_MS) throw new Error("Minimum age is one hour");
   return candidates.filter(candidate =>
@@ -31,7 +40,9 @@ export function staleCandidates(candidates: Candidate[], now: Date, ageMs = MIN_
     candidate.createdAt.getTime() <= now.getTime() - ageMs &&
     (candidate.kind === "category"
       ? categoryRun(candidate.marker, candidate.name || "") === candidate.run
-      : identityRun(candidate.marker, candidate.name || "") === candidate.run));
+      : candidate.kind === "activity"
+        ? activityRun(candidate.marker, candidate.name || "", candidate.type || "", candidate.description || "") === candidate.run
+        : identityRun(candidate.marker, candidate.name || "") === candidate.run));
 }
 
 export function eligibleRun(candidates: Candidate[], now: Date, run: string): Candidate[] {
