@@ -79,6 +79,17 @@ The newly supplied Tier 2 and educational-content references describe the four-m
 - attached_assets/Membership_Tier_2__“The_Elevated_Method”_1790476874615.md
 - attached_assets/Educational_Content_1790476874616.md
 - attached_assets/The_Elevated_Beauty_Experience™_—_Our_Signature_IP_1790476874617.md"
+"#12","Verify member stories before visitors rely on them","MERGED","2026-09-27T02:50:10.562Z","2026-09-27T11:10:46.871Z","next_steps","# Verify member stories before visitors rely on them
+
+## What & Why
+The landing page currently shows named testimonial quotes and roles, but the approved tier sources do not verify these accounts. Public endorsements should be confirmed or removed before launch.
+
+## Done looks like
+- Confirm permission and exact wording for each testimonial with the owner
+- Replace unverified claims with approved stories or remove the section
+
+## Relevant files
+- artifacts/edu-portal/src/pages/landing.tsx"
 "#14","Turn approved lesson drafts into complete member lessons","MERGED","2026-09-27T02:51:47.971Z","2026-09-27T03:09:46.291Z","next_steps","# Turn approved lesson drafts into complete member lessons
 
 ## What & Why
@@ -121,6 +132,34 @@ The broader educational reference includes hair, body-style, and transformation 
 - attached_assets/Educational_Content_1790476874616.md
 - docs/accelerator-lesson-review.md
 - artifacts/api-server/src/lib/seed-member-journey.ts"
+"#17","Prevent duplicate course enrollments when members act at the same time","MERGED","2026-09-27T03:17:17.852Z","2026-09-27T11:09:51.733Z","tech_debt","# Prevent duplicate course enrollments when members act at the same time
+
+## What & Why
+Enrollment currently checks for an existing row before inserting, but the database does not enforce one enrollment per member and course. Simultaneous requests can create duplicate rows and confusing progress views.
+
+## Done looks like
+- Database uniqueness protects the member/course pair, including existing duplicate cleanup where needed
+- Enrollment is idempotent under simultaneous requests, with a repeatable concurrent-request regression check
+
+## Relevant files
+- lib/db/src/schema/enrollments.ts
+- artifacts/api-server/src/routes/enrollments.ts
+- artifacts/api-server/src/routes/lesson-progress.test.ts"
+"#18","Confirm real signed-in members see saved lessons after reload","MERGED","2026-09-27T03:17:17.852Z","2026-09-27T11:11:17.935Z","test_gaps","# Confirm real signed-in members see saved lessons after reload
+
+## What & Why
+The progress suite exercises actual routes and database rows with an isolated test identity, and renders dashboard states, but does not exercise Clerk sign-in, client query invalidation, or browser reload with a real development member. Once test memberships can be arranged, this will catch integration gaps the isolated checks cannot.
+
+## Done looks like
+- Repeatable development-only browser check signs in as an Elevated member, enrolls, completes lessons, reloads, and verifies dashboard and lesson markers
+- A Free identity cannot open lesson content or submit completion
+- Test identities and records are isolated and cleaned up
+
+## Relevant files
+- artifacts/edu-portal/src/pages/lesson.tsx
+- artifacts/edu-portal/src/pages/dashboard.tsx
+- artifacts/edu-portal/src/components/accelerator-dashboard.tsx
+- artifacts/api-server/src/middlewares/requireAuth.ts"
 "#19","Prevent unapproved lessons from appearing in the course catalog","MERGED","2026-09-27T03:17:23.722Z","2026-09-27T05:14:45.604Z","next_steps","# Prevent unapproved lessons from appearing in the course catalog
 
 ## What & Why
@@ -162,6 +201,20 @@ Role and revision checks protect the catalog, but there are no automated signed-
 - artifacts/api-server/src/routes/courses.ts
 - artifacts/api-server/src/routes/enrollments.ts
 - artifacts/api-server/src/routes/dashboard.ts"
+"#23","Catch publication regressions automatically before release","MERGED","2026-09-27T05:23:20.976Z","2026-09-27T11:09:47.369Z","test_gaps","# Catch publication regressions automatically before release
+
+## What & Why
+The publication authorization HTTP suite can be run with the test:publication script, but the root build and existing test:progress command do not invoke it. A later route change could therefore ship without anyone running the safety checks.
+
+## Done looks like
+- A standard automated check runs the publication suite alongside the existing checks before release or merge
+- The check uses a disposable development database and never points at production
+- Failures block release and still clean up their fixtures
+
+## Relevant files
+- package.json
+- artifacts/api-server/src/routes/publication-authorization.test.ts
+- vitest.config.ts"
 "#25","See how many visitors complete the Radiant Audit","MERGED","2026-09-27T05:49:00.294Z","2026-09-27T10:02:16.627Z","custom_analytics","# See how many visitors complete the Radiant Audit
 
 ## What & Why
@@ -205,3 +258,164 @@ The radiant_audit_saved event counts successful saves, including signed-in retak
 - artifacts/api-server/src/routes/
 
 Read .local/skills/project-analytics/SKILL.md and check analytics access before editing."
+"#28","Let Audit visitors correct a sign-up email without starting over","MERGED","2026-09-27T10:05:51.573Z","2026-09-27T11:09:50.473Z","next_steps","# Let Audit visitors correct a sign-up email without starting over
+
+## What & Why
+A visitor who finishes the Audit with a mistyped email can reach the completion page signed in with a different email. The current mismatch screen offers signing in with the originally entered email or starting a new Audit, but no way to correct the email while keeping their answers. Provide a safe recovery path that only saves answers to the visitor's verified account with explicit consent.
+
+## Done looks like
+- The mismatch screen allows correcting the staged Audit email to the verified account email after explicit confirmation, or signing in with the original email
+- The completed answers are retained through recovery and never silently assigned to a different account
+
+## Relevant files
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/edu-portal/src/lib/radiant-audit-session.ts"
+"#29","Let members see how their Audit answers change over time","MERGED","2026-09-27T10:06:57.176Z","2026-09-27T11:00:51.116Z","next_steps","# Let members see how their Audit answers change over time
+
+## What & Why
+A retake currently replaces the previous Audit, so members cannot compare where they started with where they are now. Preserve prior submissions and show a private comparison for the signed-in account.
+
+## Done looks like
+- Each successful retake retains the prior snapshot for that account
+- Members can compare their latest Audit with earlier submissions after reload
+- Other members cannot access these answers, and answer text stays out of analytics
+
+## Relevant files
+- lib/db/src/schema/radiant-audits.ts
+- artifacts/api-server/src/routes/radiant-audits.ts
+- lib/api-spec/openapi.yaml
+- artifacts/edu-portal/src/pages/radiant-audit.tsx"
+"#30","Let members delete their old Audit reflections","MERGED","2026-09-27T10:29:08.603Z","2026-09-27T11:10:26.148Z","next_steps","# Let members delete their old Audit reflections
+
+## What & Why
+Audit history contains personal written reflections. Members can compare them but cannot remove an earlier submission they no longer want stored.
+
+## Done looks like
+- Signed-in members can delete a selected earlier submission or clear their own history, with confirmation
+- The server enforces ownership; one member cannot delete another's answers
+- The latest Audit remains intact unless an explicitly separate deletion action is chosen
+
+## Relevant files
+- lib/db/src/schema/radiant-audits.ts
+- artifacts/api-server/src/routes/radiant-audits.ts
+- lib/api-spec/openapi.yaml
+- artifacts/edu-portal/src/components/radiant-audit-comparison.tsx"
+"#31","Catch Audit comparison mistakes before members see them","MERGED","2026-09-27T10:29:08.603Z","2026-09-27T11:09:42.781Z","test_gaps","# Catch Audit comparison mistakes before members see them
+
+## What & Why
+The account-scoped API has integration coverage, but the signed-in comparison screen has no automated browser coverage for choosing an older submission or returning after reload.
+
+## Done looks like
+- An authenticated UI test saves three submissions and compares the newest to each earlier one
+- The comparison persists after reload and never displays another member's written answers
+- The test checks that tracking calls contain only event metadata, not answer text
+
+## Relevant files
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/edu-portal/src/components/radiant-audit-comparison.tsx
+- artifacts/edu-portal/src/lib/analytics.ts
+- artifacts/api-server/src/routes/radiant-audits.test.ts"
+"#33","Let members remove their latest Audit when they want to start over","MERGED","2026-09-27T11:03:16.572Z","2026-09-27T11:36:41.966Z","next_steps","# Let members remove their latest Audit when they want to start over
+
+## What & Why
+Members can now delete earlier Audit reflections, but the current Audit is intentionally preserved. Some members may want to erase their current submission too. This should be a distinctly labeled, separately confirmed action so clearing earlier history never removes the latest Audit by accident.
+
+## Done looks like
+- A separate action on the signed-in Audit page explicitly offers deletion of the current Audit with a clear permanent-deletion warning
+- The API deletes only the signed-in member's latest Audit and defines what should happen to any remaining earlier history
+- Dashboard and completion page update after deletion, including on reload
+
+## Relevant files
+- artifacts/api-server/src/routes/radiant-audits.ts
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- lib/api-spec/openapi.yaml"
+"#34","Catch Audit email-recovery mistakes before answers reach the wrong account","MERGED","2026-09-27T11:03:35.994Z","2026-09-27T11:30:14.439Z","test_gaps","# Catch Audit email-recovery mistakes before answers reach the wrong account
+
+## What & Why
+The signed-in Audit completion flow now handles a mistyped staged email through explicit confirmation. A regression in the auth handoff could save a visitor's answers under an unintended account.
+
+## Done looks like
+- Automated coverage shows a mismatched verified email cannot save until the visitor confirms the correction, and a signed-in unverified email cannot save
+- Correcting the email retains all answers through a reload and a failed-save retry; signing out to use the original email also retains the staged answers
+
+## Relevant files
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/edu-portal/src/lib/radiant-audit-session.ts
+- artifacts/edu-portal/src/App.tsx"
+"#35","Keep lesson progress checks away from production data","MERGED","2026-09-27T11:03:42.353Z","2026-09-27T11:30:32.981Z","tech_debt","# Keep lesson progress checks away from production data
+
+## What & Why
+The progress HTTP suite only rejects NODE_ENV=production. A development process with an overridden DATABASE_URL can still point its disposable-looking fixtures at another database. Apply the same runtime database-target validation used by the publication suite so accidental overrides fail before inserts.
+
+## Done looks like
+- The progress test refuses to run against a mismatched database URL or deployment environment
+- Its fixtures still clean up when tests fail
+
+## Relevant files
+- artifacts/api-server/src/routes/lesson-progress.test.ts
+- artifacts/api-server/src/routes/publication-authorization.test.ts"
+"#36","Catch mistakes when older duplicate enrollments are merged","MERGED","2026-09-27T11:04:11.318Z","2026-09-27T11:30:11.143Z","test_gaps","# Catch mistakes when older duplicate enrollments are merged
+
+## What & Why
+The concurrency regression covers new requests, but historical duplicates may have different enrollment dates and lesson progress. A migration regression with seeded legacy duplicates would protect the progress members already earned.
+
+## Done looks like
+- A repeatable isolated migration test seeds two rows for one member and course before uniqueness exists
+- It confirms the earliest enrollment survives with the greatest recorded progress and a usable last lesson, then confirms rerunning the migration is safe
+
+## Relevant files
+- lib/db/migrations/0005_unique_enrollments.sql
+- artifacts/api-server/src/lib/ensure-enrollment-schema.ts
+- artifacts/api-server/src/routes/lesson-progress.test.ts"
+"#37","Keep enrollment activity visible when logging fails","MERGED","2026-09-27T11:04:11.318Z","2026-09-27T11:31:39.120Z","tech_debt","# Keep enrollment activity visible when logging fails
+
+## What & Why
+The enrollment route currently discards activity-write errors after a successful enrollment. A transient failure can silently omit a member's enrollment from the activity feed.
+
+## Done looks like
+- Failed activity writes are recorded for investigation or retried without duplicating enrollments
+- Repeat enrollments still produce at most one activity item
+
+## Relevant files
+- artifacts/api-server/src/routes/enrollments.ts
+- lib/db/src/schema/activity.ts"
+"#38","Confirm Audit comparisons stay private across real signed-in accounts","MERGED","2026-09-27T11:05:15.595Z","2026-09-27T11:30:00.286Z","test_gaps","# Confirm Audit comparisons stay private across real signed-in accounts
+
+## What & Why
+The repeatable browser test controls the signed-in identity and API responses, while the API integration test controls ownership separately. A real Clerk-to-API browser pass would catch auth/session wiring leaks that neither isolated test can observe.
+
+## Done looks like
+- In a development-only automated browser run, sign in as two distinct Clerk test members with unique written answers
+- Save and retake Audits, switch members, reload the comparison, and assert no cross-account answer text appears
+- Do not require human passwords or run against production data
+
+## Relevant files
+- artifacts/edu-portal/tests/radiant-audit.spec.ts
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/api-server/src/routes/radiant-audits.test.ts"
+"#39","Catch Audit save failures before members lose their written answers","MERGED","2026-09-27T11:05:15.595Z","2026-09-27T11:30:12.711Z","test_gaps","# Catch Audit save failures before members lose their written answers
+
+## What & Why
+The browser regression covers successful saves, but does not simulate a failed save followed by a retry. Members should keep all typed answers when the API temporarily fails.
+
+## Done looks like
+- A browser regression simulates a failed signed-in save and checks that the error is visible without clearing written answers or selected checks
+- Retrying after recovery saves the same answers once and reaches the completion screen
+- Tracking records only the successful save metadata, not submitted text or a false success
+
+## Relevant files
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/edu-portal/src/components/radiant-audit-form.tsx
+- artifacts/edu-portal/tests/radiant-audit.spec.ts"
+"#40","Show Free members why a lesson is locked","MERGED","2026-09-27T11:06:37.722Z","2026-09-27T11:34:21.496Z","next_steps","# Show Free members why a lesson is locked
+
+## What & Why
+A signed-in Free member is correctly denied private lesson data (403), but direct navigation does not reliably show an explanation. Give them a clear locked-lesson message without exposing lesson content.
+
+## Done looks like
+- A Free member who opens an Elevated lesson URL sees an access-required state with a route back to the course.
+- No lesson body or completion controls render; a server 403 remains enforced.
+
+## Relevant files
+- artifacts/edu-portal/src/pages/lesson.tsx
+- artifacts/api-server/src/routes/courses.ts"
