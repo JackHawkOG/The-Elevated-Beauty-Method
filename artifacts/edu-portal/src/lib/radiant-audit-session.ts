@@ -30,3 +30,10 @@ export function stageAudit(audit: PendingAudit): PendingAudit {
 export function clearPendingAudit(): void {
   window.sessionStorage.removeItem(key);
 }
+
+export function isAuditReadyToSave(audit: RadiantAuditSubmission): boolean {
+  return !!audit.email.trim() &&
+    !!audit.beautyTrend.trim() &&
+    !!audit.masteryGoal.trim() &&
+    !!audit.researchTime.trim();
+}

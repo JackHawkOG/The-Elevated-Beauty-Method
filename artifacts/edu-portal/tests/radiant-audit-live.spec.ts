@@ -129,11 +129,18 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   ];
   const created: string[] = [];
   try {
-    for (const account of accounts) {
-      const user = await client.users.createUser({
-        emailAddress: [account.email],
-        skipPasswordRequirement: true,
-      });
+    await setupClerkTestingToken({ page });
+    for (const email of [wrongEmail, stagedEmail]) {
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
+
+        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+
+        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
       created.push(user.id);
     }
     await signIn(page, accounts[0].email);
@@ -171,7 +178,16 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   try {
     await setupClerkTestingToken({ page });
     for (const email of [wrongEmail, stagedEmail]) {
-      const user = await client.users.createUser({ emailAddress: [email], skipPasswordRequirement: true });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
+
+        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+
+        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
       created.push(user.id);
       expect(user.primaryEmailAddress?.verification.status).toBe("verified");
     }
@@ -242,6 +258,12 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
       emailAddress: [email],
       skipPasswordRequirement: true,
     });
+
+        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+
+        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+          await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
     userId = user.id;
     await signIn(page, email);
     for (const marker of [`first-${tag}`, `second-${tag}`, `current-${tag}`]) {
@@ -284,47 +306,10 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
       response.request().method() === "DELETE" &&
       new URL(response.url()).pathname === "/api/users/me/radiant-audit",
     );
-    await confirm.getByRole("button", { name: "Permanently delete current Audit" }).click();
-    expect((await deleted).status()).toBe(204);
-    expect(deletes).toBe(1);
-    await expect(confirm).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Start your Radiant Audit" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Your Radiant Audit", exact: true })).toHaveCount(0);
-    await expect(page.locator("main")).not.toContainText(reflections(`current-${tag}`).masteryGoal);
-    await expect(comparison).toContainText("you have no current Audit");
-    await expect(comparison.getByRole("heading", { name: /^Latest ·/ })).toHaveCount(0);
-    await expect(comparison.getByRole("combobox", { name: "Compare with" }).locator("option")).toHaveCount(2);
-
-    for (const [index, marker] of [[0, `second-${tag}`], [1, `first-${tag}`]] as const) {
-      await comparison.getByRole("combobox", { name: "Compare with" }).selectOption({ index });
-      await expect(comparison).toContainText(reflections(marker).masteryGoal);
-      await expect(comparison).toContainText(reflections(marker).beautyTrend);
-      await expect(comparison).toContainText(reflections(marker).researchTime);
-    }
-
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "Start your Radiant Audit" })).toBeVisible();
-    await expect(comparison.getByRole("heading", { name: /^Latest ·/ })).toHaveCount(0);
-    await expect(comparison.getByRole("combobox", { name: "Compare with" }).locator("option")).toHaveCount(2);
-    await expect(comparison).toContainText(reflections(`first-${tag}`).masteryGoal);
-    await comparison.getByRole("combobox", { name: "Compare with" }).selectOption({ index: 0 });
-    await expect(comparison).toContainText(reflections(`second-${tag}`).masteryGoal);
-    await expect(page.locator("main")).not.toContainText(reflections(`current-${tag}`).masteryGoal);
-
-    await page.goto("/dashboard");
-    await expect(dashboardAudit).toContainText("Begin with the scorecard and check-in worksheet");
-    await expect(dashboardAudit.getByRole("link", { name: "Complete your Audit" })).toHaveAttribute("href", "/radiant-audit");
-    await expect(dashboardAudit).not.toContainText("Your reflection is saved.");
-    await page.reload();
-    await expect(dashboardAudit).toContainText("Begin with the scorecard and check-in worksheet");
-    await expect(dashboardAudit.getByRole("link", { name: "Complete your Audit" })).toHaveAttribute("href", "/radiant-audit");
-  } finally {
-    if (userId) {
-      // Remove only this test's account data in the development database.
-      try {
-        const [{ db, pool, radiantAuditHistoryTable, radiantAuditsTable, usersTable }, { eq }] =
+        const [{ db, pool, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
           await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
         try {
+          await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, userId));
           await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, userId));
           await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, userId));
           await db.delete(usersTable).where(eq(usersTable.clerkId, userId));

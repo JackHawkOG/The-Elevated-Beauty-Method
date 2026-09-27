@@ -17,8 +17,8 @@ vi.mock("@workspace/api-client-react", () => ({
   getGetMyMembershipQueryKey: () => ["membership", "me"],
   getGetConfirmedMembershipCountsQueryKey: () => ["membership", "confirmed-counts"],
 }));
-vi.mock("@clerk/react", () => ({ useUser: () => ({ user: null }) }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
+vi.mock("@clerk/react", () => ({ useUser: () => ({ user: null }) }));
 vi.mock("@/components/layout", () => ({ AppLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 
 import MembershipPage from "./membership";

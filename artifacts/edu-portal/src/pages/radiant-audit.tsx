@@ -14,7 +14,7 @@ import {
 import { RadiantAuditForm, type RadiantAuditSubmission } from "@/components/radiant-audit-form";
 import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
 import { trackEvent, trackRadiantAuditSaved } from "@/lib/analytics";
-import { clearPendingAudit, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
+import { clearPendingAudit, isAuditReadyToSave, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
 import { clearAuditDraft, getAuditSubmissionId, readAuditDraft, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +34,7 @@ function auditAnswers(audit: RadiantAuditSubmission): RadiantAuditInput {
 }
 
 export default function RadiantAuditPage() {
+  const { openUserProfile, signOut } = useClerk();
   const { user, isLoaded, isSignedIn } = useUser();
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
@@ -63,6 +64,7 @@ export default function RadiantAuditPage() {
   function discardDraft() {
     try {
       clearAuditDraft(accountId);
+      clearPendingAudit();
       attempt.current = null;
       setDraftWarning(null);
       setError(null);
@@ -103,6 +105,7 @@ export default function RadiantAuditPage() {
         trackRadiantAuditSaved(saved.completionKind);
         queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
         void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+        try { clearPendingAudit(); } catch { /* A storage failure must not hide a confirmed save. */ }
         navigate("/radiant-audit/complete");
       } catch {
         setError("We couldn't save your Audit. Your answers are still here; please try again.");
@@ -118,26 +121,42 @@ export default function RadiantAuditPage() {
     }
   }
 
+  function keepAnswers(audit: RadiantAuditSubmission): boolean {
+    try {
+      stageAudit(audit);
+      setError(null);
+      return true;
+    } catch {
+      setError("We couldn't keep your answers in this browser. Please enable session storage before leaving this form.");
+      return false;
+    }
+  }
+
   if (!isLoaded) return <p role="status">Loading your Audit…</p>;
 
   return (
     <RadiantAuditForm
       key={`${accountId ?? "visitor"}:${draftRevision}`}
       initialEmail={email}
-      initialDraft={accountId ? readAuditDraft(accountId) : null}
+      initialDraft={accountId ? readAuditDraft(accountId) ?? readPendingAudit() : null}
       onDraftChange={accountId ? persistDraft : undefined}
       onDiscardDraft={accountId ? discardDraft : undefined}
       draftWarning={draftWarning}
       needsAccount={!isSignedIn}
+      needsVerification={!!isSignedIn && user?.primaryEmailAddress?.verification.status !== "verified"}
       submitting={!isLoaded || save.isPending}
       error={error}
       onSubmit={handleSubmit}
+      onVerifyEmail={audit => { if (keepAnswers(audit)) openUserProfile(); }}
+      onSwitchAccount={audit => {
+        if (keepAnswers(audit)) void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
+      }}
     />
   );
 }
 
 export function RadiantAuditCompletePage() {
-  const { signOut } = useClerk();
+  const { signOut, openUserProfile } = useClerk();
   const { user, isLoaded } = useUser();
   const [pending, setPending] = useState(readPendingAudit);
   const [error, setError] = useState<string | null>(null);
@@ -211,7 +230,7 @@ export function RadiantAuditCompletePage() {
   }
 
   useEffect(() => {
-    if (!pending || !isLoaded || !user || mismatch || started.current) return;
+    if (!pending || !isAuditReadyToSave(pending) || !isLoaded || !user || mismatch || started.current) return;
     started.current = true;
     void submitPending(pending);
   }, [pending, isLoaded, user, mismatch]);
@@ -243,25 +262,37 @@ export function RadiantAuditCompletePage() {
                 </Button>
               </div>
             ) : (
-              <p className="mt-4 text-muted-foreground">
-                Verify your account email before saving these answers, or sign in with the email you entered.
-              </p>
+              <div className="mt-4">
+                <p className="text-muted-foreground">Verify your primary email in your account profile under Email addresses before saving these answers, or sign in with the email you entered.</p>
+                {user && (
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Button variant="outline" onClick={() => openUserProfile()}>Verify my email</Button>
+                    <Button variant="ghost" onClick={() => void user.reload().catch(() => setError("We couldn't check your email status. Please try again."))}>Check verification status</Button>
+                  </div>
+                )}
+              </div>
             )}
             {error && <p className="mt-4 text-destructive" role="alert">{error}</p>}
             <div className="mt-8 flex flex-wrap gap-4">
+              <Button asChild variant="outline"><Link href="/radiant-audit">Edit my answers</Link></Button>
               <Button onClick={() => void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` })}>
-                Sign in with that email
+                Use another account
               </Button>
             </div>
           </>
         ) : pending ? (
           <>
-            <h1 className="font-serif text-4xl">Saving your Radiant Audit</h1>
-            <p className="mt-4 text-muted-foreground">Your free account is ready. We’re attaching your answers to it now.</p>
+            <h1 className="font-serif text-4xl">{isAuditReadyToSave(pending) ? "Saving your Radiant Audit" : "Finish your Radiant Audit"}</h1>
+            <p className="mt-4 text-muted-foreground">
+              {isAuditReadyToSave(pending) ? "Your free account is ready. We’re attaching your answers to it now." : "Your answers are still in this browser. Finish the form before saving."}
+            </p>
+            {!isAuditReadyToSave(pending) && <Button asChild className="mt-4"><Link href="/radiant-audit">Continue my Audit</Link></Button>}
             {error && (
               <div className="mt-6" role="alert">
                 <p className="text-destructive">{error}</p>
-                <Button className="mt-4" onClick={() => void submitPending(pending)} disabled={save.isPending}>Try saving again</Button>
+                {isAuditReadyToSave(pending) && (
+                  <Button className="mt-4" onClick={() => void submitPending(pending)} disabled={save.isPending}>Try saving again</Button>
+                )}
               </div>
             )}
           </>

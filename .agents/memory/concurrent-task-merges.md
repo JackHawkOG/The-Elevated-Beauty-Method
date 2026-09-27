@@ -7,4 +7,4 @@ When a completion check contradicts an earlier successful focused run, inspect t
 
 **Why:** Completion validation can run against a newer worktree than the one used for a focused check, particularly while independent changes are merging; a failure may come from a newly merged change.
 
-**How to apply:** Re-read the affected files, repair the current state, and run the configured check again. Do not infer current code from an earlier diff.
+**How to apply:** Re-read the affected files, repair the current state, and run the configured check again. Include test fixtures and mocked dependencies in that inspection: newly added production hooks can make previously valid isolated component tests fail without a product regression. Do not infer current code from an earlier diff.

@@ -18,9 +18,12 @@ type RadiantAuditFormProps = {
   onDiscardDraft?: () => void;
   draftWarning?: string | null;
   needsAccount?: boolean;
+  needsVerification?: boolean;
   submitting?: boolean;
   error?: string | null;
   onSubmit: (data: RadiantAuditSubmission) => void;
+  onVerifyEmail?: (data: RadiantAuditSubmission) => void;
+  onSwitchAccount?: (data: RadiantAuditSubmission) => void;
 };
 
 const routineStatements = [
@@ -170,9 +173,12 @@ export function RadiantAuditForm({
   onDiscardDraft,
   draftWarning,
   needsAccount = false,
+  needsVerification = false,
   submitting = false,
   error = null,
   onSubmit,
+  onVerifyEmail,
+  onSwitchAccount,
 }: RadiantAuditFormProps) {
   const [email, setEmail] = useState(initialDraft?.email || initialEmail);
   useEffect(() => {
@@ -184,6 +190,15 @@ export function RadiantAuditForm({
   const [masteryGoal, setMasteryGoal] = useState(initialDraft?.masteryGoal ?? "");
   const [researchTime, setResearchTime] = useState(initialDraft?.researchTime ?? "");
   const [writingError, setWritingError] = useState<string | null>(null);
+
+  const answers = (): RadiantAuditSubmission => ({
+    email: email.trim(),
+    routineChecks,
+    valuesChecks,
+    beautyTrend: beautyTrend.trim(),
+    masteryGoal: masteryGoal.trim(),
+    researchTime: researchTime.trim(),
+  });
 
   useEffect(() => {
     onDraftChange?.({ email, routineChecks, valuesChecks, beautyTrend, masteryGoal, researchTime });
@@ -204,14 +219,7 @@ export function RadiantAuditForm({
       return;
     }
     setWritingError(null);
-    onSubmit({
-      email: email.trim(),
-      routineChecks,
-      valuesChecks,
-      beautyTrend: beautyTrend.trim(),
-      masteryGoal: masteryGoal.trim(),
-      researchTime: researchTime.trim(),
-    });
+    onSubmit(answers());
   };
 
   const routineToggle = toggle(setRoutineChecks);
@@ -453,6 +461,15 @@ export function RadiantAuditForm({
               <p role="alert" className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                 {error}
               </p>
+            )}
+            {needsVerification && (
+              <div className="mt-5 rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm">
+                <p>Verify your primary email before saving. Open your account profile, choose Email addresses, and follow the verification steps. Your answers will stay in this browser.</p>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <Button type="button" variant="outline" onClick={() => onVerifyEmail?.(answers())}>Verify my email</Button>
+                  <Button type="button" variant="ghost" onClick={() => onSwitchAccount?.(answers())}>Use another account</Button>
+                </div>
+              </div>
             )}
             {onDiscardDraft && (
               <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
