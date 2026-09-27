@@ -1,5 +1,6 @@
 import { db, categoriesTable, coursesTable, lessonsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { acceleratorLessons } from "./accelerator-lessons";
 
 const courseTitle = "The Elevated Everyday Face";
 const acceleratorTitle = "The Beauty Mindset Accelerator";
@@ -39,8 +40,7 @@ export async function ensureMemberJourneyContent() {
   }
 
   const [accelerator] = await db.select().from(coursesTable).where(eq(coursesTable.title, acceleratorTitle)).limit(1);
-  if (accelerator) return;
-  const [course] = await db.insert(coursesTable).values({
+  const [course] = accelerator ? [accelerator] : await db.insert(coursesTable).values({
     title: acceleratorTitle,
     description: "Your first 30–60–90 days of personalized mastery. Work through four foundations at your own pace to build a routine that serves your skin, style, and life.",
     categoryId: category.id,
@@ -50,10 +50,15 @@ export async function ensureMemberJourneyContent() {
     accessTier: "Elevated",
   }).returning();
 
-  await db.insert(lessonsTable).values([
-    { courseId: course.id, sortOrder: 1, title: "Your Personal Beauty Blueprint", content: "Assess your skin type, undertones, and lifestyle to build your custom foundation.\n\nReflect: What does your skin need today, and what kind of routine fits your life?", durationMinutes: 10 },
-    { courseId: course.id, sortOrder: 2, title: "The Makeup Method Essentials", content: "Identify five essential products matched to your needs, then consider the application techniques that make each one work for you.\n\nReflect: Which steps support your features and which can you simplify?", durationMinutes: 10 },
-    { courseId: course.id, sortOrder: 3, title: "The Skincare Method Essentials", content: "Build a clear, evidence-informed routine around your skin concerns rather than passing trends.\n\nReflect: Which steps can you repeat consistently?", durationMinutes: 10 },
-    { courseId: course.id, sortOrder: 4, title: "The Personal Method Principles", content: "Learn to evaluate and update your routine as your skin and life evolve.\n\nReflect: What would make your method sustainable in the next season of life?", durationMinutes: 10 },
-  ]);
+  const existingLessons = await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id));
+  for (const [index, lesson] of acceleratorLessons.entries()) {
+    const existingLesson = existingLessons.find(row => row.sortOrder === index + 1 && row.title === lesson.title);
+    if (existingLesson) {
+      if (existingLesson.content !== lesson.content) {
+        await db.update(lessonsTable).set({ content: lesson.content }).where(eq(lessonsTable.id, existingLesson.id));
+      }
+    } else {
+      await db.insert(lessonsTable).values({ courseId: course.id, sortOrder: index + 1, ...lesson });
+    }
+  }
 }

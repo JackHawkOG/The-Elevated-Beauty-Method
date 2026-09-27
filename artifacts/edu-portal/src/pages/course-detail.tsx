@@ -28,6 +28,8 @@ export default function CourseDetailPage() {
   const { data: enrollments, isLoading: enrollmentsLoading } = useListEnrollments();
   const isEnrolled = enrollments?.some(e => e.courseId === courseId);
   const enrollment = enrollments?.find(e => e.courseId === courseId);
+  const completedIds = new Set(enrollment?.completedLessonIds ?? []);
+  const nextLesson = course?.lessons?.find(lesson => !completedIds.has(lesson.id)) ?? course?.lessons?.[0];
 
   const enrollMutation = useEnrollInCourse({
     mutation: {
@@ -111,8 +113,8 @@ export default function CourseDetailPage() {
                   <Skeleton className="h-12 w-32 rounded-full" />
                 ) : isEnrolled ? (
                   <Button asChild size="lg" className="rounded-full h-12 px-8 bg-secondary/20 text-secondary hover:bg-secondary/30">
-                    <Link href={`/courses/${course.id}/lessons/${enrollment?.lastLessonId || course.lessons?.[0]?.id}`}>
-                      {enrollment?.lastLessonId ? 'Continue Learning' : 'Start Course'} <PlayCircle className="w-5 h-5 ml-2" />
+                     <Link href={nextLesson ? `/courses/${course.id}/lessons/${nextLesson.id}` : `/courses/${course.id}`}>
+                       {enrollment?.completedLessons ? 'Continue Learning' : 'Start Course'} <PlayCircle className="w-5 h-5 ml-2" />
                     </Link>
                   </Button>
                 ) : (
@@ -163,7 +165,7 @@ export default function CourseDetailPage() {
                     <div>
                       {isEnrolled ? (
                         <Button asChild variant="ghost" size="sm" className="rounded-full text-primary hover:text-primary hover:bg-primary/10">
-                          <Link href={`/courses/${course.id}/lessons/${lesson.id}`}>Read</Link>
+                           <Link href={`/courses/${course.id}/lessons/${lesson.id}`}>{completedIds.has(lesson.id) ? "Completed · Review" : "Read"}</Link>
                         </Button>
                       ) : (
                         <Lock className="w-5 h-5 text-muted-foreground/50" />

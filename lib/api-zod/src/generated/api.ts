@@ -209,6 +209,7 @@ export const ListEnrollmentsResponseItem = zod.object({
   "courseTitle": zod.string(),
   "userId": zod.string(),
   "completedLessons": zod.number(),
+  "completedLessonIds": zod.array(zod.number()).optional(),
   "totalLessons": zod.number(),
   "lastLessonId": zod.number().nullish(),
   "enrolledAt": zod.string()
@@ -229,6 +230,7 @@ export const EnrollInCourseResponse = zod.object({
   "courseTitle": zod.string(),
   "userId": zod.string(),
   "completedLessons": zod.number(),
+  "completedLessonIds": zod.array(zod.number()).optional(),
   "totalLessons": zod.number(),
   "lastLessonId": zod.number().nullish(),
   "enrolledAt": zod.string()
@@ -252,6 +254,7 @@ export const UpdateProgressResponse = zod.object({
   "courseTitle": zod.string(),
   "userId": zod.string(),
   "completedLessons": zod.number(),
+  "completedLessonIds": zod.array(zod.number()).optional(),
   "totalLessons": zod.number(),
   "lastLessonId": zod.number().nullish(),
   "enrolledAt": zod.string()

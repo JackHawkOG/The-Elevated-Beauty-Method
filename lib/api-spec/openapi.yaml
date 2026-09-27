@@ -576,6 +576,10 @@ components:
           type: string
         completedLessons:
           type: number
+        completedLessonIds:
+          type: array
+          items:
+            type: number
         totalLessons:
           type: number
         lastLessonId:

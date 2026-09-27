@@ -7,7 +7,8 @@ import {
   useUpdateProgress,
   useGetCourse,
   getGetCourseQueryKey,
-  getListEnrollmentsQueryKey
+  getListEnrollmentsQueryKey,
+  useListEnrollments
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -15,6 +16,28 @@ import { ArrowLeft, CheckCircle, Circle, ChevronLeft, ChevronRight, Menu, Loader
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+
+function LessonContent({ content }: { content: string }) {
+  return (
+    <div className="space-y-6 text-base leading-8 md:text-lg">
+      {content.split(/\n\s*\n/).map((paragraph, index) => {
+        const label = paragraph.match(/^\*\*(Outcome|Try it|Reflect):\*\*\s*/);
+        const body = label ? paragraph.slice(label[0].length) : paragraph;
+        const parts = body.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
+        return (
+          <p key={index} className={label ? "rounded-2xl border border-[#dccebf]/20 bg-[#dccebf]/[0.04] px-5 py-4" : ""}>
+            {label && <strong className="mr-2 text-[#dccebf]">{label[1]}:</strong>}
+            {parts.map((part, partIndex) =>
+              part.startsWith("**") && part.endsWith("**") ? <strong key={partIndex} className="text-foreground">{part.slice(2, -2)}</strong> :
+              part.startsWith("*") && part.endsWith("*") ? <em key={partIndex}>{part.slice(1, -1)}</em> :
+              <span key={partIndex}>{part}</span>
+            )}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function LessonPage() {
   const [, params] = useRoute("/courses/:courseId/lessons/:lessonId");
@@ -35,6 +58,9 @@ export default function LessonPage() {
   const { data: lessons, isLoading: lessonsLoading } = useListLessons(courseId, {
     query: { queryKey: getListLessonsQueryKey(courseId), enabled: !!courseId }
   });
+  const { data: enrollments } = useListEnrollments();
+  const completedIds = new Set(enrollments?.find(item => item.courseId === courseId)?.completedLessonIds ?? []);
+  const isComplete = completedIds.has(lessonId);
 
   const updateProgress = useUpdateProgress({
     mutation: {
@@ -124,8 +150,7 @@ export default function LessonPage() {
               <Link key={l.id} href={`/courses/${courseId}/lessons/${l.id}`}>
                 <button className={`w-full text-left px-3 py-3 rounded-lg flex items-start gap-3 transition-colors ${isActive ? 'bg-primary/10 text-primary' : 'hover:bg-muted text-muted-foreground hover:text-foreground'}`}>
                   <div className="mt-0.5 shrink-0">
-                    {/* Assuming we don't have individual completion status in list, just using circles */}
-                    {isActive ? <Circle className="w-4 h-4 fill-primary/20" /> : <Circle className="w-4 h-4" />}
+                     {completedIds.has(l.id) ? <CheckCircle className="w-4 h-4 text-primary" aria-label="Completed" /> : <Circle className={`w-4 h-4 ${isActive ? "fill-primary/20" : ""}`} />}
                   </div>
                   <div>
                     <span className="text-xs font-medium opacity-70 block mb-0.5">Lesson {i + 1}</span>
@@ -175,7 +200,7 @@ export default function LessonPage() {
               disabled={updateProgress.isPending}
             >
               {updateProgress.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-              Mark Complete
+               {isComplete ? "Completed · Continue" : "Mark Complete"}
             </Button>
           </div>
         </header>
@@ -186,7 +211,6 @@ export default function LessonPage() {
             
             {lesson.videoUrl && (
               <div className="aspect-video rounded-2xl overflow-hidden bg-black mb-12 border border-border shadow-2xl">
-                {/* Assuming videoUrl is an embed link for an iframe, or just a placeholder if not valid */}
                 <iframe 
                   src={lesson.videoUrl.replace('watch?v=', 'embed/')} 
                   className="w-full h-full"
@@ -198,7 +222,7 @@ export default function LessonPage() {
 
             <div className="prose prose-invert prose-lg max-w-none text-muted-foreground">
               {lesson.content ? (
-                <div dangerouslySetInnerHTML={{ __html: lesson.content.replace(/\n/g, '<br/>') }} />
+                <LessonContent content={lesson.content} />
               ) : (
                 <p>This lesson doesn't have any text content yet.</p>
               )}
@@ -219,7 +243,7 @@ export default function LessonPage() {
                 className="w-full sm:w-auto bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 {updateProgress.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle className="w-4 h-4 mr-2" />}
-                {nextLesson ? 'Complete & Continue' : 'Finish Course'}
+                 {nextLesson ? (isComplete ? 'Continue' : 'Complete & Continue') : (isComplete ? 'Return to Course' : 'Finish Course')}
                 {nextLesson && <ChevronRight className="w-4 h-4 ml-1" />}
               </Button>
             </div>

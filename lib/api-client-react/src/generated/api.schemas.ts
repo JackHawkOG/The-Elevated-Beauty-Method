@@ -126,6 +126,7 @@ export interface Enrollment {
   courseTitle: string;
   userId: string;
   completedLessons: number;
+  completedLessonIds?: number[];
   totalLessons: number;
   /** @nullable */
   lastLessonId?: number | null;

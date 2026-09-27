@@ -24,6 +24,7 @@ router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
       courseTitle: coursesTable.title,
       userId: enrollmentsTable.userId,
       completedLessons: enrollmentsTable.completedLessons,
+      completedLessonIds: sql<number[]>`coalesce((select array_agg(lc.lesson_id order by lc.lesson_id) from lesson_completions lc inner join lessons l on l.id = lc.lesson_id where lc.user_id = ${enrollmentsTable.userId} and l.course_id = ${enrollmentsTable.courseId}), ARRAY[]::integer[])`,
       totalLessons: sql<number>`(select count(*) from ${lessonsTable} where ${lessonsTable.courseId} = ${enrollmentsTable.courseId})::int`,
       lastLessonId: enrollmentsTable.lastLessonId,
       enrolledAt: enrollmentsTable.enrolledAt,

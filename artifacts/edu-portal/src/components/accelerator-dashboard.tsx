@@ -18,9 +18,7 @@ const MODULE_SUMMARIES = [
 ];
 
 /**
- * Elevated-member view of the seeded four-lesson Accelerator. Enrollment only
- * exposes an aggregate completion count and the last completed lesson, so we
- * deliberately avoid guessing completion for individual earlier modules.
+ * Elevated-member view of the four approved Accelerator lessons.
  */
 export function AcceleratorDashboard({ course, enrollment, loading }: AcceleratorDashboardProps) {
   if (loading) {
@@ -56,10 +54,10 @@ export function AcceleratorDashboard({ course, enrollment, loading }: Accelerato
 
   const lessons = [...(course.lessons ?? [])].sort((a, b) => a.sortOrder - b.sortOrder).slice(0, 4);
   const isEnrolled = enrollment?.courseId === course.id;
-  const completed = isEnrolled ? Math.min(lessons.length, Math.max(0, enrollment.completedLessons)) : 0;
+  const completedIds = new Set(isEnrolled ? enrollment.completedLessonIds ?? [] : []);
+  const completed = lessons.filter(lesson => completedIds.has(lesson.id)).length;
   const progress = lessons.length ? Math.round((completed / lessons.length) * 100) : 0;
-  const lastLessonIndex = lessons.findIndex((lesson) => lesson.id === enrollment?.lastLessonId);
-  const nextLesson = lessons[lastLessonIndex + 1] ?? lessons[0];
+  const nextLesson = lessons.find(lesson => !completedIds.has(lesson.id)) ?? lessons[0];
   const destination = isEnrolled && nextLesson
     ? `/courses/${course.id}/lessons/${nextLesson.id}`
     : `/courses/${course.id}`;
@@ -111,9 +109,8 @@ export function AcceleratorDashboard({ course, enrollment, loading }: Accelerato
           {lessons.length ? (
             <ol className="divide-y divide-border/70 border-y border-border/70">
               {lessons.map((lesson, index) => {
-                const allComplete = completed === lessons.length && lessons.length > 0;
-                const lastCompleted = isEnrolled && enrollment.lastLessonId === lesson.id;
-                const status = !isEnrolled ? "Enroll to access" : allComplete ? "Complete" : lastCompleted ? "Most recently completed" : "Ready to explore";
+                 const lessonComplete = completedIds.has(lesson.id);
+                 const status = !isEnrolled ? "Enroll to access" : lessonComplete ? "Complete" : "Ready to explore";
                  const description = MODULE_SUMMARIES[index] ?? "Explore this foundation in the lesson.";
                 const body = (
                   <>
@@ -123,7 +120,7 @@ export function AcceleratorDashboard({ course, enrollment, loading }: Accelerato
                       <span className="block font-serif text-[1.65rem] leading-tight text-foreground sm:text-3xl">{lesson.title}</span>
                       <span className="mt-2 block text-sm leading-6 text-muted-foreground">{description}</span>
                       <span data-testid={`status-accelerator-module-${lesson.id}`} className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-[#dccebf]">
-                        {allComplete || lastCompleted ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : isEnrolled ? <BookOpen aria-hidden="true" className="h-3.5 w-3.5" /> : <LockKeyhole aria-hidden="true" className="h-3.5 w-3.5" />}
+                         {lessonComplete ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : isEnrolled ? <BookOpen aria-hidden="true" className="h-3.5 w-3.5" /> : <LockKeyhole aria-hidden="true" className="h-3.5 w-3.5" />}
                         {status}
                       </span>
                     </span>
