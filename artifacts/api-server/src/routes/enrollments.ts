@@ -59,25 +59,34 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // The unique index serializes simultaneous requests. Only the winning insert
-  // produces an activity entry; losers return the row created by the winner.
-  const [inserted] = await db.insert(enrollmentsTable).values({ userId, courseId })
-    .onConflictDoNothing({ target: [enrollmentsTable.userId, enrollmentsTable.courseId] })
-    .returning();
-  const enrollment = inserted ?? (await db.select().from(enrollmentsTable)
-    .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
-    .limit(1))[0];
+  // A new enrollment and its activity must commit together. On activity failure,
+  // the enrollment rolls back so a retry can safely create both rows. The unique
+  // index serializes concurrent requests; only the winning insert writes activity.
+  const enrollment = await db.transaction(async (tx) => {
+    const [inserted] = await tx.insert(enrollmentsTable).values({ userId, courseId })
+      .onConflictDoNothing({ target: [enrollmentsTable.userId, enrollmentsTable.courseId] })
+      .returning();
+    if (!inserted) {
+      return (await tx.select().from(enrollmentsTable)
+        .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
+        .limit(1))[0];
+    }
+
+    try {
+      await tx.insert(activityTable).values({
+        type: "enrollment",
+        description: "enrolled in a course",
+        actorName: member.displayName ?? "A learner",
+        entityTitle: course.title,
+      });
+    } catch (err) {
+      req.log.error({ err, enrollmentId: inserted.id, courseId }, "Enrollment activity write failed; rolling back enrollment");
+      throw err;
+    }
+    return inserted;
+  });
   if (!enrollment) throw new Error("Enrollment missing after conflict");
   const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
-
-  if (inserted) {
-    await db.insert(activityTable).values({
-      type: "enrollment",
-      description: "enrolled in a course",
-      actorName: member.displayName ?? "A learner",
-      entityTitle: course.title,
-    }).catch(() => {});
-  }
 
   res.status(201).json(EnrollInCourseResponse.parse({
     ...enrollment,
