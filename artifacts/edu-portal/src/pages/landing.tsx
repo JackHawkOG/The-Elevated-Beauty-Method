@@ -48,7 +48,7 @@ export default function LandingPage() {
                 <span>A community for women ready to be seen</span>
               </div>
               <p className="mb-5 text-sm font-bold uppercase tracking-[0.28em] text-[#dccebf]">
-                Founding Member Launch
+                Founding Member enrollment coming soon
               </p>
               <h1 className="mb-8 font-serif text-5xl font-bold leading-[1.03] text-foreground md:text-7xl lg:text-[5.5rem]">
                 Discover Your Personalized{" "}
@@ -230,17 +230,18 @@ export default function LandingPage() {
               <h2 className="font-serif text-4xl md:text-5xl font-bold mb-4">Choose your level</h2>
               <p className="text-muted-foreground text-lg">Start free. Elevate when you're ready.</p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Tier 1 */}
               <div className="rounded-2xl border border-border bg-card/50 p-8 flex flex-col">
                 <div className="mb-6">
                   <div className="text-xs font-semibold tracking-widest text-muted-foreground uppercase mb-2">Free</div>
                   <h3 className="font-serif text-2xl font-bold mb-1">The Beauty Method</h3>
-                  <div className="text-4xl font-serif font-bold text-foreground mt-4">$0</div>
+                  <div className="text-4xl font-serif font-bold text-foreground mt-4" data-testid="text-price-beauty-method">$0<span className="text-lg font-normal text-muted-foreground">/month</span></div>
                 </div>
                 <ul className="space-y-4 text-sm text-muted-foreground flex-1 mb-8">
                   {[
-                    "Personalized Beauty Diagnostic",
+                    "The Radiant Audit scorecard & check-in worksheet",
+                    "Personal Beauty Diagnostic",
                     "The Elevated Everyday Face (5 lessons)",
                     "Public community forum",
                     "Curated free digital guides"
@@ -258,18 +259,26 @@ export default function LandingPage() {
 
               {/* Tier 2 */}
               <div className="rounded-2xl border border-primary/40 bg-card/80 p-8 flex flex-col relative shadow-[0_0_40px_-15px_rgba(255,224,153,0.15)]">
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs font-bold tracking-wider uppercase px-4 py-1 rounded-full">Popular</div>
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs font-bold tracking-wider uppercase px-4 py-1 rounded-full">Core Membership</div>
                 <div className="mb-6">
-                  <div className="text-xs font-semibold tracking-widest text-primary uppercase mb-2">Monthly</div>
+                  <div className="text-xs font-semibold tracking-widest text-primary uppercase mb-2">Monthly membership</div>
                   <h3 className="font-serif text-2xl font-bold mb-1">The Elevated Method</h3>
-                  <div className="text-4xl font-serif font-bold text-primary mt-4">$29<span className="text-lg font-normal text-muted-foreground">/mo</span></div>
+                  <div className="text-4xl font-serif font-bold text-primary mt-4" data-testid="text-price-elevated-method">$48<span className="text-lg font-normal text-muted-foreground">/month</span></div>
+                  <div className="mt-5 rounded-xl border border-primary/30 bg-primary/5 p-4">
+                    <p className="font-semibold text-foreground" data-testid="text-founding-offer">Founding Member offer: $24/month</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Coming soon · Limited to 50 Founding Members</p>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                      The lowest possible pricing stays locked in permanently while you maintain a member account in good standing.
+                    </p>
+                  </div>
                 </div>
                 <ul className="space-y-4 text-sm text-muted-foreground flex-1 mb-8">
                   {[
                     "Everything in The Beauty Method",
-                    "Full access to all Elevated courses",
-                    "Tiered-level monthly workshops",
-                    "Exclusive education offers & events"
+                    "Full course library & mini-courses",
+                    "Live group sessions, workshops & Q&As",
+                    "Four-module core curriculum",
+                    "Seasonal lookbooks & member-only events"
                   ].map(f => (
                     <li key={f} className="flex items-start gap-3">
                       <Star className="w-4 h-4 text-primary shrink-0 mt-0.5" />
@@ -278,33 +287,7 @@ export default function LandingPage() {
                   ))}
                 </ul>
                 <Button asChild className="w-full rounded-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_20px_-5px_rgba(255,224,153,0.3)]">
-                  <Link href="/sign-up">Get Started</Link>
-                </Button>
-              </div>
-
-              {/* Tier 3 */}
-              <div className="rounded-2xl border border-border bg-card/50 p-8 flex flex-col">
-                <div className="mb-6">
-                  <div className="text-xs font-semibold tracking-widest text-muted-foreground uppercase mb-2">Premium</div>
-                  <h3 className="font-serif text-2xl font-bold mb-1">The Elevated Beauty Method</h3>
-                  <div className="text-4xl font-serif font-bold text-foreground mt-4">$49<span className="text-lg font-normal text-muted-foreground">/mo</span></div>
-                  <div className="text-xs text-muted-foreground mt-2">+ $1,500 one-time Masterclass access</div>
-                </div>
-                <ul className="space-y-4 text-sm text-muted-foreground flex-1 mb-8">
-                  {[
-                    "Everything in The Elevated Method",
-                    "Exclusive Masterclasses with Nikki",
-                    "Priority access to new content",
-                    "Premium inner-circle community access"
-                  ].map(f => (
-                    <li key={f} className="flex items-start gap-3">
-                      <Star className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                      <span>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Button asChild className="w-full rounded-full bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20">
-                  <Link href="/sign-up">Apply Now</Link>
+                  <Link href="/sign-up" data-testid="link-join-free-from-elevated">Join Free While Enrollment Is Coming Soon</Link>
                 </Button>
               </div>
             </div>
