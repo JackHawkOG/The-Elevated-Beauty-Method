@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { useGetMembershipOffer, useGetMyMembership, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
+import { trackConfirmedMembershipReturn, trackMembershipCheckoutStarted } from "@/lib/analytics";
 
 export default function MembershipPage() {
   const queryClient = useQueryClient();
@@ -17,10 +18,15 @@ export default function MembershipPage() {
   const founding = offer?.phase === "open" && offer.foundingAvailable;
   const canBuy = offer?.phase !== "upcoming" && Boolean(offer);
 
+  useEffect(() => {
+    trackConfirmedMembershipReturn(mine?.membership);
+  }, [mine?.membership?.kind, mine?.membership?.status]);
+
   async function begin(kind: "founding" | "standard") {
     setError("");
     try {
       const result = await checkout.mutateAsync({ data: { kind } });
+      trackMembershipCheckoutStarted(kind);
       window.location.assign(result.url);
     } catch (err) {
       queryClient.invalidateQueries({ queryKey: getGetMembershipOfferQueryKey() });
