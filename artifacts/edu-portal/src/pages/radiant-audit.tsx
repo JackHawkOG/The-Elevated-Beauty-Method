@@ -52,6 +52,7 @@ export default function RadiantAuditPage() {
     }
     try {
       stageAudit(audit);
+      trackEvent("radiant_audit_signup_started");
       navigate("/sign-up");
     } catch {
       setError("We couldn't keep your answers for sign-up in this browser. Please enable session storage and try again.");
