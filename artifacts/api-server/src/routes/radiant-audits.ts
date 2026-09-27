@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db, radiantAuditsTable, radiantAuditHistoryTable } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
-import { GetRadiantAuditResponse, GetRadiantAuditHistoryResponse, SaveRadiantAuditBody, SaveRadiantAuditResponse } from "@workspace/api-zod";
+import { and, desc, eq } from "drizzle-orm";
+import { DeleteRadiantAuditHistoryEntryParams, GetRadiantAuditResponse, GetRadiantAuditHistoryResponse, SaveRadiantAuditBody, SaveRadiantAuditResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 
 const router = Router();
@@ -33,6 +33,33 @@ router.get("/users/me/radiant-audit/history", requireAuth, jitProvisionUser, asy
     id: entry.id,
     ...response(entry),
   }))));
+});
+
+router.delete("/users/me/radiant-audit/history", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  await db.delete(radiantAuditHistoryTable)
+    .where(eq(radiantAuditHistoryTable.clerkId, req.userId!));
+  res.sendStatus(204);
+});
+
+router.delete("/users/me/radiant-audit/history/:id", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  const rawId = req.params.id;
+  const parsed = DeleteRadiantAuditHistoryEntryParams.safeParse(req.params);
+  if (typeof rawId !== "string" || !/^[1-9]\d*$/.test(rawId) ||
+      !parsed.success || !Number.isSafeInteger(parsed.data.id)) {
+    res.status(400).json({ error: "Invalid submission ID." });
+    return;
+  }
+  const [deleted] = await db.delete(radiantAuditHistoryTable)
+    .where(and(
+      eq(radiantAuditHistoryTable.id, parsed.data.id),
+      eq(radiantAuditHistoryTable.clerkId, req.userId!),
+    ))
+    .returning({ id: radiantAuditHistoryTable.id });
+  if (!deleted) {
+    res.status(404).json({ error: "Earlier submission not found." });
+    return;
+  }
+  res.sendStatus(204);
 });
 
 router.put("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {

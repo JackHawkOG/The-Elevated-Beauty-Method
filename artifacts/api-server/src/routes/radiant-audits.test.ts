@@ -28,7 +28,7 @@ async function request(method: string, body?: object, user = account, path = "")
     headers: { "x-test-user": user, ...(body ? { "content-type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return { status: response.status, data: await response.json() as Record<string, unknown> };
+  return { status: response.status, data: response.status === 204 ? {} : await response.json() as Record<string, unknown> };
 }
 
 beforeAll(async () => {
@@ -126,4 +126,40 @@ test("first save and later retake are classified by persisted account history", 
   expect(finalHistory).toHaveLength(4);
   expect(new Set([final.masteryGoal, ...finalHistory.map(entry => entry.masteryGoal)]))
     .toEqual(new Set(["test goal", "updated goal", "third goal", "simultaneous A", "simultaneous B"]));
+});
+
+test("members can remove earlier submissions without deleting the latest or another member's answers", async () => {
+  const answers = {
+    routineChecks: ["skincare-consistency"],
+    valuesChecks: ["quality-over-price"],
+    beautyTrend: "private trend",
+    masteryGoal: "private goal",
+    researchTime: "one hour",
+  };
+  await request("PUT", answers, otherAccount);
+  const otherHistory = (await request("GET", undefined, otherAccount, "/history")).data as unknown as Array<{ id: number }>;
+  expect(otherHistory).toHaveLength(1);
+  const otherId = otherHistory[0].id;
+
+  expect((await request("DELETE", undefined, account, `/history/${otherId}`)).status).toBe(404);
+  expect((await request("GET", undefined, otherAccount, "/history")).data).toHaveLength(1);
+  for (const invalid of ["abc", "0", "1.5", "999999999999999999999"]) {
+    expect((await request("DELETE", undefined, account, `/history/${invalid}`)).status).toBe(400);
+  }
+  expect((await request("DELETE", undefined, account, "/history/999999")).status).toBe(404);
+
+  const before = (await request("GET", undefined, account, "/history")).data as unknown as Array<{ id: number }>;
+  expect(before.length).toBeGreaterThan(1);
+  const latest = (await request("GET", undefined, account)).data;
+  expect((await request("DELETE", undefined, account, `/history/${before[0].id}`)).status).toBe(204);
+  const remaining = (await request("GET", undefined, account, "/history")).data as unknown as Array<{ id: number }>;
+  expect(remaining).toHaveLength(before.length - 1);
+  expect(remaining.map(entry => entry.id)).not.toContain(before[0].id);
+  expect((await request("GET", undefined, account)).data).toEqual(latest);
+
+  expect((await request("DELETE", undefined, account, "/history")).status).toBe(204);
+  expect((await request("DELETE", undefined, account, "/history")).status).toBe(204);
+  expect((await request("GET", undefined, account, "/history")).data).toEqual([]);
+  expect((await request("GET", undefined, account)).data).toEqual(latest);
+  expect((await request("GET", undefined, otherAccount, "/history")).data).toHaveLength(1);
 });

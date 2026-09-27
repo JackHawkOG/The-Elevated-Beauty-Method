@@ -712,6 +712,25 @@ export const GetRadiantAuditHistoryResponse = zod.array(GetRadiantAuditHistoryRe
 
 
 /**
+ * @summary Delete all earlier Audit submissions belonging to the signed-in member, without deleting the current Audit
+ */
+export const ClearRadiantAuditHistoryResponse = zod.void()
+
+
+/**
+ * @summary Delete one earlier Audit submission belonging to the signed-in member
+ */
+
+
+
+export const DeleteRadiantAuditHistoryEntryParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const DeleteRadiantAuditHistoryEntryResponse = zod.void()
+
+
+/**
  * @summary Get summary stats for the portal home dashboard
  */
 export const GetDashboardStatsResponse = zod.object({

@@ -561,6 +561,37 @@ paths:
                   $ref: "#/components/schemas/RadiantAuditHistoryEntry"
         "401":
           description: Unauthorized
+    delete:
+      operationId: clearRadiantAuditHistory
+      tags: [method]
+      summary: Delete all earlier Audit submissions belonging to the signed-in member, without deleting the current Audit
+      responses:
+        "204":
+          description: Earlier submissions deleted
+        "401":
+          description: Unauthorized
+
+  /users/me/radiant-audit/history/{id}:
+    delete:
+      operationId: deleteRadiantAuditHistoryEntry
+      tags: [method]
+      summary: Delete one earlier Audit submission belonging to the signed-in member
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "204":
+          description: Earlier submission deleted
+        "400":
+          description: Invalid submission ID
+        "401":
+          description: Unauthorized
+        "404":
+          description: Submission not found for this member
 
   /dashboard/stats:
     get:
