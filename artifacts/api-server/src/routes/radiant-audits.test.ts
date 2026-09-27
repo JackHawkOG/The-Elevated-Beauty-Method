@@ -2,9 +2,9 @@ import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db, pool, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, usersTable } from "@workspace/db";
-import { ensureRadiantAuditSchema } from "../lib/ensure-radiant-audit-schema";
+import { AUDIT_RECEIPT_RETENTION_MS, ensureRadiantAuditSchema, purgeExpiredRadiantAuditReceipts } from "../lib/ensure-radiant-audit-schema";
 import { requireDevelopmentDatabase } from "./test-development-database";
 
 vi.mock("../middlewares/requireAuth", () => ({
@@ -21,6 +21,7 @@ vi.mock("../middlewares/requireAuth", () => ({
 const account = `audit-test-${randomUUID()}`;
 const otherAccount = `audit-test-${randomUUID()}`;
 const retryAccount = `audit-test-${randomUUID()}`;
+const expiryAccount = `audit-test-${randomUUID()}`;
 let server: Server;
 let baseUrl: string;
 let databaseSafe = false;
@@ -61,13 +62,18 @@ beforeAll(async () => {
     displayName: "Retry audit test",
     email: `${retryAccount}@example.invalid`,
   });
+  await db.insert(usersTable).values({
+    clerkId: expiryAccount,
+    displayName: "Expiry audit test",
+    email: `${expiryAccount}@example.invalid`,
+  });
 });
 
 afterAll(async () => {
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     if (!databaseSafe) return;
-    for (const user of [account, otherAccount, retryAccount]) {
+    for (const user of [account, otherAccount, retryAccount, expiryAccount]) {
       await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, user));
       await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, user));
       await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user));
@@ -129,6 +135,47 @@ test("a committed save with a lost response can be retried without creating hist
   expect(a.status).toBe(200);
   expect(b.data).toEqual(a.data);
   expect((await request("GET", undefined, retryAccount, "/history")).data).toHaveLength(3);
+});
+
+test("expired receipts are purged without deleting Audits or history; their IDs can create new retakes", async () => {
+  const answers = {
+    routineChecks: ["skincare-consistency"],
+    valuesChecks: ["quality-over-price"],
+    beautyTrend: "private trend",
+    masteryGoal: "private goal",
+    researchTime: "one hour",
+  };
+  const expiredId = randomUUID();
+  const recentId = randomUUID();
+  expect((await request("PUT", { ...answers, submissionId: expiredId }, expiryAccount)).status).toBe(200);
+  const newer = await request("PUT", { ...answers, masteryGoal: "new goal", submissionId: recentId }, expiryAccount);
+  expect(newer.status).toBe(200);
+  const current = (await request("GET", undefined, expiryAccount)).data;
+  const history = (await request("GET", undefined, expiryAccount, "/history")).data;
+
+  const now = new Date();
+  await db.update(radiantAuditSubmissionsTable)
+    .set({ createdAt: new Date(now.getTime() - AUDIT_RECEIPT_RETENTION_MS - 1000) })
+    .where(and(
+      eq(radiantAuditSubmissionsTable.clerkId, expiryAccount),
+      eq(radiantAuditSubmissionsTable.submissionId, expiredId),
+    ));
+  await purgeExpiredRadiantAuditReceipts(now);
+  const receipts = await db.select().from(radiantAuditSubmissionsTable)
+    .where(eq(radiantAuditSubmissionsTable.clerkId, expiryAccount));
+  expect(receipts.map(receipt => receipt.submissionId)).toEqual([recentId]);
+  expect((await request("GET", undefined, expiryAccount)).data).toEqual(current);
+  expect((await request("GET", undefined, expiryAccount, "/history")).data).toEqual(history);
+  expect((await request("PUT", { ...answers, masteryGoal: "new goal", submissionId: recentId }, expiryAccount)).data)
+    .toEqual(newer.data);
+
+  // No tombstone is retained: the expired ID is no longer recognizable as a
+  // replay, so the same answers are a new retake with one more history entry.
+  const replay = await request("PUT", { ...answers, submissionId: expiredId }, expiryAccount);
+  expect(replay.status).toBe(200);
+  expect(replay.data).toMatchObject({ completionKind: "retake", audit: answers });
+  expect((await request("GET", undefined, expiryAccount, "/history")).data).toHaveLength(2);
+  expect((await request("GET", undefined, expiryAccount)).data).toEqual(replay.data.audit);
 });
 
 test("first save and later retake are classified by persisted account history", async () => {

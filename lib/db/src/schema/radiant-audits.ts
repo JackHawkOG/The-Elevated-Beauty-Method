@@ -37,4 +37,8 @@ export const radiantAuditSubmissionsTable = pgTable("radiant_audit_submissions",
   submissionId: uuid("submission_id").notNull(),
   answers: jsonb("answers").notNull(),
   result: jsonb("result"),
-}, table => [primaryKey({ columns: [table.clerkId, table.submissionId] })]);
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  primaryKey({ columns: [table.clerkId, table.submissionId] }),
+  index("radiant_audit_submissions_created_at_idx").on(table.createdAt),
+]);

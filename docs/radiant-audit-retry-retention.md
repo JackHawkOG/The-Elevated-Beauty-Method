@@ -1,0 +1,7 @@
+# Audit retry receipts
+
+An Audit save with a submission ID stores its answer snapshot and response for **seven days** so a lost response can be retried safely. A retry within that window returns the original response; reusing the ID with different answers returns 409. Receipts older than seven days are removed on API startup and daily thereafter. The purge deletes **only** retry receipts, not current Audits or history. Explicit Audit deletion still clears the member's receipts immediately.
+
+Existing receipts that predate the timestamp column receive a fresh seven-day window when the schema is upgraded. The exact cleanup time may be up to one day after expiry while the API stays running; restarting the API also runs cleanup.
+
+Once a receipt is purged, the server has no record that its submission ID was used. Sending that ID again is treated as a **new save** (normally a retake if a current Audit exists), even if the answers are identical. It creates a new history entry instead of replaying the original response. Clients should not automatically resend an unconfirmed submission after seven days; they should load the current Audit and ask the member before saving again.

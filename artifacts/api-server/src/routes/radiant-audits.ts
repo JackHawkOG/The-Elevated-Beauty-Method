@@ -117,7 +117,8 @@ router.put("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req,
   const outcome = await db.transaction(async tx => {
     if (submissionId) {
       // The unique key serializes concurrent attempts, including an attempt whose
-      // first response was lost after commit.
+      // first response was lost after commit. After seven days the receipt is
+      // purged; reusing its ID then behaves like a new save (including a retake).
       const [reserved] = await tx.insert(radiantAuditSubmissionsTable)
         .values({ clerkId: req.userId!, submissionId, answers })
         .onConflictDoNothing()

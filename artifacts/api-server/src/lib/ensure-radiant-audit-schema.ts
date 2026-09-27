@@ -1,5 +1,30 @@
 import { db } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { radiantAuditSubmissionsTable } from "@workspace/db";
+import { lt, sql } from "drizzle-orm";
+import { logger } from "./logger";
+
+// Seven days covers delayed reconnects and lost responses without keeping answer
+// snapshots indefinitely. This bounds receipts, not the member's Audit/history.
+export const AUDIT_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+export async function purgeExpiredRadiantAuditReceipts(now = new Date()): Promise<void> {
+  await db.delete(radiantAuditSubmissionsTable)
+    .where(lt(radiantAuditSubmissionsTable.createdAt, new Date(now.getTime() - AUDIT_RECEIPT_RETENTION_MS)));
+}
+
+export function startRadiantAuditReceiptCleanup(): void {
+  // Schedule the next run only after the previous one completes.
+  const schedule = () => {
+    const timer = setTimeout(() => {
+      void purgeExpiredRadiantAuditReceipts()
+        .catch(err => logger.error({ err }, "Audit receipt cleanup failed"))
+        .finally(schedule);
+    }, CLEANUP_INTERVAL_MS);
+    timer.unref();
+  };
+  schedule();
+}
 
 // Apply this additive table on existing databases before accepting Audit submissions.
 // Keep the matching migration in lib/db/migrations for manual schema management.
@@ -34,7 +59,13 @@ export async function ensureRadiantAuditSchema(): Promise<void> {
       "submission_id" uuid NOT NULL,
       "answers" jsonb NOT NULL,
       "result" jsonb,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY ("clerk_id", "submission_id")
     )
   `);
+  // Existing receipts have no creation timestamp. Give them a fresh seven-day
+  // grace period on upgrade instead of deleting them immediately.
+  await db.execute(sql`ALTER TABLE "radiant_audit_submissions" ADD COLUMN IF NOT EXISTS "created_at" timestamptz NOT NULL DEFAULT now()`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "radiant_audit_submissions_created_at_idx" ON "radiant_audit_submissions" ("created_at")`);
+  await purgeExpiredRadiantAuditReceipts();
 }
