@@ -59,32 +59,25 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  // Idempotent — return existing if already enrolled
-  const existing = await db.select().from(enrollmentsTable)
+  // The unique index serializes simultaneous requests. Only the winning insert
+  // produces an activity entry; losers return the row created by the winner.
+  const [inserted] = await db.insert(enrollmentsTable).values({ userId, courseId })
+    .onConflictDoNothing({ target: [enrollmentsTable.userId, enrollmentsTable.courseId] })
+    .returning();
+  const enrollment = inserted ?? (await db.select().from(enrollmentsTable)
     .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, courseId)))
-    .limit(1);
-  if (existing.length > 0) {
-    const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
-    res.status(201).json(EnrollInCourseResponse.parse({
-      ...existing[0],
-      courseTitle: course.title,
-      totalLessons: totalRow?.count ?? 0,
-      enrolledAt: existing[0].enrolledAt?.toISOString(),
-    }));
-    return;
-  }
-
-  const [enrollment] = await db.insert(enrollmentsTable).values({ userId, courseId }).returning();
+    .limit(1))[0];
+  if (!enrollment) throw new Error("Enrollment missing after conflict");
   const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
 
-  // Log activity
-  const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1);
-  await db.insert(activityTable).values({
-    type: "enrollment",
-    description: `enrolled in a course`,
-    actorName: dbUser?.displayName ?? "A learner",
-    entityTitle: course.title,
-  }).catch(() => {});
+  if (inserted) {
+    await db.insert(activityTable).values({
+      type: "enrollment",
+      description: "enrolled in a course",
+      actorName: member.displayName ?? "A learner",
+      entityTitle: course.title,
+    }).catch(() => {});
+  }
 
   res.status(201).json(EnrollInCourseResponse.parse({
     ...enrollment,

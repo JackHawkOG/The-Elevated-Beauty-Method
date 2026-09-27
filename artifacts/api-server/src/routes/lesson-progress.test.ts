@@ -7,6 +7,7 @@ import {
   db, pool, activityTable, categoriesTable, coursesTable, enrollmentsTable,
   lessonCompletionsTable, lessonsTable, usersTable,
 } from "@workspace/db";
+import { ensureEnrollmentSchema } from "../lib/ensure-enrollment-schema";
 
 // Only this isolated test router trusts the test identity header. The real
 // application and its Clerk middleware are never started by this suite.
@@ -21,6 +22,7 @@ vi.mock("../middlewares/requireAuth", () => ({
 const run = randomUUID();
 const elevatedId = `test-elevated-${run}`;
 const freeId = `test-free-${run}`;
+const concurrentId = `test-concurrent-${run}`;
 let courseId: number;
 let categoryId: number;
 let lessonIds: number[];
@@ -49,6 +51,7 @@ beforeAll(async () => {
   if (process.env.NODE_ENV === "production") {
     throw new Error("Progress integration tests must only run against a development database");
   }
+  await ensureEnrollmentSchema();
   // Use the same routes and database as the app, but a private HTTP server and
   // disposable fixtures. A new request reads from the DB, as after a reload.
   const { default: coursesRouter } = await import("./courses");
@@ -81,6 +84,7 @@ beforeAll(async () => {
   await db.insert(usersTable).values([
     { clerkId: elevatedId, displayName: "Test Elevated", email: `${elevatedId}@example.invalid`, membershipTier: "Elevated" },
     { clerkId: freeId, displayName: "Test Free", email: `${freeId}@example.invalid`, membershipTier: "Free" },
+    { clerkId: concurrentId, displayName: "Test Concurrent", email: `${concurrentId}@example.invalid`, membershipTier: "Elevated" },
   ]);
 });
 
@@ -93,11 +97,42 @@ afterAll(async () => {
     await db.delete(lessonsTable).where(eq(lessonsTable.courseId, courseId));
     await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
     await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Elevated")));
+    await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Concurrent")));
   }
   if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
   await db.delete(usersTable).where(eq(usersTable.clerkId, elevatedId));
   await db.delete(usersTable).where(eq(usersTable.clerkId, freeId));
+  await db.delete(usersTable).where(eq(usersTable.clerkId, concurrentId));
   await pool.end();
+});
+
+test("simultaneous enrollment requests return one row and create one activity entry", async () => {
+  const results = await Promise.all(
+    Array.from({ length: 16 }, () => request(concurrentId, "/enrollments", "POST", { courseId })),
+  );
+  expect(results.map(result => result.status)).toEqual(Array(16).fill(201));
+  const ids = results.map(result => (result.data as { id: number }).id);
+  expect(new Set(ids).size).toBe(1);
+
+  const rows = await db.select().from(enrollmentsTable)
+    .where(and(eq(enrollmentsTable.userId, concurrentId), eq(enrollmentsTable.courseId, courseId)));
+  expect(rows).toHaveLength(1);
+  expect(rows[0].id).toBe(ids[0]);
+  expect(((await request(concurrentId, "/enrollments")).data as Array<{ courseId: number }>).filter(
+    (row: { courseId: number }) => row.courseId === courseId,
+  )).toHaveLength(1);
+  const activity = await db.select().from(activityTable).where(and(
+    eq(activityTable.entityTitle, `Accelerator progress test ${run}`),
+    eq(activityTable.actorName, "Test Concurrent"),
+  ));
+  expect(activity).toHaveLength(1);
+
+  // Even a direct insert outside the HTTP handler cannot bypass uniqueness.
+  await expect(db.insert(enrollmentsTable).values({ userId: concurrentId, courseId }))
+    .rejects.toMatchObject({ cause: { code: "23505" } });
+  const repeated = await request(concurrentId, "/enrollments", "POST", { courseId });
+  expect(repeated.status).toBe(201);
+  expect((repeated.data as { id: number }).id).toBe(ids[0]);
 });
 
 test("Elevated progress survives fresh requests and revisit; repeats and out-of-order completions do not inflate it", async () => {

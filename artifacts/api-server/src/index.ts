@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { ensureMemberJourneyContent } from "./lib/seed-member-journey";
 import { ensureProgressSchema } from "./lib/ensure-progress-schema";
+import { ensureEnrollmentSchema } from "./lib/ensure-enrollment-schema";
 import { ensurePublicationSchema } from "./lib/ensure-publication-schema";
 import { ensureRadiantAuditSchema } from "./lib/ensure-radiant-audit-schema";
 
@@ -19,6 +20,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+await ensureEnrollmentSchema();
 await ensureProgressSchema();
 await ensureRadiantAuditSchema();
 const needsPublicationBackfill = await ensurePublicationSchema();
