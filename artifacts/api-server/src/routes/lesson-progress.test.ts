@@ -23,6 +23,10 @@ const run = randomUUID();
 const elevatedId = `test-elevated-${run}`;
 const freeId = `test-free-${run}`;
 const concurrentId = `test-concurrent-${run}`;
+const retryId = `test-retry-${run}`;
+const retryActor = `Test Retry ${run}`;
+const courseTitle = `Accelerator progress test ${run}`;
+const requestError = vi.fn();
 let courseId: number;
 let categoryId: number;
 let lessonIds: number[];
@@ -67,7 +71,14 @@ beforeAll(async () => {
   const { default: coursesRouter } = await import("./courses");
   const { default: enrollmentsRouter } = await import("./enrollments");
   const app = express();
+  app.use((req, _res, next) => {
+    req.log = { error: requestError } as unknown as typeof req.log;
+    next();
+  });
   app.use(express.json(), coursesRouter, enrollmentsRouter);
+  app.use(((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(500).json({ error: err.message });
+  }) as express.ErrorRequestHandler);
   server = app.listen(0);
   await new Promise<void>(resolve => server.once("listening", resolve));
   const address = server.address();
@@ -79,7 +90,7 @@ beforeAll(async () => {
   }).returning();
   categoryId = category.id;
   const [course] = await db.insert(coursesTable).values({
-    title: `Accelerator progress test ${run}`, description: "Isolated progress fixture",
+    title: courseTitle, description: "Isolated progress fixture",
     categoryId: category.id, instructorName: "Test", accessTier: "Elevated",
     publishedAt: new Date(),
   }).returning();
@@ -95,10 +106,12 @@ beforeAll(async () => {
     { clerkId: elevatedId, displayName: "Test Elevated", email: `${elevatedId}@example.invalid`, membershipTier: "Elevated" },
     { clerkId: freeId, displayName: "Test Free", email: `${freeId}@example.invalid`, membershipTier: "Free" },
     { clerkId: concurrentId, displayName: "Test Concurrent", email: `${concurrentId}@example.invalid`, membershipTier: "Elevated" },
+    { clerkId: retryId, displayName: retryActor, email: `${retryId}@example.invalid`, membershipTier: "Elevated" },
   ]);
 });
 
 afterAll(async () => {
+  vi.restoreAllMocks();
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     // Remove only rows belonging to this run, even when setup or an assertion failed.
@@ -110,14 +123,55 @@ afterAll(async () => {
       await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Elevated")));
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Concurrent")));
+      await db.delete(activityTable).where(and(eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, retryActor)));
     }
     if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, elevatedId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, freeId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, concurrentId));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, retryId));
   } finally {
     await pool.end();
   }
+});
+
+test("failed activity insert rolls back enrollment; retry creates one enrollment and activity", async () => {
+  const failure = new Error("Injected enrollment activity failure");
+  const transaction = db.transaction.bind(db);
+  const transactionSpy = vi.spyOn(db, "transaction").mockImplementationOnce((callback, config) =>
+    transaction(async tx => {
+      const insert = tx.insert.bind(tx);
+      vi.spyOn(tx, "insert").mockImplementation(((table: typeof activityTable) => {
+        if (table === activityTable) return { values: () => Promise.reject(failure) };
+        return insert(table);
+      }) as typeof tx.insert);
+      return callback(tx);
+    }, config),
+  );
+
+  try {
+    expect((await request(retryId, "/enrollments", "POST", { courseId })).status).toBe(500);
+    expect(requestError).toHaveBeenCalledWith(
+      expect.objectContaining({ err: failure, courseId, enrollmentId: expect.any(Number) }),
+      "Enrollment activity write failed; rolling back enrollment",
+    );
+    expect(await db.select().from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.userId, retryId), eq(enrollmentsTable.courseId, courseId),
+    ))).toHaveLength(0);
+    expect(await db.select().from(activityTable).where(and(
+      eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, retryActor),
+    ))).toHaveLength(0);
+  } finally {
+    transactionSpy.mockRestore();
+  }
+
+  expect((await request(retryId, "/enrollments", "POST", { courseId })).status).toBe(201);
+  expect(await db.select().from(enrollmentsTable).where(and(
+    eq(enrollmentsTable.userId, retryId), eq(enrollmentsTable.courseId, courseId),
+  ))).toHaveLength(1);
+  expect(await db.select().from(activityTable).where(and(
+    eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, retryActor),
+  ))).toHaveLength(1);
 });
 
 test("simultaneous enrollment requests return one row and create one activity entry", async () => {
