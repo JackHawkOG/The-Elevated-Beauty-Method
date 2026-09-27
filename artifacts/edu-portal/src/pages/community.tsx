@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AppLayout } from "@/components/layout";
 import { 
   useListAnnouncements,
-  useCreateAnnouncement,
+  createAnnouncement,
   useGetRecentActivity,
   getListAnnouncementsQueryKey,
   getGetRecentActivityQueryKey
@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { MessageSquare, Clock, Pin, Plus, Loader2 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useUser } from "@clerk/react";
 
 export default function CommunityPage() {
@@ -128,12 +128,17 @@ function CreateAnnouncementDialog() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const requestKey = useRef<string | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const createMutation = useCreateAnnouncement({
-    mutation: {
+  const createMutation = useMutation({
+      mutationFn: (data: { title: string; body: string }) => {
+        requestKey.current ??= crypto.randomUUID();
+        return createAnnouncement(data, { headers: { "Idempotency-Key": requestKey.current } });
+      },
       onSuccess: () => {
+        requestKey.current = null;
         queryClient.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetRecentActivityQueryKey() });
         toast({ title: "Announcement posted", description: "Your announcement is now live." });
@@ -143,14 +148,13 @@ function CreateAnnouncementDialog() {
       },
       onError: () => {
         toast({ title: "Failed to post", description: "There was an error posting your announcement.", variant: "destructive" });
-      }
-    }
+      },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !body.trim()) return;
-    createMutation.mutate({ data: { title, body } });
+    createMutation.mutate({ title, body });
   };
 
   return (
@@ -170,7 +174,8 @@ function CreateAnnouncementDialog() {
               <label className="text-sm font-medium text-muted-foreground">Title</label>
               <Input 
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => { requestKey.current = null; setTitle(e.target.value); }}
+                disabled={createMutation.isPending}
                 placeholder="What's new?"
                 className="bg-input border-border focus-visible:ring-primary text-foreground"
                 required
@@ -180,7 +185,8 @@ function CreateAnnouncementDialog() {
               <label className="text-sm font-medium text-muted-foreground">Message</label>
               <Textarea 
                 value={body}
-                onChange={(e) => setBody(e.target.value)}
+                onChange={(e) => { requestKey.current = null; setBody(e.target.value); }}
+                disabled={createMutation.isPending}
                 placeholder="Share the details with the community..."
                 className="min-h-[150px] bg-input border-border focus-visible:ring-primary text-foreground resize-none"
                 required
@@ -188,7 +194,7 @@ function CreateAnnouncementDialog() {
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)} className="hover:bg-muted text-muted-foreground">Cancel</Button>
+              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={createMutation.isPending} className="hover:bg-muted text-muted-foreground">Cancel</Button>
             <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90" disabled={createMutation.isPending || !title.trim() || !body.trim()}>
               {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Post Announcement

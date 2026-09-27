@@ -540,6 +540,13 @@ export const ListAnnouncementsResponse = zod.array(ListAnnouncementsResponseItem
 /**
  * @summary Post a community announcement
  */
+export const createAnnouncementHeaderIdempotencyKeyRegExp = new RegExp('^[0-9a-fA-F-]{36}$');
+
+
+export const CreateAnnouncementHeader = zod.object({
+  "Idempotency-Key": zod.string().regex(createAnnouncementHeaderIdempotencyKeyRegExp).describe('UUID identifying this post attempt. Reuse it on retries; a different payload with the same key is rejected.')
+})
+
 
 
 

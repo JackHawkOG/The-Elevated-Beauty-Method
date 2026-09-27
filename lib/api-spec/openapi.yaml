@@ -501,6 +501,14 @@ paths:
       operationId: createAnnouncement
       tags: [announcements]
       summary: Post a community announcement
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          description: UUID identifying this post attempt. Reuse it on retries; a different payload with the same key is rejected.
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F-]{36}$'
       requestBody:
         required: true
         content:
@@ -514,6 +522,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Announcement"
+        "200":
+          description: Previously posted announcement returned on retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Announcement"
+        "409":
+          description: Request key already used for a different announcement
 
   /users/me:
     get:

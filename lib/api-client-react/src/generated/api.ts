@@ -1916,7 +1916,7 @@ export const createAnnouncement = async (announcementInput: AnnouncementInput, o
 
 
 
-export const getCreateAnnouncementMutationOptions = <TError = ErrorType<unknown>,
+export const getCreateAnnouncementMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnnouncement>>, TError,{data: BodyType<AnnouncementInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createAnnouncement>>, TError,{data: BodyType<AnnouncementInput>}, TContext> => {
 
@@ -1945,12 +1945,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateAnnouncementMutationResult = NonNullable<Awaited<ReturnType<typeof createAnnouncement>>>
     export type CreateAnnouncementMutationBody = BodyType<AnnouncementInput>
-    export type CreateAnnouncementMutationError = ErrorType<unknown>
+    export type CreateAnnouncementMutationError = ErrorType<void>
 
     /**
  * @summary Post a community announcement
  */
-export const useCreateAnnouncement = <TError = ErrorType<unknown>,
+export const useCreateAnnouncement = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnnouncement>>, TError,{data: BodyType<AnnouncementInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createAnnouncement>>,
