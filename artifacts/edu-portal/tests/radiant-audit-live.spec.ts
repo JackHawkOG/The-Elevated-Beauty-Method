@@ -2,34 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
-
-function requireDevelopment() {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT) {
-    throw new Error("The live Audit test cannot run in a deployment.");
-  }
-  if (!process.env.CLERK_SECRET_KEY?.startsWith("sk_test_") ||
-      !process.env.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_")) {
-    throw new Error("The live Audit test requires development Clerk keys.");
-  }
-  if (!process.env.REPLIT_DEV_DOMAIN?.endsWith(".replit.dev") ||
-      !process.env.DATABASE_URL ||
-      !process.env.PGHOST ||
-      !process.env.PGDATABASE ||
-      !process.env.PGUSER) {
-    throw new Error("The live Audit test requires the Replit development preview and database.");
-  }
-  // The PG* variables are injected for this workspace's development database.
-  // Refuse a DATABASE_URL override pointing at any other database, even with test Clerk keys.
-  const target = new URL(process.env.DATABASE_URL);
-  if (target.hostname !== process.env.PGHOST ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
-      decodeURIComponent(target.username) !== process.env.PGUSER ||
-      (process.env.PGPORT && (target.port || "5432") !== process.env.PGPORT) ||
-      [...target.searchParams.keys()].some(key =>
-        ["host", "hostaddr", "port", "dbname", "user", "service", "options"].includes(key.toLowerCase()))) {
-    throw new Error("DATABASE_URL does not match the workspace development database.");
-  }
-}
+import { auditFixtureEmail, auditFixturePrivateMetadata, requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 const reflections = (marker: string) => ({
   beautyTrend: `trend ${marker}`,
@@ -57,6 +30,7 @@ async function signInThroughClerk(page: Page, email: string) {
 
 async function cleanUpAccounts(client: ReturnType<typeof createClerkClient>, created: string[]) {
   if (!created.length) return;
+  requireAuditDevelopment();
   // The environment guard runs before users are created. Delete only our own
   // disposable identities and their development rows, even on assertion failure.
   const [{ db, radiantAuditDraftsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
@@ -122,13 +96,13 @@ async function checkComparison(page: Page, own: string[], other: string[]) {
 
 test("two real Clerk members keep saved and retaken Audit comparisons private across account switches", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
   const accounts = [
-    { email: `audit-a-${tag}+clerk_test@example.com`, markers: [`a-first-${tag}`, `a-retake-${tag}`] },
-    { email: `audit-b-${tag}+clerk_test@example.com`, markers: [`b-first-${tag}`, `b-retake-${tag}`] },
+    { email: auditFixtureEmail("a", tag), markers: [`a-first-${tag}`, `a-retake-${tag}`] },
+    { email: auditFixtureEmail("b", tag), markers: [`b-first-${tag}`, `b-retake-${tag}`] },
   ];
   const created: string[] = [];
   try {
@@ -137,6 +111,7 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
       const user = await client.users.createUser({
         emailAddress: [account.email],
         skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
       });
       created.push(user.id);
     }
@@ -164,12 +139,12 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
 
 test("a delayed Audit response from the previous member never appears after switching accounts", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const a = { email: `audit-late-a-${tag}+clerk_test@example.com`, marker: `late-a-${tag}` };
-  const b = { email: `audit-late-b-${tag}+clerk_test@example.com` };
+  const a = { email: auditFixtureEmail("late-a", tag), marker: `late-a-${tag}` };
+  const b = { email: auditFixtureEmail("late-b", tag) };
   const created: string[] = [];
   let release!: () => void;
   let captured!: () => void;
@@ -186,6 +161,7 @@ test("a delayed Audit response from the previous member never appears after swit
       const user = await client.users.createUser({
         emailAddress: [account.email],
         skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
       });
       created.push(user.id);
     }
@@ -248,12 +224,12 @@ test("a delayed Audit response from the previous member never appears after swit
 
 test("staged answers survive real sign-out and sign-in without saving to the wrong verified account", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const wrongEmail = `audit-wrong-${tag}+clerk_test@example.com`;
-  const stagedEmail = `audit-staged-${tag}+clerk_test@example.com`;
+  const wrongEmail = auditFixtureEmail("wrong", tag);
+  const stagedEmail = auditFixtureEmail("staged", tag);
   const marker = `recovery-${tag}`;
   const created: string[] = [];
   try {
@@ -262,6 +238,7 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
       const user = await client.users.createUser({
         emailAddress: [email],
         skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
       });
       created.push(user.id);
       expect(user.primaryEmailAddress?.verification.status).toBe("verified");
@@ -322,11 +299,11 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
 
 test("a visitor's staged Audit saves only after the new account verifies its email", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const email = `audit-signup-${tag}+clerk_test@example.com`;
+  const email = auditFixtureEmail("signup", tag);
   const answers = reflections(`signup-${tag}`);
   const created: string[] = [];
   const auditWrites: Array<{ status?: number; body: string }> = [];
@@ -379,7 +356,10 @@ test("a visitor's staged Audit saves only after the new account verifies its ema
     const unverified = (await client.users.getUserList({ emailAddress: [email] })).data;
     if (unverified.length) expect(unverified[0].primaryEmailAddress?.verification.status).not.toBe("verified");
     expect(unverified.length).toBeLessThanOrEqual(1);
-    if (unverified.length) created.push(unverified[0].id);
+    if (unverified.length) {
+      created.push(unverified[0].id);
+      await client.users.updateUserMetadata(unverified[0].id, { privateMetadata: auditFixturePrivateMetadata });
+    }
     expect(created.length ? await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0])) : []).toHaveLength(0);
 
     await page.getByLabel("Enter verification code").fill("424242");
@@ -387,7 +367,11 @@ test("a visitor's staged Audit saves only after the new account verifies its ema
     const verified = (await client.users.getUserList({ emailAddress: [email] })).data[0];
     if (!created.length) created.push(verified.id);
     expect(verified.id).toBe(created[0]);
-    const currentRows = () => db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0]));
+    // Browser signup cannot set private metadata atomically. Mark it as soon as
+    // Clerk exposes the verified identity so completed runs are recoverable.
+    await client.users.updateUserMetadata(verified.id, { privateMetadata: auditFixturePrivateMetadata });
+    const currentRows = () => db.select().from(radiantAuditsTable)
+      .where(eq(radiantAuditsTable.clerkId, created[0]));
     await expect(page).toHaveURL(/\/radiant-audit\/complete(?:\/|$)/);
     await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
     for (const answer of Object.values(answers)) await expect(page.locator("main")).toContainText(answer);
@@ -417,16 +401,17 @@ test("a visitor's staged Audit saves only after the new account verifies its ema
 
 test("cancel keeps the current Audit; confirming deletes only current and leaves earlier answers after reload", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const email = `audit-delete-failure-${tag}+clerk_test@example.com`;
+  const email = auditFixtureEmail("delete-failure", tag);
   let userId: string | undefined;
   try {
     const user = await client.users.createUser({
       emailAddress: [email],
       skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
     });
     userId = user.id;
     await signIn(page, email);
@@ -516,11 +501,11 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
 
 test("selected and clear-all earlier Audit confirmations remove only requested history, never current", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const email = `audit-delete-failure-${tag}+clerk_test@example.com`;
+  const email = auditFixtureEmail("delete-failure", tag);
   const first = `history-first-${tag}`;
   const second = `history-second-${tag}`;
   const current = `history-current-${tag}`;
@@ -530,6 +515,7 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
     const user = await client.users.createUser({
       emailAddress: [email],
       skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
     });
     created.push(user.id);
     await signIn(page, email);
@@ -631,17 +617,18 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
 
 test("failed current Audit deletion keeps saved answers and history through reload, then retry succeeds", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const email = `audit-delete-failure-${tag}+clerk_test@example.com`;
+  const email = auditFixtureEmail("delete-failure", tag);
   const markers = [`first-${tag}`, `second-${tag}`, `current-${tag}`];
   let userId: string | undefined;
   try {
     const user = await client.users.createUser({
       emailAddress: [email],
       skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
     });
     userId = user.id;
     await signIn(page, email);
