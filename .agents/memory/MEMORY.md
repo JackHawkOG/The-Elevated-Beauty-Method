@@ -2,3 +2,4 @@
 - [OpenAPI integer codegen](openapi-integer-codegen.md) — generated Zod can emit z.int() against the installed Zod v3 runtime; check integer fields before relying on codegen.
 - [Audit browser test boundary](audit-browser-test-boundary.md) — the repeatable comparison browser test isolates auth/API; pair it with server isolation checks rather than treating it as live Clerk coverage.
 - [Clerk test tickets](clerk-test-tickets.md) — consumed sign-in tickets cannot be revoked; keep them short-lived and clean up disposable users.
+- [Audit checkbox browser interaction](audit-checkbox-browser-interaction.md) — live Playwright checks should click the visible label, not the visually hidden checkbox.

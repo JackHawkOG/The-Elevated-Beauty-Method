@@ -10,13 +10,17 @@
     "test:progress:browser": "vitest run artifacts/api-server/src/routes/member-progress.browser.test.ts --maxWorkers=1",
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
     "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",
+    "test:audit-live": "playwright test --config playwright.audit-live.config.ts",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "dependencies": {
+    "@clerk/backend": "^3.20.1",
+    "@clerk/testing": "^2.2.39",
     "@playwright/test": "^1.63.0",
     "@replit/connectors-sdk": "^0.4.1",
+    "drizzle-orm": "catalog:",
     "jspdf": "^4.2.1"
   },
   "devDependencies": {
