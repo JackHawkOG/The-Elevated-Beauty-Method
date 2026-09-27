@@ -75,6 +75,22 @@ A free educational community portal where anyone can sign up, browse courses acr
 - Microblading pricing is final: $400 for the initial service and $200 for touch-ups.
 - Masterclasses are exclusive to Nikki; do not describe them as crowdsourced.
 
+## Reference Library for Future TEBM Work
+
+These seven original uploads are preserved in `attached_assets/`. Use them as starting materials for the named work areas, not as instructions to launch features or replace current project decisions.
+
+| Work area | Source | Intended use |
+| --- | --- | --- |
+| EduPortal Dashboard and membership | [Tier 1 — The Beauty Method](<attached_assets/Membership_Tier_1__“The_Beauty_Method”_1790476874614.md>) | Free-tier inclusions, onboarding, the Radiant Audit, and the five-part introductory series. |
+| EduPortal Dashboard and membership | [Tier 2 — The Elevated Method](<attached_assets/Membership_Tier_2__“The_Elevated_Method”_1790476874615.md>) | Paid-tier inclusions, four-module curriculum, live group session, and member experience requirements. |
+| EduPortal Dashboard and educational content | [Educational Content](<attached_assets/Educational_Content_1790476874616.md>) | Draft makeup, hair, body-style, and transformation lesson topics; review content before publication. |
+| Launches and free-tier onboarding | [The Radiant Audit (PDF)](<attached_assets/The-Radiant-Audit_(2)_1790476874616.pdf>) | Two-page scorecard, check-in worksheet, five-stage framework, and free-membership call to action. |
+| Launches and product research | [TEBM Products List (spreadsheet)](<attached_assets/TEBM_Products_List_1790476874613.xlsx>) | Product-reference list for future educational examples and product-matching research, not an approved storefront catalog. |
+| Tech architecture and dashboard ideas | [TEBM Tech Stack — Beta Founding Member Launch](<attached_assets/TEBM_TECH_STACK_-_Beta_Founding_Member_Launch_1790476874611.md>) | Proposed portal features and multi-cloud architecture to evaluate against the actual stack, costs, security, and launch scope. |
+| TEBM foundations and brand core identity | [The Elevated Beauty Experience™ — Our Signature IP](<attached_assets/The_Elevated_Beauty_Experience™_—_Our_Signature_IP_1790476874617.md>) | Brand pillars, voice, positioning, and Discover → Refine → Enhance → Embody → Radiate framework; product and architecture ideas are proposals. |
+
+**Precedence and review:** The confirmed rules in “Branding & Marketing Source of Truth” above and `docs/tebm-branding-marketing-blueprint-review.md` govern where these uploads disagree. In particular, launch only Tier 1 and Tier 2; keep the confirmed $24 founding and $48 standard monthly rates, with the Founding Member price lock conditioned on an account in good standing and availability capped at 50. Do not infer cancellation or failed-payment outcomes until “good standing” is defined. MARI access described in tier materials is conditional on its release, not proof that it is already available. The signature-IP document contains a separate older $97/$597 offer diagram and implementation ideas; those are not approved launch offers. The tech-stack document proposes different hosting, database, deployment, integration, and cost assumptions; none are adopted by uploading it. Do not migrate infrastructure, change providers, or treat its estimates as verified without a separate decision.
+
 ## User preferences
 
 _Populate as needed._
