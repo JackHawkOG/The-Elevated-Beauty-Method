@@ -5,10 +5,11 @@
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "check": "pnpm run typecheck && pnpm run test:progress",
+    "check": "pnpm run typecheck && pnpm run test:progress && pnpm run test:membership",
     "check:pre-release": "pnpm run check && pnpm run test:progress:browser",
     "test:progress": "vitest run artifacts/api-server/src/routes/lesson-progress.test.ts artifacts/api-server/src/routes/enrollment-migration.test.ts artifacts/edu-portal/src/components/accelerator-dashboard.test.tsx artifacts/api-server/src/routes/publication-authorization.test.ts artifacts/api-server/src/routes/member-progress-browser-environment.test.ts --maxWorkers=1",
     "test:progress:browser": "vitest run artifacts/api-server/src/routes/member-progress.browser.test.ts --maxWorkers=1",
+    "test:membership": "vitest run artifacts/api-server/src/routes/membership-reservations.test.ts --maxWorkers=1",
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
     "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",
     "test:audit-live": "playwright test --config playwright.audit-live.config.ts",
@@ -22,7 +23,9 @@
     "@playwright/test": "^1.63.0",
     "@replit/connectors-sdk": "^0.4.1",
     "drizzle-orm": "catalog:",
-    "jspdf": "^4.2.1"
+    "jspdf": "^4.2.1",
+    "stripe": "^22.6.2",
+    "stripe-replit-sync": "^1.0.0"
   },
   "devDependencies": {
     "playwright": "^1.63.0",

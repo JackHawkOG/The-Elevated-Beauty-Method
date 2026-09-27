@@ -12,7 +12,8 @@ This review does not rewrite the source document. It records errors and ambiguit
 - The current launch includes only Tier 1 and Tier 2. Tier 3 and Tier 4 are retained as internal future-roadmap concepts with no approved public pricing.
 - Tier 2’s official customer-facing name is “The Elevated Method.”
 - Tier 1 and Tier 2 receive the MARI AI Imaging Processor. Future Tier 3 and Tier 4 receive the MARI AI Video app.
-- The Tier 2 Founding Member rate is $24/month, with a standard rate of $48/month. The only currently confirmed Founding Member rules are a permanent lock on the lowest possible pricing while the member maintains a member account in good standing, and a cap of 50 Founding Members. Cancellation and failed-payment consequences in the older membership document have been superseded; "good standing" has not yet been defined.
+- The Tier 2 Founding Member rate is $24/month, with a standard rate of $48/month. The permanent rate lock depends on good standing and availability is capped at 50. The older membership document's cancellation and failed-payment language has been superseded by the confirmed rule below.
+- The owner confirmed a founding enrollment window of October 1, 2026 at 9:00 AM through October 7, 2026 at 11:59 PM Central Time. Three consecutive monthly payment failures remove Founding Member status. Cancellation ends that status when the current paid period ends. Founding availability is limited to the first 50 eligible paid members; an uncompleted checkout does not guarantee a place.
 - Remove “crowdsourced masterclasses.” Masterclasses are exclusive to Nikki.
 - Every Wedding/Bridal service requires a 25% retainer.
 - Every non-Wedding/Bridal service requires a flat $125 retainer.
@@ -41,4 +42,4 @@ No pricing was changed during this review. A confirmed pricing decision should p
 
 ## Safe application rule
 
-Use the blueprint directly for visual style, positioning, voice, vocabulary, customer experience, confirmed service prices, and confirmed retainer rules. Use the Founding Member Launch file for membership inclusions, but apply the updated Founding Member rules recorded above instead of its older continuity language. Before opening paid enrollment, confirm the Founding Member launch dates and define what it means for an account to remain in good standing.
+Use the blueprint directly for visual style, positioning, voice, vocabulary, customer experience, confirmed service prices, and confirmed retainer rules. Use the Founding Member Launch file for membership inclusions, but apply the updated Founding Member rules recorded above instead of its older continuity language. Apply the subsequently confirmed dates and standing rule above instead of the earlier unresolved status.

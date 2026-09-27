@@ -49,6 +49,7 @@ export default function Dashboard() {
         <header className="mb-8">
           <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Welcome back.</h1>
           <p className="text-muted-foreground text-lg">Here's what's happening in The Elevated Beauty Method ™ community today.</p>
+          <Link href="/membership" className="mt-3 inline-block text-primary underline">Membership and billing</Link>
         </header>
 
         {!auditLoading && (

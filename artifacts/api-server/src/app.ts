@@ -10,6 +10,7 @@ import {
 } from "./middlewares/clerkProxyMiddleware";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { handleMembershipWebhook } from "./routes/membership";
 
 const app: Express = express();
 
@@ -37,6 +38,7 @@ app.use(
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
 app.use(cors({ credentials: true, origin: true }));
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleMembershipWebhook);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

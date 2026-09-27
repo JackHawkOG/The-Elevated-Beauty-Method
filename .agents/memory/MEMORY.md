@@ -4,3 +4,4 @@
 - [Clerk test tickets](clerk-test-tickets.md) — consumed sign-in tickets cannot be revoked; keep them short-lived and clean up disposable users.
 - [Audit checkbox browser interaction](audit-checkbox-browser-interaction.md) — live Playwright checks should click the visible label, not the visually hidden checkbox.
 - [Concurrent task merges](concurrent-task-merges.md) — a task completion check can see newly merged test code; reread the current worktree before addressing feedback.
+- [Stripe sync in bundled server](stripe-sync-bundling.md) — keep the sync library external so its filesystem migrations remain available at runtime; connector credentials may use different field names than examples.

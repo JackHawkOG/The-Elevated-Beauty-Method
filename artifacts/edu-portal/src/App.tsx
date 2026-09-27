@@ -98,13 +98,14 @@ function ClerkQueryClientCacheInvalidator() {
 
 function SignInPage() {
   const pendingAudit = readPendingAudit();
+  const joiningMembership = new URLSearchParams(window.location.search).get("membership") === "1";
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
       <SignIn
         routing="path"
         path={`${basePath}/sign-in`}
-        signUpUrl={`${basePath}/sign-up`}
-        forceRedirectUrl={pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
+        signUpUrl={`${basePath}/sign-up${joiningMembership ? "?membership=1" : ""}`}
+        forceRedirectUrl={joiningMembership ? `${basePath}/membership` : pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
       />
     </div>
   );
@@ -112,7 +113,8 @@ function SignInPage() {
 
 function SignUpPage() {
   const pendingAudit = readPendingAudit();
-  if (!pendingAudit && window.location.pathname === `${basePath}/sign-up`) {
+  const joiningMembership = new URLSearchParams(window.location.search).get("membership") === "1";
+  if (!pendingAudit && !joiningMembership && window.location.pathname === `${basePath}/sign-up`) {
     return <Redirect to="/radiant-audit" />;
   }
   return (
@@ -120,9 +122,9 @@ function SignUpPage() {
       <SignUp
         routing="path"
         path={`${basePath}/sign-up`}
-        signInUrl={`${basePath}/sign-in`}
+        signInUrl={`${basePath}/sign-in${joiningMembership ? "?membership=1" : ""}`}
         initialValues={pendingAudit ? { emailAddress: pendingAudit.email } : undefined}
-        forceRedirectUrl={pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
+        forceRedirectUrl={joiningMembership ? `${basePath}/membership` : pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
       />
     </div>
   );
@@ -140,6 +142,7 @@ function HomeRedirect() {
 // Import your page components
 import LandingPage from '@/pages/landing';
 import Dashboard from '@/pages/dashboard';
+import MembershipPage from '@/pages/membership';
 import CoursesPage from '@/pages/courses';
 import CourseDetailPage from '@/pages/course-detail';
 import LessonPage from '@/pages/lesson';
@@ -175,6 +178,10 @@ function Router() {
       <Route path="/radiant-audit" component={RadiantAuditPage} />
       <Route path="/radiant-audit/complete" component={() => <ProtectedRoute component={RadiantAuditCompletePage} />} />
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
+      <Route path="/membership">
+        <Show when="signed-in"><MembershipPage /></Show>
+        <Show when="signed-out"><Redirect to="/sign-up?membership=1" /></Show>
+      </Route>
       <Route path="/courses" component={() => <ProtectedRoute component={CoursesPage} />} />
       <Route path="/courses/:courseId" component={() => <ProtectedRoute component={CourseDetailPage} />} />
       <Route path="/courses/:courseId/lessons/:lessonId" component={() => <ProtectedRoute component={LessonPage} />} />
@@ -197,7 +204,7 @@ function ClerkProviderWithRoutes() {
       signUpUrl={`${basePath}/sign-up`}
       localization={{
         signIn: { start: { title: "Welcome back", subtitle: "Sign in to continue learning" } },
-        signUp: { start: { title: "Join The Elevated Beauty Method ™", subtitle: "Verify your email to save your Radiant Audit and create a free account" } },
+        signUp: { start: { title: "Join The Elevated Beauty Method ™", subtitle: "Verify your email to create your account and continue" } },
       }}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}

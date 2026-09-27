@@ -1,0 +1,257 @@
+import { Router, type Request, type Response } from "express";
+import { db, pool, usersTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import type Stripe from "stripe";
+import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
+import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
+import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
+
+const router = Router();
+const OPENS = Date.parse("2026-10-01T14:00:00Z"); // 9 AM Central (CDT)
+const CLOSES = Date.parse("2026-10-08T05:00:00Z"); // exclusive; Oct 7 at 11:59 PM Central
+
+function phase(now = Date.now()): "upcoming" | "open" | "closed" {
+  return now < OPENS ? "upcoming" : now >= CLOSES ? "closed" : "open";
+}
+
+async function reconcileStaleReservations(): Promise<void> {
+  const pending = await pool.query<{ stripe_session_id: string }>(
+    "SELECT stripe_session_id FROM membership_checkouts WHERE status = 'pending' AND created_at < now() - interval '31 minutes' AND stripe_session_id IS NOT NULL",
+  );
+  if (!pending.rows.length) return;
+  const stripe = await getUncachableStripeClient();
+  for (const row of pending.rows) {
+    const session = await stripe.checkout.sessions.retrieve(row.stripe_session_id);
+    if (session.status === "expired") {
+      const client = await pool.connect();
+      try {
+        await expireCheckout(client, session.id);
+      } finally {
+        client.release();
+      }
+    } else if (session.status === "complete" && session.payment_status === "paid" && typeof session.subscription === "string") {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await confirmCheckout(client, session.id, session.subscription);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+  }
+}
+
+async function availability() {
+  await reconcileStaleReservations();
+  const client = await pool.connect();
+  try {
+    return await hasFoundingCapacity(client);
+  } finally {
+    client.release();
+  }
+}
+
+router.get("/membership/offer", async (_req, res): Promise<void> => {
+  res.json({ phase: phase(), foundingAvailable: await availability(), foundingPrice: 24, standardPrice: 48 });
+});
+
+router.get("/membership/me", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  const result = await pool.query<{ kind: string; status: string }>(
+    "SELECT kind, status FROM membership_checkouts WHERE clerk_id = $1 AND status IN ('pending', 'confirmed') ORDER BY id DESC LIMIT 1",
+    [req.userId],
+  );
+  res.json({ membership: result.rows[0] ?? null });
+});
+
+router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  const kind = req.body?.kind;
+  if (kind !== "founding" && kind !== "standard") {
+    res.status(400).json({ error: "Choose a valid membership." });
+    return;
+  }
+  if (phase() === "upcoming" || (kind === "founding" && phase() !== "open")) {
+    res.status(409).json({ error: "This enrollment option is not open." });
+    return;
+  }
+  const client = await pool.connect();
+  try {
+    await reconcileStaleReservations();
+    await client.query("BEGIN");
+    // Serializes checkouts across all server instances, including simultaneous last-place requests.
+    await lockMembershipCapacity(client);
+    const existing = await client.query<{ kind: string; status: string; stripe_session_id: string | null }>(
+      "SELECT kind, status, stripe_session_id FROM membership_checkouts WHERE clerk_id = $1 AND status IN ('pending', 'confirmed') LIMIT 1",
+      [req.userId],
+    );
+    if (existing.rowCount) {
+      if (existing.rows[0].kind !== kind) {
+        await client.query("ROLLBACK");
+        res.status(409).json({ error: "You have a different membership checkout in progress. Finish it or wait for it to expire before changing plans." });
+        return;
+      }
+      if (existing.rows[0].status === "pending" && existing.rows[0].stripe_session_id) {
+        const session = await (await getUncachableStripeClient()).checkout.sessions.retrieve(existing.rows[0].stripe_session_id);
+        if (session.status === "open" && session.url) {
+          await client.query("ROLLBACK");
+          res.json({ url: session.url });
+          return;
+        }
+      }
+      await client.query("ROLLBACK");
+      res.status(409).json({ error: "You already have a membership or a checkout in progress." });
+      return;
+    }
+    if (kind === "founding" && !(await hasFoundingCapacity(client))) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ error: "All 50 Founding Member places are claimed or reserved." });
+      return;
+    }
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.clerkId, req.userId!)).limit(1);
+    if (!user) throw new Error("Account not found");
+    const stripe = await getUncachableStripeClient();
+    const key = kind === "founding" ? "founding_2026" : "standard_2026";
+    const prices = await stripe.prices.list({ lookup_keys: [key], active: true, limit: 10 });
+    const expected = kind === "founding" ? 2400 : 4800;
+    const price = prices.data.find(p => p.unit_amount === expected && p.currency === "usd" && p.recurring?.interval === "month");
+    if (!price) throw new Error(`Stripe ${kind} monthly price is not configured`);
+    const customer = await stripe.customers.create({ email: user.email, metadata: { clerkId: user.clerkId } });
+    const reservation = await client.query<{ id: string }>(
+      "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_customer_id) VALUES ($1, $2, 'pending', $3) RETURNING id",
+      [user.clerkId, kind, customer.id],
+    );
+    const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
+    if (!domain) throw new Error("Checkout return domain is not configured");
+    const base = `https://${domain}`;
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customer.id,
+      payment_method_types: ["card"],
+      line_items: [{ price: price.id, quantity: 1 }],
+      expires_at: checkoutExpiry(),
+      client_reference_id: user.clerkId,
+      metadata: { reservationId: reservation.rows[0].id },
+      subscription_data: { metadata: { reservationId: reservation.rows[0].id } },
+      success_url: `${base}/membership?checkout=success`,
+      cancel_url: `${base}/membership?checkout=cancel`,
+    }, { idempotencyKey: `membership-${reservation.rows[0].id}` });
+    if (!session.url) throw new Error("Stripe did not return a checkout URL");
+    await client.query("UPDATE membership_checkouts SET stripe_session_id = $1 WHERE id = $2", [session.id, reservation.rows[0].id]);
+    await client.query("COMMIT");
+    res.json({ url: session.url });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    req.log.error({ err: error }, "Could not create membership checkout");
+    res.status(503).json({ error: "Checkout is unavailable right now. Please try again." });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/membership/portal", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  const row = await pool.query<{ stripe_customer_id: string }>(
+    "SELECT stripe_customer_id FROM membership_checkouts WHERE clerk_id = $1 AND status = 'confirmed' ORDER BY id DESC LIMIT 1",
+    [req.userId],
+  );
+  if (!row.rows[0]?.stripe_customer_id) {
+    res.status(404).json({ error: "No active membership found." });
+    return;
+  }
+  const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
+  if (!domain) throw new Error("Portal return domain is not configured");
+  const stripe = await getUncachableStripeClient();
+  const configurations = await stripe.billingPortal.configurations.list({ active: true, limit: 100 });
+  let configuration = configurations.data.find(c =>
+    c.features.subscription_cancel?.enabled && c.features.subscription_cancel.mode === "at_period_end"
+    && c.features.payment_method_update?.enabled && !c.features.subscription_update?.enabled,
+  );
+  if (!configuration) configuration = await stripe.billingPortal.configurations.create({
+    business_profile: { headline: "Manage your Elevated Method membership" },
+    features: {
+      subscription_cancel: { enabled: true, mode: "at_period_end" },
+      payment_method_update: { enabled: true },
+      subscription_update: { enabled: false },
+    },
+  });
+  const session = await stripe.billingPortal.sessions.create({
+    customer: row.rows[0].stripe_customer_id,
+    return_url: `https://${domain}/membership`,
+    configuration: configuration.id,
+  });
+  res.json({ url: session.url });
+});
+
+export async function handleMembershipWebhook(req: Request, res: Response): Promise<void> {
+  const signature = req.headers["stripe-signature"];
+  if (!signature || Array.isArray(signature) || !Buffer.isBuffer(req.body)) {
+    res.status(400).json({ error: "Invalid webhook request" });
+    return;
+  }
+  try {
+    // Sync verifies Stripe's signature before we inspect or act on the event.
+    await (await getStripeSync()).processWebhook(req.body, signature);
+    const event = JSON.parse(req.body.toString()) as Stripe.Event;
+    const object = event.data.object;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const firstDelivery = await client.query(
+        "INSERT INTO membership_webhook_events (id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id",
+        [event.id],
+      );
+      if (!firstDelivery.rowCount) {
+        await client.query("COMMIT");
+        res.json({ received: true });
+        return;
+      }
+      if (event.type === "checkout.session.completed" && object.object === "checkout.session") {
+        const session = object as Stripe.Checkout.Session;
+        if (session.payment_status === "paid" && session.subscription && typeof session.subscription === "string") {
+          await confirmCheckout(client, session.id, session.subscription);
+        }
+      } else if (event.type === "checkout.session.expired" && object.object === "checkout.session") {
+        await expireCheckout(client, object.id);
+      } else if (event.type === "customer.subscription.deleted" && object.object === "subscription") {
+        const result = await client.query<{ clerk_id: string }>(
+          "UPDATE membership_checkouts SET status = 'forfeited' WHERE stripe_subscription_id = $1 AND status = 'confirmed' RETURNING clerk_id",
+          [object.id],
+        );
+        if (result.rows[0]) await client.query("UPDATE users SET membership_tier = 'Free' WHERE clerk_id = $1", [result.rows[0].clerk_id]);
+      } else if ((event.type === "invoice.payment_failed" || event.type === "invoice.payment_succeeded") && object.object === "invoice") {
+        const invoice = object as Stripe.Invoice;
+        const subscription = invoice.parent?.subscription_details?.subscription;
+        const id = typeof subscription === "string" ? subscription : subscription?.id;
+        if (id) {
+          if (event.type === "invoice.payment_succeeded") {
+            await client.query("UPDATE membership_checkouts SET failed_months = 0, last_failed_invoice = NULL WHERE stripe_subscription_id = $1 AND status = 'confirmed'", [id]);
+          } else if (invoice.billing_reason === "subscription_cycle") {
+            const updated = await client.query<{ clerk_id: string; failed_months: number }>(
+              "UPDATE membership_checkouts SET failed_months = failed_months + 1, last_failed_invoice = $2 WHERE stripe_subscription_id = $1 AND kind = 'founding' AND status = 'confirmed' AND last_failed_invoice IS DISTINCT FROM $2 RETURNING clerk_id, failed_months",
+              [id, invoice.id],
+            );
+            if (updated.rows[0]?.failed_months >= 3) {
+              await (await getUncachableStripeClient()).subscriptions.cancel(id);
+              await client.query("UPDATE membership_checkouts SET status = 'forfeited' WHERE stripe_subscription_id = $1", [id]);
+              await client.query("UPDATE users SET membership_tier = 'Free' WHERE clerk_id = $1", [updated.rows[0].clerk_id]);
+            }
+          }
+        }
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    res.json({ received: true });
+  } catch (error) {
+    req.log.error({ err: error }, "Stripe webhook failed");
+    res.status(400).json({ error: "Webhook processing failed" });
+  }
+}
+
+export default router;

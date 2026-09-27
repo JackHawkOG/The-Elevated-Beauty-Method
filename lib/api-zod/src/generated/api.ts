@@ -65,7 +65,6 @@ export const ListCoursesResponse = zod.array(ListCoursesResponseItem)
  */
 
 
-
 export const CreateCourseBody = zod.object({
   "title": zod.string().min(1),
   "description": zod.string(),
@@ -139,8 +138,6 @@ export const UpdateCourseParams = zod.object({
 })
 
 
-
-
 export const UpdateCourseBody = zod.object({
   "title": zod.string().min(1),
   "description": zod.string(),
@@ -180,7 +177,6 @@ export const ApproveCourseParams = zod.object({
 
 export const approveCourseBodyRevisionMin = 64;
 export const approveCourseBodyRevisionMax = 64;
-
 
 
 export const ApproveCourseBody = zod.object({
@@ -233,8 +229,6 @@ export const CreateLessonParams = zod.object({
 })
 
 
-
-
 export const CreateLessonBody = zod.object({
   "title": zod.string().min(1),
   "content": zod.string().optional(),
@@ -282,8 +276,6 @@ export const UpdateLessonParams = zod.object({
 })
 
 
-
-
 export const UpdateLessonBody = zod.object({
   "title": zod.string().min(1),
   "content": zod.string().optional(),
@@ -313,7 +305,6 @@ export const ApproveLessonParams = zod.object({
 
 export const approveLessonBodyRevisionMin = 64;
 export const approveLessonBodyRevisionMax = 64;
-
 
 
 export const ApproveLessonBody = zod.object({
@@ -484,7 +475,6 @@ export const ListAnnouncementsResponse = zod.array(ListAnnouncementsResponseItem
  */
 
 
-
 export const CreateAnnouncementBody = zod.object({
   "title": zod.string().min(1),
   "body": zod.string(),
@@ -541,7 +531,6 @@ export const UpdateMeResponse = zod.object({
  */
 
 
-
 export const GetBeautyMethodResponse = zod.object({
   "completed": zod.boolean(),
   "diagnostic": zod.union([zod.object({
@@ -568,7 +557,6 @@ export const GetBeautyMethodResponse = zod.object({
  */
 
 
-
 export const SaveBeautyDiagnosticBody = zod.object({
   "skinType": zod.enum(['Dry', 'Balanced', 'Combination', 'Oily', 'Sensitive']),
   "undertone": zod.enum(['Cool', 'Neutral', 'Warm', 'Unsure']),
@@ -576,8 +564,6 @@ export const SaveBeautyDiagnosticBody = zod.object({
   "lifeStage": zod.enum(['Starting fresh', 'Career growth', 'Entrepreneurship', 'Reinvention', 'Midlife evolution']),
   "visibilityGoal": zod.enum(['Everyday confidence', 'Camera ready', 'Executive presence', 'Personal brand', 'Special occasions'])
 })
-
-
 
 
 export const SaveBeautyDiagnosticResponse = zod.object({
@@ -615,7 +601,6 @@ export const getRadiantAuditResponseOneOneMasteryGoalMax = 1000;
 export const getRadiantAuditResponseOneOneResearchTimeMax = 1000;
 
 
-
 export const GetRadiantAuditResponse = zod.union([zod.object({
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditResponseOneOneRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(getRadiantAuditResponseOneOneValuesChecksMax),
@@ -649,7 +634,6 @@ export const saveRadiantAuditBodyMasteryGoalMax = 1000;
 export const saveRadiantAuditBodyResearchTimeMax = 1000;
 
 
-
 export const SaveRadiantAuditBody = zod.object({
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditBodyRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditBodyValuesChecksMax),
@@ -667,7 +651,6 @@ export const saveRadiantAuditResponseAuditOneBeautyTrendMax = 1000;
 export const saveRadiantAuditResponseAuditOneMasteryGoalMax = 1000;
 
 export const saveRadiantAuditResponseAuditOneResearchTimeMax = 1000;
-
 
 
 export const SaveRadiantAuditResponse = zod.object({
@@ -700,7 +683,6 @@ export const getRadiantAuditHistoryResponseOneOneMasteryGoalMax = 1000;
 export const getRadiantAuditHistoryResponseOneOneResearchTimeMax = 1000;
 
 
-
 export const GetRadiantAuditHistoryResponseItem = zod.object({
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditHistoryResponseOneOneRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(getRadiantAuditHistoryResponseOneOneValuesChecksMax),
@@ -726,7 +708,6 @@ export const ClearRadiantAuditHistoryResponse = zod.void()
 /**
  * @summary Delete one earlier Audit submission belonging to the signed-in member
  */
-
 
 
 export const DeleteRadiantAuditHistoryEntryParams = zod.object({
@@ -784,3 +765,40 @@ export const GetRecentActivityResponseItem = zod.object({
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
 
 
+/**
+ * @summary Current founding offer availability
+ */
+export const GetMembershipOfferResponse = zod.object({
+  "phase": zod.enum(['upcoming', 'open', 'closed']),
+  "foundingAvailable": zod.boolean(),
+  "foundingPrice": zod.number(),
+  "standardPrice": zod.number()
+})
+
+/**
+ * @summary Manage billing and cancellation
+ */
+export const CreateMembershipPortalResponse = zod.object({
+  "url": zod.string()
+})
+
+export const CreateMembershipCheckoutResponse = zod.object({
+  "url": zod.string()
+})
+
+/**
+ * @summary Start a monthly membership checkout
+ */
+export const CreateMembershipCheckoutBody = zod.object({
+  "kind": zod.enum(['founding', 'standard'])
+})
+
+/**
+ * @summary Current membership
+ */
+export const GetMyMembershipResponse = zod.object({
+  "membership": zod.object({
+  "kind": zod.enum(['founding', 'standard']),
+  "status": zod.enum(['pending', 'confirmed'])
+}).nullable()
+})

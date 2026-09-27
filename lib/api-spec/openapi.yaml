@@ -27,6 +27,62 @@ tags:
   - name: method
     description: Personalized beauty method
 paths:
+  /membership/offer:
+    get:
+      operationId: getMembershipOffer
+      tags: [membership]
+      summary: Current founding offer availability
+      responses:
+        "200":
+          description: Offer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipOffer"
+  /membership/me:
+    get:
+      operationId: getMyMembership
+      tags: [membership]
+      summary: Current membership
+      responses:
+        "200":
+          description: Membership status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyMembership"
+  /membership/checkout:
+    post:
+      operationId: createMembershipCheckout
+      tags: [membership]
+      summary: Start a monthly membership checkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipCheckoutInput"
+      responses:
+        "200":
+          description: Hosted checkout
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipRedirect"
+        "409":
+          description: Offer not available
+  /membership/portal:
+    post:
+      operationId: createMembershipPortal
+      tags: [membership]
+      summary: Manage billing and cancellation
+      responses:
+        "200":
+          description: Hosted billing portal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipRedirect"
   /healthz:
     get:
       operationId: healthCheck
@@ -649,6 +705,34 @@ paths:
 
 components:
   schemas:
+    MembershipOffer:
+      type: object
+      required: [phase, foundingAvailable, foundingPrice, standardPrice]
+      properties:
+        phase: { type: string, enum: [upcoming, open, closed] }
+        foundingAvailable: { type: boolean }
+        foundingPrice: { type: number }
+        standardPrice: { type: number }
+    MembershipCheckoutInput:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [founding, standard] }
+    MembershipRedirect:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string }
+    MyMembership:
+      type: object
+      required: [membership]
+      properties:
+        membership:
+          type: ["object", "null"]
+          required: [kind, status]
+          properties:
+            kind: { type: string, enum: [founding, standard] }
+            status: { type: string, enum: [pending, confirmed] }
     HealthStatus:
       type: object
       properties:

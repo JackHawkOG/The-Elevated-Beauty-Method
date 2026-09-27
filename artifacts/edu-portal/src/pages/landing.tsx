@@ -4,10 +4,19 @@ import { Sparkles, ArrowRight, Crown, Eye, Star, CheckCircle2 } from "lucide-rea
 import heroImage from "@assets/generated_images/hero-beauty.jpg";
 import diagnosticImage from "@assets/generated_images/diagnostic-preview.jpg";
 import everydayFaceImage from "@assets/generated_images/everyday-face.jpg";
+import { useGetMembershipOffer, getGetMembershipOfferQueryKey } from "@workspace/api-client-react";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
 export default function LandingPage() {
+  const { data: offer } = useGetMembershipOffer({ query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 30000, staleTime: 15000 } });
+  const foundingOpen = offer?.phase === "open" && offer.foundingAvailable;
+  const standardOpen = offer?.phase === "closed" || offer?.phase === "open";
+  const offerMessage = !offer ? "Enrollment availability is being checked"
+    : offer.phase === "upcoming" && offer.foundingAvailable ? "Founding Member enrollment opens October 1 at 9 AM Central"
+    : foundingOpen ? "Founding Member enrollment is open while places remain"
+    : offer.phase !== "closed" ? "Founding Member places are currently unavailable"
+    : "Founding Member enrollment has closed";
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
       <nav className="relative flex min-h-[31rem] items-center justify-center border-b border-border/50 bg-background/90 px-6 pb-8 pt-24 backdrop-blur md:min-h-[42rem] md:px-12 md:pt-28 lg:min-h-[58rem]">
@@ -48,7 +57,7 @@ export default function LandingPage() {
                 <span>A community for women ready to be seen</span>
               </div>
               <p className="mb-5 text-sm font-bold uppercase tracking-[0.28em] text-[#dccebf]">
-                Founding Member enrollment coming soon
+                {offerMessage}
               </p>
               <h1 className="mb-8 font-serif text-5xl font-bold leading-[1.03] text-foreground md:text-7xl lg:text-[5.5rem]">
                 Discover Your Personalized{" "}
@@ -225,11 +234,19 @@ export default function LandingPage() {
                   <h3 className="font-serif text-2xl font-bold mb-1">The Elevated Method</h3>
                   <div className="text-4xl font-serif font-bold text-primary mt-4" data-testid="text-price-elevated-method">$48<span className="text-lg font-normal text-muted-foreground">/month</span></div>
                   <div className="mt-5 rounded-xl border border-primary/30 bg-primary/5 p-4">
-                    <p className="font-semibold text-foreground" data-testid="text-founding-offer">Founding Member offer: $24/month</p>
-                    <p className="mt-1 text-sm text-muted-foreground">Coming soon · Limited to 50 Founding Members</p>
-                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                      The lowest possible pricing stays locked in permanently while you maintain a member account in good standing.
+                    <p className="font-semibold text-foreground" data-testid="text-founding-offer">
+                      {foundingOpen ? "Founding Member rate: $24/month" : offer?.phase === "upcoming" && offer.foundingAvailable ? "Planned Founding Member rate: $24/month" : "Standard membership: $48/month"}
                     </p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {!offer ? "Availability is being checked. No discounted place is guaranteed."
+                        : offer.phase === "upcoming" && offer.foundingAvailable ? "Opens October 1 at 9 AM Central; closes October 7 at 11:59 PM Central. First 50 eligible paid members only; a place is not guaranteed."
+                        : foundingOpen ? "Limited to the first 50 paid members. Availability is confirmed at checkout."
+                        : offer.phase !== "closed" ? "All Founding Member places are claimed or reserved."
+                        : "The founding enrollment window is closed."}
+                    </p>
+                    {(foundingOpen || (offer?.phase === "upcoming" && offer.foundingAvailable)) && <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                      The founding rate remains locked while your account is in good standing. Three consecutive monthly payment failures end founding status; cancellation ends it when the paid period ends.
+                    </p>}
                   </div>
                 </div>
                 <ul className="space-y-4 text-sm text-muted-foreground flex-1 mb-8">
@@ -247,7 +264,9 @@ export default function LandingPage() {
                   ))}
                 </ul>
                 <Button asChild className="w-full rounded-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_20px_-5px_rgba(255,224,153,0.3)]">
-                  <Link href="/radiant-audit" data-testid="link-join-free-from-elevated">Join Free While Enrollment Is Coming Soon</Link>
+                  <Link href={standardOpen ? "/membership" : "/radiant-audit"} data-testid="link-join-free-from-elevated">
+                    {foundingOpen ? "Check Founding Availability" : standardOpen ? "Explore $48/month Membership" : "Join Free Before Enrollment"}
+                  </Link>
                 </Button>
               </div>
             </div>

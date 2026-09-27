@@ -12,7 +12,8 @@ import { progressBrowserEnvironment } from "./member-progress-browser-environmen
 // This intentionally goes through the running web and API workflows, not a
 // mocked auth router. Run separately from the fast progress suite.
 test("Clerk members retain progress after reload; Free members cannot access it", async () => {
-  const target = new URL(process.env.DATABASE_URL);
+  const { base, chromiumPath } = progressBrowserEnvironment();
+  const target = new URL(process.env.DATABASE_URL || "");
   if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
       target.hostname !== process.env.PGHOST ||
       (target.port || "5432") !== process.env.PGPORT ||
@@ -60,6 +61,8 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     await expect.poll(async () => (await api(page, "/users/me")).status).toBe(200);
     return page;
   }
+  browser = await chromium.launch({ executablePath: chromiumPath, headless: true, args: ["--no-sandbox"] });
+  try {
     let [course] = await db.select().from(coursesTable).where(and(
       eq(coursesTable.title, "The Beauty Mindset Accelerator"),
       eq(coursesTable.accessTier, "Elevated"),
@@ -139,6 +142,26 @@ test("Clerk members retain progress after reload; Free members cannot access it"
 
     const free = await signIn(identities[1]);
     expect((await api(free, "/users/me")).data.membershipTier).toBe("Free");
-    const lessonPath = `/lessons/${lessons[0].id}`;
-
-  const { base, chromiumPath } = progressBrowserEnvironment();
+    expect((await api(free, `/lessons/${lessons[0].id}`)).status).toBe(403);
+    expect((await api(free, `/courses/${course.id}/lessons`)).status).toBe(403);
+    expect((await api(free, "/enrollments", "POST", { courseId: course.id })).status).toBe(403);
+    await free.goto(`${base}/dashboard`);
+    await browserExpect(free.getByTestId("text-accelerator-progress")).toHaveCount(0);
+  } finally {
+    for (const context of contexts) await context.close();
+    await browser?.close();
+    for (const identity of identities) {
+      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, identity));
+      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, identity));
+      await db.delete(usersTable).where(eq(usersTable.clerkId, identity));
+      await clerkClient.users.deleteUser(identity);
+    }
+    if (fixtureCourseId) {
+      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, fixtureCourseId));
+      await db.delete(coursesTable).where(eq(coursesTable.id, fixtureCourseId));
+    }
+    if (fixtureCategoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, fixtureCategoryId));
+    await db.delete(activityTable).where(eq(activityTable.actorName, names[0]));
+    await pool.end();
+  }
+}, 120_000);

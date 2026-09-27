@@ -5,6 +5,67 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+export type MembershipOfferPhase = typeof MembershipOfferPhase[keyof typeof MembershipOfferPhase];
+
+
+export const MembershipOfferPhase = {
+  upcoming: 'upcoming',
+  open: 'open',
+  closed: 'closed',
+} as const;
+
+export interface MembershipOffer {
+  phase: MembershipOfferPhase;
+  foundingAvailable: boolean;
+  foundingPrice: number;
+  standardPrice: number;
+}
+
+export type MembershipCheckoutInputKind = typeof MembershipCheckoutInputKind[keyof typeof MembershipCheckoutInputKind];
+
+
+export const MembershipCheckoutInputKind = {
+  founding: 'founding',
+  standard: 'standard',
+} as const;
+
+export interface MembershipCheckoutInput {
+  kind: MembershipCheckoutInputKind;
+}
+
+export interface MembershipRedirect {
+  url: string;
+}
+
+export type MyMembershipMembershipKind = typeof MyMembershipMembershipKind[keyof typeof MyMembershipMembershipKind];
+
+
+export const MyMembershipMembershipKind = {
+  founding: 'founding',
+  standard: 'standard',
+} as const;
+
+export type MyMembershipMembershipStatus = typeof MyMembershipMembershipStatus[keyof typeof MyMembershipMembershipStatus];
+
+
+export const MyMembershipMembershipStatus = {
+  pending: 'pending',
+  confirmed: 'confirmed',
+} as const;
+
+/**
+ * @nullable
+ */
+export type MyMembershipMembership = {
+  kind: MyMembershipMembershipKind;
+  status: MyMembershipMembershipStatus;
+} | null;
+
+export interface MyMembership {
+  /** @nullable */
+  membership: MyMembershipMembership;
+}
+
 export interface HealthStatus {
   status: string;
 }
