@@ -13,3 +13,4 @@
 - [Audit draft privacy tradeoff](audit-draft-privacy.md) — local recovery favors one short-lived account draft over retaining drafts for multiple users of a shared browser.
 - [Delayed Clerk response tests](delayed-clerk-response-tests.md) — browser interception can lose session auth on replay; capture an authenticated response before holding the route.
 - [Workspace CLI dependency boundary](workspace-cli-dependency-boundary.md) — a root script may not see package-local executables or imports; invoke tools from their owning workspace.
+- [Workspace command shims](workspace-command-shims.md) — generated package binaries can lack executable bits; distinguish launcher permissions from failing tests.

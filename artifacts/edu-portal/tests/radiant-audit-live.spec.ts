@@ -130,7 +130,6 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   const created: string[] = [];
   try {
     await setupClerkTestingToken({ page });
-    for (const email of [wrongEmail, stagedEmail]) {
     const user = await client.users.createUser({
       emailAddress: [email],
       skipPasswordRequirement: true,
@@ -255,7 +254,6 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   const created: string[] = [];
   try {
     await setupClerkTestingToken({ page });
-    for (const email of [wrongEmail, stagedEmail]) {
     const user = await client.users.createUser({
       emailAddress: [email],
       skipPasswordRequirement: true,
@@ -323,7 +321,7 @@ test("cancel keeps the current Audit; confirming deletes only current and leaves
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const email = `audit-delete-${tag}+clerk_test@example.com`;
+  const email = `audit-delete-failure-${tag}+clerk_test@example.com`;
   let userId: string | undefined;
   try {
     const user = await client.users.createUser({
@@ -422,7 +420,7 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomUUID().slice(0, 12);
-  const email = `audit-history-delete-${tag}+clerk_test@example.com`;
+  const email = `audit-delete-failure-${tag}+clerk_test@example.com`;
   const first = `history-first-${tag}`;
   const second = `history-second-${tag}`;
   const current = `history-current-${tag}`;

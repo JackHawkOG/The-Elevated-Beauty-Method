@@ -208,3 +208,65 @@ test("late invoice and subscription notices use current Stripe state; sweeps can
     status: "confirmed", failed_months: 2, last_failed_invoice: null, membership_tier: "Elevated",
   });
 });
+
+test("a temporary Stripe retrieval failure rolls back the event so redelivery can end access once", async () => {
+  const retryClerkId = `billing-retry-${id}`;
+  const retrySubscriptionId = `sub_billing_retry_${id}`;
+  const eventId = `evt_billing_retry_${id}`;
+  const event = { object: "subscription", id: retrySubscriptionId, status: "canceled" };
+  let retrievals = 0;
+  const stripe = {
+    subscriptions: {
+      retrieve: async (requestedId: string) => {
+        expect(requestedId).toBe(retrySubscriptionId);
+        retrievals++;
+        if (retrievals === 1) throw new Error("Temporary Stripe outage");
+        return { status: "canceled", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+      },
+    },
+  } as unknown as Stripe;
+  vi.mocked(getStripeSync).mockResolvedValue({ processWebhook: vi.fn().mockResolvedValue(undefined) } as never);
+  vi.mocked(getUncachableStripeClient).mockResolvedValue(stripe);
+
+  await pool.query(
+    "INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [retryClerkId, "Billing retry fixture", `${retryClerkId}@example.invalid`],
+  );
+  try {
+    await pool.query(
+      "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)",
+      [retryClerkId, retrySubscriptionId],
+    );
+    const retryState = async () => {
+      const result = await pool.query<MembershipState>(
+        "SELECT m.status, m.failed_months, m.last_failed_invoice, u.membership_tier FROM membership_checkouts m JOIN users u ON u.clerk_id = m.clerk_id WHERE m.stripe_subscription_id = $1",
+        [retrySubscriptionId],
+      );
+      return result.rows[0];
+    };
+    const recordedEvents = async () => {
+      const result = await pool.query("SELECT id FROM membership_webhook_events WHERE id = $1", [eventId]);
+      return result.rows;
+    };
+
+    expect(await deliver("customer.subscription.updated", event, eventId)).toBe(400);
+    expect(await recordedEvents()).toEqual([]);
+    expect(await retryState()).toEqual({
+      status: "confirmed", failed_months: 0, last_failed_invoice: null, membership_tier: "Elevated",
+    });
+
+    expect(await deliver("customer.subscription.updated", event, eventId)).toBe(200);
+    expect(await recordedEvents()).toEqual([{ id: eventId }]);
+    expect(await retryState()).toEqual({
+      status: "forfeited", failed_months: 0, last_failed_invoice: null, membership_tier: "Free",
+    });
+
+    expect(await deliver("customer.subscription.updated", event, eventId)).toBe(200);
+    expect(retrievals).toBe(2); // A processed replay does not reconcile again.
+    expect(await retryState()).toMatchObject({ status: "forfeited", membership_tier: "Free" });
+  } finally {
+    await pool.query("DELETE FROM membership_webhook_events WHERE id = $1", [eventId]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [retryClerkId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [retryClerkId]);
+  }
+});
