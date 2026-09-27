@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
-import { clerk, clerkSetup } from "@clerk/testing/playwright";
+import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 function requireDevelopment() {
@@ -40,6 +40,35 @@ async function signIn(page: Page, email: string) {
   await clerk.signIn({ page, emailAddress: email });
   await page.goto("/radiant-audit");
   await expect(page.getByRole("button", { name: "Save my Audit" })).toBeVisible();
+}
+
+async function signInThroughClerk(page: Page, email: string) {
+  await expect(page).toHaveURL(/\/sign-in(?:\/|$)/);
+  await page.getByLabel("Email address").fill(email);
+  const prepared = page.waitForResponse(response =>
+    response.url().includes("/prepare_first_factor") && response.status() === 200,
+  );
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await prepared;
+  await page.getByLabel("Enter verification code").fill("424242");
+}
+
+async function cleanUpAccounts(client: ReturnType<typeof createClerkClient>, created: string[]) {
+  if (!created.length) return;
+  // The environment guard runs before users are created. Delete only our own
+  // disposable identities and their development rows, even on assertion failure.
+  const [{ db, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+    await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+  try {
+    for (const id of created) {
+      await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, id));
+      await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, id));
+      await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, id));
+      await db.delete(usersTable).where(eq(usersTable.clerkId, id));
+    }
+  } finally {
+    await Promise.all(created.map(id => client.users.deleteUser(id)));
+  }
 }
 
 async function save(page: Page, email: string, marker: string) {
@@ -125,22 +154,78 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
     await signIn(page, accounts[0].email);
     await checkComparison(page, accounts[0].markers, accounts[1].markers);
   } finally {
-    // Import the DB only after the environment guard. Remove only rows for the
-    // newly created Clerk IDs; never touch another member's data.
-    if (created.length) {
-      const [{ db, pool, radiantAuditHistoryTable, radiantAuditsTable, usersTable }, { eq }] =
-        await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
-      try {
-        for (const id of created) {
-          await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, id));
-          await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, id));
-          await db.delete(usersTable).where(eq(usersTable.clerkId, id));
-        }
-      } finally {
-        await pool.end();
-        await Promise.all(created.map(id => client.users.deleteUser(id)));
-      }
+    await cleanUpAccounts(client, created);
+  }
+});
+
+test("staged answers survive real sign-out and sign-in without saving to the wrong verified account", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const wrongEmail = `audit-wrong-${tag}+clerk_test@example.com`;
+  const stagedEmail = `audit-staged-${tag}+clerk_test@example.com`;
+  const marker = `recovery-${tag}`;
+  const created: string[] = [];
+  try {
+    await setupClerkTestingToken({ page });
+    for (const email of [wrongEmail, stagedEmail]) {
+      const user = await client.users.createUser({ emailAddress: [email], skipPasswordRequirement: true });
+      created.push(user.id);
+      expect(user.primaryEmailAddress?.verification.status).toBe("verified");
     }
+
+    // Start signed out and let the app stage the answers and navigate to auth.
+    await page.goto("/radiant-audit");
+    await page.locator('label[for="routine-skincare-consistency"]').click();
+    await page.locator('label[for="values-quality-over-price"]').click();
+    await page.locator("#beauty-trend").fill(reflections(marker).beautyTrend);
+    await page.locator("#mastery-goal").fill(reflections(marker).masteryGoal);
+    await page.locator("#research-time").fill(reflections(marker).researchTime);
+    await page.getByLabel("Email address").fill(stagedEmail);
+    await page.getByRole("button", { name: /continue|save my audit/i }).click();
+    await expect(page).toHaveURL(/\/sign-up(?:\/|$)/);
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"))).not.toBeNull();
+
+    // Choose an existing account instead of creating another one.
+    await page.goto("/sign-in");
+    const saves: string[] = [];
+    page.on("request", request => {
+      if (request.method() === "PUT" && request.url().endsWith("/api/users/me/radiant-audit")) {
+        saves.push(request.url());
+      }
+    });
+    await signInThroughClerk(page, wrongEmail);
+    await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+    await expect(page.locator("main")).toContainText(stagedEmail);
+    await expect(page.locator("main")).toContainText(wrongEmail);
+    await expect(page.getByRole("button", { name: "Correct email and save my Audit" })).toBeDisabled();
+    expect(saves).toHaveLength(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+    expect(saves).toHaveLength(0);
+
+    // This is the app's actual Clerk sign-out and sign-in redirect, not a
+    // programmatic session swap; sessionStorage must survive both navigations.
+    await page.getByRole("button", { name: "Sign in with that email" }).click();
+    await signInThroughClerk(page, stagedEmail);
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    for (const answer of Object.values(reflections(marker))) {
+      await expect(page.locator("main")).toContainText(answer);
+    }
+    expect(saves).toHaveLength(1);
+    expect(await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"))).toBeNull();
+
+    const [{ db, radiantAuditsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const wrong = await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0]));
+    const right = await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[1]));
+    expect(wrong).toHaveLength(0);
+    expect(right).toHaveLength(1);
+    expect(right[0].masteryGoal).toBe(reflections(marker).masteryGoal);
+  } finally {
+    await cleanUpAccounts(client, created);
   }
 });
 

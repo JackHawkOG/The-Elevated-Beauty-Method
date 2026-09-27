@@ -7,7 +7,6 @@ const state = vi.hoisted(() => ({
   isLoading: false,
   isError: false,
 }));
-
 vi.mock("@workspace/api-client-react", () => ({
   useGetMembershipOffer: () => ({ data: state.offer, isLoading: state.isLoading, isError: state.isError }),
   useGetMyMembership: () => ({ data: { membership: null } }),
