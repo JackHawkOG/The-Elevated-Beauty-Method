@@ -1,26 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test, type Page } from "@playwright/test";
-
-function requireDevelopment() {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT ||
-      !process.env.CLERK_SECRET_KEY?.startsWith("sk_test_") ||
-      !process.env.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_") ||
-      !process.env.REPLIT_DEV_DOMAIN?.endsWith(".replit.dev") ||
-      !process.env.DATABASE_URL || !process.env.PGHOST || !process.env.PGPORT ||
-      !process.env.PGDATABASE || !process.env.PGUSER) {
-    throw new Error("The live community check requires development Clerk, preview, and database.");
-  }
-  const target = new URL(process.env.DATABASE_URL);
-  if (target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
-      decodeURIComponent(target.username) !== process.env.PGUSER ||
-      [...target.searchParams.keys()].some(key => /^(host|hostaddr|port|dbname|user|service)$/i.test(key))) {
-    throw new Error("DATABASE_URL does not target the workspace development database.");
-  }
-}
+import { communityFixtureEmail, communityFixturePrivateMetadata, newCommunityFixtureTag, requireCommunityDevelopment } from "./community-fixtures";
 
 const isPost = (url: string, method: string) =>
   method === "POST" && new URL(url).pathname === "/api/announcements";
@@ -34,11 +15,11 @@ async function fillDraft(page: Page, title: string, body: string) {
 
 test("a lost response retries one signed-in post; editing a failed draft starts a new attempt", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireCommunityDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-  const marker = randomUUID().slice(0, 12);
-  const email = `community-${marker}+clerk_test@example.com`;
+  const marker = newCommunityFixtureTag();
+  const email = communityFixtureEmail(marker);
   const titles = [`Community retry ${marker}`, `Community changed ${marker}`, `Community changed ${marker} edited`];
   let userId: string | undefined;
   try {
@@ -47,6 +28,7 @@ test("a lost response retries one signed-in post; editing a failed draft starts 
       firstName: "Community",
       lastName: "Check",
       skipPasswordRequirement: true,
+      privateMetadata: communityFixturePrivateMetadata,
     })).id;
     await page.goto("/community");
     await clerk.signIn({ page, emailAddress: email });
@@ -124,14 +106,13 @@ test("a lost response retries one signed-in post; editing a failed draft starts 
   } finally {
     if (!page.isClosed()) await page.unrouteAll({ behavior: "ignoreErrors" });
     if (userId) {
-      const [{ db, announcementsTable, activityTable, usersTable, pool }, { eq, inArray, or }] =
+      const [{ db, announcementsTable, activityTable, usersTable, pool }, { eq, inArray }] =
         await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
       try {
         const posts = await db.select({ id: announcementsTable.id }).from(announcementsTable)
           .where(eq(announcementsTable.actorId, userId));
-        await db.delete(activityTable).where(posts.length
-          ? or(inArray(activityTable.sourceAnnouncementId, posts.map(post => post.id)), inArray(activityTable.entityTitle, titles))
-          : inArray(activityTable.entityTitle, titles));
+        if (posts.length) await db.delete(activityTable)
+          .where(inArray(activityTable.sourceAnnouncementId, posts.map(post => post.id)));
         await db.delete(announcementsTable).where(eq(announcementsTable.actorId, userId));
         await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
       } finally {
