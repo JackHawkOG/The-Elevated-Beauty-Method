@@ -33,7 +33,8 @@ export function readAuditDraft(accountId: string): RadiantAuditSubmission | null
     if (!record || typeof record !== "object") throw new Error("Invalid draft");
     const { owner, expiresAt, answers } = record as Record<string, unknown>;
     // A shared browser must never expose one member's answers to another account.
-    if (owner !== accountId || typeof expiresAt !== "number" || expiresAt <= Date.now()) {
+    if (owner !== accountId || typeof expiresAt !== "number" ||
+        expiresAt <= Date.now() || expiresAt > Date.now() + lifetime) {
       clearAuditDraft();
       return null;
     }

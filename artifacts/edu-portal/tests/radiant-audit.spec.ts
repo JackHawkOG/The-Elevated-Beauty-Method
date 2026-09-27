@@ -730,7 +730,7 @@ test("an unfinished Audit continues in a separate browser, stays private, and di
   }
 });
 
-for (const scenario of ["expired", "unreadable JSON", "invalid answers"] as const) {
+for (const scenario of ["expired", "far-future expiry", "unreadable JSON", "invalid answers"] as const) {
   test(`${scenario} signed-in drafts are removed without restoring answers, and a new draft remains editable`, async ({ page }) => {
     await signInAs(page, "member-a");
     const oldAnswer = `private ${scenario} answer`;
@@ -745,6 +745,7 @@ for (const scenario of ["expired", "unreadable JSON", "invalid answers"] as cons
       };
       const record = { owner: "member-a", expiresAt: Date.now() + 60_000, answers };
       if (scenario === "expired") record.expiresAt = Date.now() - 1;
+      if (scenario === "far-future expiry") record.expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
       if (scenario === "invalid answers") {
         (record.answers as { valuesChecks: unknown }).valuesChecks = "quality-over-price";
       }
