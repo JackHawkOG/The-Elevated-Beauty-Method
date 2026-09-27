@@ -523,6 +523,17 @@ paths:
                   - type: "null"
         "401":
           description: Unauthorized
+    delete:
+      operationId: deleteRadiantAudit
+      tags: [method]
+      summary: Permanently delete the signed-in member's current Radiant Audit, keeping earlier history
+      responses:
+        "204":
+          description: Current Audit deleted; earlier submissions remain in history and are not promoted
+        "401":
+          description: Unauthorized
+        "404":
+          description: No current Audit for this member
     put:
       operationId: saveRadiantAudit
       tags: [method]

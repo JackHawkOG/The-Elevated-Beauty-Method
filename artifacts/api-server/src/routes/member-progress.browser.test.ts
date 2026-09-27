@@ -20,6 +20,13 @@ test("Clerk members retain progress after reload; Free members cannot access it"
   }
   // The local PG* variables identify the workspace development database.
   // Check the URL used by the DB client before creating accounts or fixtures.
+  const target = new URL(process.env.DATABASE_URL);
+  if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
+      target.hostname !== process.env.PGHOST ||
+      (target.port || "5432") !== process.env.PGPORT ||
+      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
+    throw new Error("Browser progress check requires the workspace development database URL");
+  }
   const base = `https://${process.env.REPLIT_DEV_DOMAIN}`;
   const run = randomUUID();
   const identities: string[] = [];

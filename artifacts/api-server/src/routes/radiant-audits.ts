@@ -25,6 +25,17 @@ router.get("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req,
   res.json(GetRadiantAuditResponse.parse(audit ? response(audit) : null));
 });
 
+router.delete("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  const [deleted] = await db.delete(radiantAuditsTable)
+    .where(eq(radiantAuditsTable.clerkId, req.userId!))
+    .returning({ clerkId: radiantAuditsTable.clerkId });
+  if (!deleted) {
+    res.status(404).json({ error: "Current Audit not found." });
+    return;
+  }
+  res.sendStatus(204);
+});
+
 router.get("/users/me/radiant-audit/history", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
   const history = await db.select().from(radiantAuditHistoryTable)
     .where(eq(radiantAuditHistoryTable.clerkId, req.userId!))

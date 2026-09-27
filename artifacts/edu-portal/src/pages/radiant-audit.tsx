@@ -6,6 +6,7 @@ import {
   useGetRadiantAudit,
   useGetRadiantAuditHistory,
   useSaveRadiantAudit,
+  useDeleteRadiantAudit,
   getGetRadiantAuditQueryKey,
   getGetRadiantAuditHistoryQueryKey,
   type RadiantAuditInput,
@@ -15,6 +16,10 @@ import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
 import { trackEvent, trackRadiantAuditSaved } from "@/lib/analytics";
 import { clearPendingAudit, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CheckCircle2 } from "lucide-react";
 
 function auditAnswers(audit: RadiantAuditSubmission): RadiantAuditInput {
@@ -84,19 +89,35 @@ export function RadiantAuditCompletePage() {
   const [pending, setPending] = useState(readPendingAudit);
   const [error, setError] = useState<string | null>(null);
   const [confirmedEmail, setConfirmedEmail] = useState<string | null>(null);
+  const [confirmDeleteCurrent, setConfirmDeleteCurrent] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const started = useRef(false);
   const queryClient = useQueryClient();
   const save = useSaveRadiantAudit();
+  const deleteCurrent = useDeleteRadiantAudit();
   const { data: saved, isLoading, isError } = useGetRadiantAudit({
     query: { queryKey: getGetRadiantAuditQueryKey(), enabled: !pending },
   });
   const { data: history, isLoading: historyLoading, isError: historyError } = useGetRadiantAuditHistory({
-    query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !!saved },
+    query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !isLoading && !isError },
   });
   const email = user?.primaryEmailAddress?.emailAddress;
   const verifiedEmail = user?.primaryEmailAddress?.verification.status === "verified" ? email : undefined;
   const mismatch = !!pending && !!isLoaded &&
     (!verifiedEmail || verifiedEmail.toLowerCase() !== pending.email.toLowerCase());
+
+  async function confirmCurrentDeletion() {
+    setDeleteError(null);
+    try {
+      await deleteCurrent.mutateAsync();
+      queryClient.setQueryData(getGetRadiantAuditQueryKey(), null);
+      setConfirmDeleteCurrent(false);
+      void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+    } catch {
+      setDeleteError("We couldn't delete your current Audit. Please try again.");
+    }
+  }
 
   async function submitPending(audit: RadiantAuditSubmission) {
     setError(null);
@@ -234,14 +255,49 @@ export function RadiantAuditCompletePage() {
               <Button asChild><Link href="/dashboard">Explore your free dashboard</Link></Button>
               <Button asChild variant="outline"><Link href="/radiant-audit">Retake the Audit</Link></Button>
             </div>
+            <section className="mt-10 border-t border-border pt-8">
+              <h2 className="font-serif text-2xl">Remove your current Audit</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                This is separate from clearing earlier history. Earlier submissions will remain saved, but none will become your current Audit.
+              </p>
+              <Button type="button" variant="outline" className="mt-4" onClick={() => { setDeleteError(null); setConfirmDeleteCurrent(true); }}>
+                Delete current Audit
+              </Button>
+              {deleteError && <p className="mt-3 text-sm text-destructive" role="alert">{deleteError}</p>}
+            </section>
           </>
         ) : (
           <>
             <h1 className="font-serif text-4xl">Start your Radiant Audit</h1>
             <p className="mt-4 text-muted-foreground">There isn't an Audit saved for this account yet.</p>
             <Button asChild className="mt-6"><Link href="/radiant-audit">Complete the Audit</Link></Button>
+            {historyLoading ? (
+              <p className="mt-8" role="status">Loading earlier Audits…</p>
+            ) : historyError ? (
+              <p className="mt-8 text-destructive" role="alert">We couldn't load your earlier Audits. Please refresh and try again.</p>
+            ) : history?.length ? (
+              <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={null} history={history} />
+            ) : null}
           </>
         )}
+        <AlertDialog open={confirmDeleteCurrent} onOpenChange={open => { if (!open && !deleteCurrent.isPending) setConfirmDeleteCurrent(false); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete your current Audit?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Your current Audit and its written reflections will be permanently deleted. This cannot be undone.
+                Earlier Audits will stay in your history, but none will become your current Audit.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {deleteError && <p className="text-sm text-destructive" role="alert">{deleteError}</p>}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleteCurrent.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction disabled={deleteCurrent.isPending} onClick={event => { event.preventDefault(); void confirmCurrentDeletion(); }}>
+                {deleteCurrent.isPending ? "Deleting…" : "Permanently delete current Audit"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );

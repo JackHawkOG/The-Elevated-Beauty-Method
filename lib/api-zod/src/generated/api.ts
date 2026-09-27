@@ -630,6 +630,12 @@ export const GetRadiantAuditResponse = zod.union([zod.object({
 
 
 /**
+ * @summary Permanently delete the signed-in member's current Radiant Audit, keeping earlier history
+ */
+export const DeleteRadiantAuditResponse = zod.void()
+
+
+/**
  * @summary Submit or update the signed-in member's Radiant Audit
  */
 export const saveRadiantAuditBodyRoutineChecksMax = 5;

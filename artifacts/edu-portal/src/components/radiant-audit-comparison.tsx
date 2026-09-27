@@ -66,7 +66,7 @@ export function RadiantAuditComparison({
   history,
   accountId,
 }: {
-  latest: RadiantAudit;
+  latest: RadiantAudit | null;
   history: RadiantAuditHistoryEntry[];
   accountId: string;
 }) {
@@ -98,14 +98,14 @@ export function RadiantAuditComparison({
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, []);
         try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
         setSelectedId(null);
-        setNotice("Earlier Audit history cleared. Your latest Audit is still saved.");
+        setNotice(latest ? "Earlier Audit history cleared. Your latest Audit is still saved." : "Earlier Audit history cleared. You have no current Audit.");
       } else if (earlier) {
         const id = earlier.id;
         await deleteEntry.mutateAsync({ id });
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, entries => entries?.filter(entry => entry.id !== id));
         try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
         setSelectedId(null);
-        setNotice("Earlier submission deleted. Your latest Audit is still saved.");
+        setNotice(latest ? "Earlier submission deleted. Your latest Audit is still saved." : "Earlier submission deleted. You have no current Audit.");
       }
       setConfirmation(null);
       void queryClient.invalidateQueries({ queryKey: key });
@@ -126,7 +126,9 @@ export function RadiantAuditComparison({
   return (
     <section className="mt-10 border-t border-border pt-8" aria-labelledby="audit-history-heading">
       <h2 id="audit-history-heading" className="font-serif text-2xl">How your answers have changed</h2>
-      <p className="mt-2 text-sm text-muted-foreground">Compare your latest reflection with any earlier submission. Only you can see these answers.</p>
+      <p className="mt-2 text-sm text-muted-foreground">
+        {latest ? "Compare your latest reflection with any earlier submission." : "Your earlier submissions remain saved, but you have no current Audit. Complete a new Audit to compare answers again."} Only you can see these answers.
+      </p>
       <label htmlFor="earlier-audit" className="mt-5 block text-sm font-medium">Compare with</label>
       <select
         id="earlier-audit"
@@ -158,15 +160,17 @@ export function RadiantAuditComparison({
       </div>
       {notice && <p className="mt-3 text-sm" role="status">{notice}</p>}
       {error && <p className="mt-3 text-sm text-destructive" role="alert">{error}</p>}
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+      <div className={`mt-5 grid gap-4 ${latest ? "sm:grid-cols-2" : ""}`}>
         <div className="min-w-0 rounded-2xl border border-border p-5">
           <h3 className="mb-5 font-serif text-xl">Earlier · {dateLabel(earlier.completedAt)}</h3>
           <Answers audit={earlier} />
         </div>
-        <div className="min-w-0 rounded-2xl border border-primary/40 bg-primary/[0.04] p-5">
-          <h3 className="mb-5 font-serif text-xl">Latest · {dateLabel(latest.completedAt)}</h3>
-          <Answers audit={latest} />
-        </div>
+        {latest && (
+          <div className="min-w-0 rounded-2xl border border-primary/40 bg-primary/[0.04] p-5">
+            <h3 className="mb-5 font-serif text-xl">Latest · {dateLabel(latest.completedAt)}</h3>
+            <Answers audit={latest} />
+          </div>
+        )}
       </div>
       <AlertDialog open={confirmation !== null} onOpenChange={open => { if (!open && !deleting) setConfirmation(null); }}>
         <AlertDialogContent>
@@ -174,8 +178,8 @@ export function RadiantAuditComparison({
             <AlertDialogTitle>{confirmation === "all" ? "Clear all earlier Audits?" : "Delete this earlier Audit?"}</AlertDialogTitle>
             <AlertDialogDescription>
               {confirmation === "all"
-                ? "All earlier submissions and their written reflections will be permanently deleted. Your latest Audit will remain saved."
-                : `The earlier submission from ${dateLabel(earlier.completedAt)} and its written reflections will be permanently deleted. Your latest Audit will remain saved.`}
+                ? `All earlier submissions and their written reflections will be permanently deleted. ${latest ? "Your latest Audit will remain saved." : "You have no current Audit."}`
+                : `The earlier submission from ${dateLabel(earlier.completedAt)} and its written reflections will be permanently deleted. ${latest ? "Your latest Audit will remain saved." : "You have no current Audit."}`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
