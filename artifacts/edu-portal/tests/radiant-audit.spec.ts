@@ -76,13 +76,13 @@ async function stagedInBrowser(page: Page) {
 }
 
 test("a corrected verified email requires consent, retains every answer across reload and failed-save retry", async ({ page }) => {
-  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
+  const writes: Array<{ account: string | undefined; answers: Answers; submissionId: string }> = [];
   let failWrites = true;
   await page.route("**/api/users/me/radiant-audit**", async route => {
     const request = route.request();
     if (request.method() === "PUT") {
-      const { submissionId: _submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
-      writes.push({ account: request.headers().authorization, answers });
+      const { submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
+      writes.push({ account: request.headers().authorization, answers, submissionId });
       if (failWrites) return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
       return route.fulfill({
         json: {
@@ -96,6 +96,10 @@ test("a corrected verified email requires consent, retains every answer across r
 
   await stageVisitorAnswers(page);
   expect(await stagedInBrowser(page)).toEqual({ email: originalEmail, ...stagedAnswers });
+  const stagedId = await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("tebm:radiant-audit:pending")!)?.submissionId as string,
+  );
+  expect(stagedId).toBeTruthy();
   await page.evaluate(() => localStorage.setItem("audit-test-account", "corrected"));
   await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
   await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
@@ -106,25 +110,31 @@ test("a corrected verified email requires consent, retains every answer across r
   await page.reload();
   await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
   expect(await stagedInBrowser(page)).toEqual({ email: originalEmail, ...stagedAnswers });
+  expect(await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("tebm:radiant-audit:pending")!)?.submissionId,
+  )).toBe(stagedId);
   expect(writes).toHaveLength(0);
 
   await page.getByRole("checkbox", { name: /I confirm that these are my Audit answers/ }).check();
   await page.getByRole("button", { name: "Correct email and save my Audit" }).click();
   await expect(page.getByRole("button", { name: "Try saving again" })).toBeVisible();
-  expect(writes).toEqual([{ account: "Bearer corrected", answers: stagedAnswers }]);
+  expect(writes).toEqual([{ account: "Bearer corrected", answers: stagedAnswers, submissionId: stagedId }]);
   expect(await stagedInBrowser(page)).toEqual({ email: correctedEmail, ...stagedAnswers });
+  expect(await page.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("tebm:radiant-audit:pending")!)?.submissionId,
+  )).toBe(stagedId);
 
   await page.reload();
   await expect(page.getByRole("button", { name: "Try saving again" })).toBeVisible();
   expect(writes).toHaveLength(2);
-  expect(writes[1]).toEqual({ account: "Bearer corrected", answers: stagedAnswers });
+  expect(writes[1]).toEqual({ account: "Bearer corrected", answers: stagedAnswers, submissionId: stagedId });
   expect(await stagedInBrowser(page)).toEqual({ email: correctedEmail, ...stagedAnswers });
 
   failWrites = false;
   await page.getByRole("button", { name: "Try saving again" }).click();
   await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
   expect(writes).toHaveLength(3);
-  expect(writes[2]).toEqual({ account: "Bearer corrected", answers: stagedAnswers });
+  expect(writes[2]).toEqual({ account: "Bearer corrected", answers: stagedAnswers, submissionId: stagedId });
   await expect(page.getByText(stagedAnswers.masteryGoal).first()).toBeVisible();
   expect(await stagedInBrowser(page)).toBeNull();
 });
@@ -383,6 +393,7 @@ test("failed signed-in save preserves answers and checks until a successful retr
   await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
   expect(submitted).toEqual([answers, answers]);
   expect(submissionIds).toHaveLength(2);
+  expect(submissionIds[0]).toBeTruthy();
   expect(submissionIds[1]).toBe(submissionIds[0]);
   expect(saved).toHaveLength(1);
   expect(await tracking()).toEqual([
@@ -392,6 +403,20 @@ test("failed signed-in save preserves answers and checks until a successful retr
   await page.goto("/tests/audit-harness.html");
   await expect(page.locator("#mastery-goal")).toHaveValue("");
   await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+  // Even identical answers are a new submission after the earlier one succeeds.
+  await page.getByLabel("Skincare consistency").check();
+  await page.getByLabel("Quality over price").check();
+  await page.getByLabel("Professional results").check();
+  await page.locator("#beauty-trend").fill(answers.beautyTrend);
+  await page.locator("#mastery-goal").fill(answers.masteryGoal);
+  await page.locator("#research-time").fill(answers.researchTime);
+  await page.getByLabel("Email address").fill("member-a@example.invalid");
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  expect(submitted).toEqual([answers, answers, answers]);
+  expect(submissionIds).toHaveLength(3);
+  expect(submissionIds[2]).toBeTruthy();
+  expect(submissionIds[2]).not.toBe(submissionIds[0]);
 });
 
 test("a signed-in draft never appears for another account and can be discarded", async ({ page }) => {
