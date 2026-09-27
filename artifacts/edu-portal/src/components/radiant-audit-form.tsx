@@ -13,6 +13,10 @@ export type RadiantAuditSubmission = {
 
 type RadiantAuditFormProps = {
   initialEmail?: string;
+  initialDraft?: RadiantAuditSubmission | null;
+  onDraftChange?: (data: RadiantAuditSubmission) => void;
+  onDiscardDraft?: () => void;
+  draftWarning?: string | null;
   needsAccount?: boolean;
   submitting?: boolean;
   error?: string | null;
@@ -161,21 +165,29 @@ function CheckOption({
 
 export function RadiantAuditForm({
   initialEmail = "",
+  initialDraft,
+  onDraftChange,
+  onDiscardDraft,
+  draftWarning,
   needsAccount = false,
   submitting = false,
   error = null,
   onSubmit,
 }: RadiantAuditFormProps) {
-  const [email, setEmail] = useState(initialEmail);
+  const [email, setEmail] = useState(initialDraft?.email || initialEmail);
   useEffect(() => {
     if (initialEmail) setEmail(current => current || initialEmail);
   }, [initialEmail]);
-  const [routineChecks, setRoutineChecks] = useState<string[]>([]);
-  const [valuesChecks, setValuesChecks] = useState<string[]>([]);
-  const [beautyTrend, setBeautyTrend] = useState("");
-  const [masteryGoal, setMasteryGoal] = useState("");
-  const [researchTime, setResearchTime] = useState("");
+  const [routineChecks, setRoutineChecks] = useState<string[]>(initialDraft?.routineChecks ?? []);
+  const [valuesChecks, setValuesChecks] = useState<string[]>(initialDraft?.valuesChecks ?? []);
+  const [beautyTrend, setBeautyTrend] = useState(initialDraft?.beautyTrend ?? "");
+  const [masteryGoal, setMasteryGoal] = useState(initialDraft?.masteryGoal ?? "");
+  const [researchTime, setResearchTime] = useState(initialDraft?.researchTime ?? "");
   const [writingError, setWritingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onDraftChange?.({ email, routineChecks, valuesChecks, beautyTrend, masteryGoal, researchTime });
+  }, [email, routineChecks, valuesChecks, beautyTrend, masteryGoal, researchTime, onDraftChange]);
 
   const toggle = (setter: (value: string[] | ((previous: string[]) => string[])) => void) =>
     (value: string, checked: boolean) => {
@@ -442,6 +454,15 @@ export function RadiantAuditForm({
                 {error}
               </p>
             )}
+            {onDiscardDraft && (
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <span>Your unfinished answers stay in this browser for up to 24 hours. Avoid shared devices.</span>
+                <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={onDiscardDraft} data-testid="button-discard-audit-draft">
+                  Discard draft
+                </Button>
+              </div>
+            )}
+            {draftWarning && <p role="alert" className="mt-3 text-sm text-destructive">{draftWarning}</p>}
             <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
               Your answers are a starting point — not a judgment. Every beauty method begins with understanding you.
             </p>

@@ -48,6 +48,7 @@ const stagedAnswers: Answers = {
 };
 const originalEmail = "original@example.invalid";
 const correctedEmail = "corrected@example.invalid";
+const signedInDraftKey = "tebm:radiant-audit:signed-in-draft";
 
 async function stageVisitorAnswers(page: Page) {
   await page.goto("/tests/audit-harness.html");
@@ -66,7 +67,12 @@ async function stageVisitorAnswers(page: Page) {
 }
 
 async function stagedInBrowser(page: Page) {
-  return page.evaluate(() => JSON.parse(sessionStorage.getItem("tebm:radiant-audit:pending") || "null"));
+  return page.evaluate(() => {
+    const value = JSON.parse(sessionStorage.getItem("tebm:radiant-audit:pending") || "null");
+    if (!value) return null;
+    const { submissionId: _submissionId, ...answers } = value;
+    return answers;
+  });
 }
 
 test("a corrected verified email requires consent, retains every answer across reload and failed-save retry", async ({ page }) => {
@@ -75,7 +81,7 @@ test("a corrected verified email requires consent, retains every answer across r
   await page.route("**/api/users/me/radiant-audit**", async route => {
     const request = route.request();
     if (request.method() === "PUT") {
-      const answers = request.postDataJSON() as Answers;
+      const { submissionId: _submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
       writes.push({ account: request.headers().authorization, answers });
       if (failWrites) return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
       return route.fulfill({
@@ -170,7 +176,7 @@ test("signing out of the mismatched account preserves the staged answers for the
   await page.route("**/api/users/me/radiant-audit**", async route => {
     const request = route.request();
     if (request.method() === "PUT") {
-      const answers = request.postDataJSON() as Answers;
+      const { submissionId: _submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
       writes.push({ account: request.headers().authorization, answers });
       return route.fulfill({
         json: {
@@ -294,6 +300,7 @@ test("signed-in member compares both earlier Audits after saving and reload, wit
 test("failed signed-in save preserves answers and checks until a successful retry", async ({ page }) => {
   const answers = fixture("retry");
   const submitted: Answers[] = [];
+  const submissionIds: string[] = [];
   const saved: Audit[] = [];
   await page.addInitScript(() => {
     (window as unknown as { __auditTracking: Array<{ name: string; data?: unknown }> }).__auditTracking = [];
@@ -316,7 +323,8 @@ test("failed signed-in save preserves answers and checks until a successful retr
       return route.fulfill({ json: new URL(request.url()).pathname.endsWith("/history") ? [] : saved.at(-1) ?? null });
     }
     if (request.method() !== "PUT") return route.fulfill({ status: 405 });
-    const input = request.postDataJSON() as Answers;
+    const { submissionId, ...input } = request.postDataJSON() as Answers & { submissionId: string };
+    submissionIds.push(submissionId);
     submitted.push(input);
     if (submitted.length === 1) {
       return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
@@ -339,6 +347,14 @@ test("failed signed-in save preserves answers and checks until a successful retr
   await page.locator("#mastery-goal").fill(answers.masteryGoal);
   await page.locator("#research-time").fill(answers.researchTime);
   await page.getByLabel("Email address").fill("member-a@example.invalid");
+  await page.reload();
+  await expect(page.getByLabel("Skincare consistency")).toBeChecked();
+  await expect(page.getByLabel("Quality over price")).toBeChecked();
+  await expect(page.getByLabel("Professional results")).toBeChecked();
+  await expect(page.locator("#beauty-trend")).toHaveValue(answers.beautyTrend);
+  await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
+  await expect(page.locator("#research-time")).toHaveValue(answers.researchTime);
+  await expect(page.getByLabel("Email address")).toHaveValue("member-a@example.invalid");
   await page.getByRole("button", { name: "Save my Audit" }).click();
 
   await expect(page.getByRole("alert")).toContainText("We couldn't save your Audit");
@@ -354,12 +370,48 @@ test("failed signed-in save preserves answers and checks until a successful retr
   expect(saved).toHaveLength(0);
   expect(await tracking()).toEqual([]);
 
+  await page.reload();
+  await expect(page.getByLabel("Skincare consistency")).toBeChecked();
+  await expect(page.getByLabel("Quality over price")).toBeChecked();
+  await expect(page.getByLabel("Professional results")).toBeChecked();
+  await expect(page.locator("#beauty-trend")).toHaveValue(answers.beautyTrend);
+  await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
+  await expect(page.locator("#research-time")).toHaveValue(answers.researchTime);
+  await expect(page.getByLabel("Email address")).toHaveValue("member-a@example.invalid");
   await page.getByRole("button", { name: "Save my Audit" }).click();
   await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
   await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
   expect(submitted).toEqual([answers, answers]);
+  expect(submissionIds).toHaveLength(2);
+  expect(submissionIds[1]).toBe(submissionIds[0]);
   expect(saved).toHaveLength(1);
   expect(await tracking()).toEqual([
     { name: "radiant_audit_saved", data: { completion_kind: "first_time" } },
   ]);
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  await page.goto("/tests/audit-harness.html");
+  await expect(page.locator("#mastery-goal")).toHaveValue("");
+  await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+});
+
+test("a signed-in draft never appears for another account and can be discarded", async ({ page }) => {
+  await signInAs(page, "member-a");
+  await page.getByLabel("Skincare consistency").check();
+  await page.locator("#beauty-trend").fill("private account A answer");
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key) !== null, signedInDraftKey)).toBe(true);
+
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "member-b"));
+  await page.reload();
+  await expect(page.locator("#beauty-trend")).toHaveValue("");
+  await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+  await expect(page.locator("body")).not.toContainText("private account A answer");
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+
+  await page.locator("#mastery-goal").fill("account B draft");
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key) !== null, signedInDraftKey)).toBe(true);
+  await page.getByRole("button", { name: "Discard draft" }).click();
+  await expect(page.locator("#mastery-goal")).toHaveValue("");
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  await page.reload();
+  await expect(page.locator("#mastery-goal")).toHaveValue("");
 });

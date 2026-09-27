@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useClerk, useUser } from "@clerk/react";
 import { useLocation, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import { RadiantAuditForm, type RadiantAuditSubmission } from "@/components/radi
 import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
 import { trackEvent, trackRadiantAuditSaved } from "@/lib/analytics";
 import { clearPendingAudit, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
+import { clearAuditDraft, getAuditSubmissionId, readAuditDraft, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -37,9 +38,39 @@ export default function RadiantAuditPage() {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [draftWarning, setDraftWarning] = useState<string | null>(null);
+  const [draftRevision, setDraftRevision] = useState(0);
   const save = useSaveRadiantAudit();
-  const attempt = useRef<{ answers: string; id: string } | null>(null);
+  const attempt = useRef<{ accountId: string; answers: string; id: string } | null>(null);
   const email = user?.primaryEmailAddress?.emailAddress;
+  const accountId = isLoaded && isSignedIn ? user?.id : undefined;
+  const persistDraft = useCallback((answers: RadiantAuditSubmission) => {
+    if (!accountId) return;
+    try {
+      if (!answers.routineChecks.length && !answers.valuesChecks.length &&
+          !answers.beautyTrend && !answers.masteryGoal && !answers.researchTime &&
+          answers.email === (email ?? "")) {
+        clearAuditDraft(accountId);
+      } else {
+        writeAuditDraft(accountId, answers);
+      }
+      setDraftWarning(null);
+    } catch {
+      setDraftWarning("This browser couldn't keep your draft. Keep this page open until your Audit is saved.");
+    }
+  }, [accountId, email]);
+
+  function discardDraft() {
+    try {
+      clearAuditDraft(accountId);
+      attempt.current = null;
+      setDraftWarning(null);
+      setError(null);
+      setDraftRevision(revision => revision + 1);
+    } catch {
+      setDraftWarning("This browser couldn't remove your draft. Please clear this site's browser data.");
+    }
+  }
 
   async function handleSubmit(audit: RadiantAuditSubmission) {
     setError(null);
@@ -56,10 +87,19 @@ export default function RadiantAuditPage() {
       try {
         const answers = auditAnswers(audit);
         const signature = JSON.stringify(answers);
-        if (attempt.current?.answers !== signature) {
-          attempt.current = { answers: signature, id: crypto.randomUUID() };
+        if (attempt.current?.accountId !== user!.id || attempt.current.answers !== signature) {
+          let id: string;
+          try {
+            id = getAuditSubmissionId(user!.id, audit);
+          } catch {
+            // Saving still works when local browser storage is unavailable.
+            id = crypto.randomUUID();
+          }
+          attempt.current = { accountId: user!.id, answers: signature, id };
         }
         const saved = await save.mutateAsync({ data: { ...answers, submissionId: attempt.current.id } });
+        // Clear only after the server confirms the save.
+        try { clearAuditDraft(user?.id); } catch { /* A storage failure must not hide a confirmed save. */ }
         trackRadiantAuditSaved(saved.completionKind);
         queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
         void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
@@ -78,9 +118,16 @@ export default function RadiantAuditPage() {
     }
   }
 
+  if (!isLoaded) return <p role="status">Loading your Audit…</p>;
+
   return (
     <RadiantAuditForm
+      key={`${accountId ?? "visitor"}:${draftRevision}`}
       initialEmail={email}
+      initialDraft={accountId ? readAuditDraft(accountId) : null}
+      onDraftChange={accountId ? persistDraft : undefined}
+      onDiscardDraft={accountId ? discardDraft : undefined}
+      draftWarning={draftWarning}
       needsAccount={!isSignedIn}
       submitting={!isLoaded || save.isPending}
       error={error}
