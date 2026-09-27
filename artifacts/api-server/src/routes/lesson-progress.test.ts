@@ -68,12 +68,13 @@ beforeAll(async () => {
   const [course] = await db.insert(coursesTable).values({
     title: `Accelerator progress test ${run}`, description: "Isolated progress fixture",
     categoryId: category.id, instructorName: "Test", accessTier: "Elevated",
+    publishedAt: new Date(),
   }).returning();
   courseId = course.id;
   const lessons = await db.insert(lessonsTable).values(
     [1, 2, 3, 4].map(sortOrder => ({
       courseId, title: `Module ${sortOrder}`, content: `Private module ${sortOrder}`,
-      sortOrder,
+      sortOrder, publishedAt: new Date(),
     })),
   ).returning();
   lessonIds = lessons.map(lesson => lesson.id);

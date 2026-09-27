@@ -14,6 +14,7 @@ A free educational community portal where anyone can sign up, browse courses acr
 - `pnpm --filter @workspace/edu-portal run dev` — run the frontend (port 21120)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
+- `pnpm run check` — pre-merge development check: typecheck, progress and publication HTTP suites; uses disposable fixtures in the workspace development database. The registered `check` validation must pass before release; do not run these database-writing tests during a production build.
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string

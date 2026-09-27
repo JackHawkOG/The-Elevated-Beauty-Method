@@ -30,6 +30,7 @@ let server: Server;
 let baseUrl: string;
 let categoryId: number;
 const courseIds: number[] = [];
+let fixturesStarted = false;
 
 type ApiResult = { status: number; data: any };
 
@@ -80,9 +81,19 @@ async function assertCourseHidden(courseId: number, lessonId?: number) {
 }
 
 beforeAll(async () => {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Publication integration tests must only run against a development database");
+  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT || !process.env.DATABASE_URL) {
+    throw new Error("Publication integration tests require a development database and cannot run in a deployment");
   }
+  // Replit supplies PG* and DATABASE_URL for the same development database.
+  // Reject a manually overridden DATABASE_URL (for example, a production URL).
+  const target = new URL(process.env.DATABASE_URL);
+  if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
+      target.hostname !== process.env.PGHOST ||
+      (target.port || "5432") !== process.env.PGPORT ||
+      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
+    throw new Error("Publication tests require the workspace development database URL");
+  }
+  fixturesStarted = true;
   const [{ default: courses }, { default: enrollments }, { default: dashboard }] = await Promise.all([
     import("./courses"), import("./enrollments"), import("./dashboard"),
   ]);
@@ -106,18 +117,22 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-  if (courseIds.length) {
-    const lessons = await db.select({ id: lessonsTable.id }).from(lessonsTable).where(inArray(lessonsTable.courseId, courseIds));
-    if (lessons.length) await db.delete(lessonCompletionsTable).where(inArray(lessonCompletionsTable.lessonId, lessons.map(row => row.id)));
-    await db.delete(enrollmentsTable).where(inArray(enrollmentsTable.courseId, courseIds));
-    await db.delete(lessonsTable).where(inArray(lessonsTable.courseId, courseIds));
-    await db.delete(coursesTable).where(inArray(coursesTable.id, courseIds));
-    await db.delete(activityTable).where(and(eq(activityTable.entityTitle, title), eq(activityTable.actorName, "Test Member")));
+  try {
+    if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    if (!fixturesStarted) return;
+    if (courseIds.length) {
+      const lessons = await db.select({ id: lessonsTable.id }).from(lessonsTable).where(inArray(lessonsTable.courseId, courseIds));
+      if (lessons.length) await db.delete(lessonCompletionsTable).where(inArray(lessonCompletionsTable.lessonId, lessons.map(row => row.id)));
+      await db.delete(enrollmentsTable).where(inArray(enrollmentsTable.courseId, courseIds));
+      await db.delete(lessonsTable).where(inArray(lessonsTable.courseId, courseIds));
+      await db.delete(coursesTable).where(inArray(coursesTable.id, courseIds));
+      await db.delete(activityTable).where(and(eq(activityTable.entityTitle, title), eq(activityTable.actorName, "Test Member")));
+    }
+    if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
+    for (const user of [member, editor, owner]) await db.delete(usersTable).where(eq(usersTable.clerkId, user));
+  } finally {
+    await pool.end();
   }
-  if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
-  for (const user of [member, editor, owner]) await db.delete(usersTable).where(eq(usersTable.clerkId, user));
-  await pool.end();
 });
 
 test("only editors can draft and only owners can publish; drafts and withdrawn copy never reach members", async () => {
