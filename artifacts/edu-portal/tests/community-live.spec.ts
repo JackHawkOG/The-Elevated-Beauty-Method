@@ -13,7 +13,7 @@ async function fillDraft(page: Page, title: string, body: string) {
   return dialog;
 }
 
-test("a lost response retries one signed-in post; editing a failed draft starts a new attempt", async ({ page }) => {
+test("a lost response survives refresh for one signed-in post; editing starts a new attempt", async ({ page }) => {
   test.setTimeout(120_000);
   requireCommunityDevelopment();
   await clerkSetup();
@@ -73,12 +73,18 @@ test("a lost response retries one signed-in post; editing a failed draft starts 
     await dialog.getByRole("button", { name: "Post Announcement" }).click();
     await expect(page.getByText("Failed to post", { exact: true }).last()).toBeVisible();
     await expect(dialog.getByPlaceholder("What's new?")).toHaveValue(titles[0]);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Community", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "New Post" }).click();
+    await expect(dialog.getByPlaceholder("What's new?")).toHaveValue(titles[0]);
+    await expect(dialog.getByPlaceholder("Share the details with the community...")).toHaveValue(`Message ${marker}`);
     const retried = page.waitForResponse(response => isPost(response.url(), response.request().method()));
     await dialog.getByRole("button", { name: "Post Announcement" }).click();
     const retryResponse = await retried;
     expect(retryResponse.status()).toBe(200);
     expect(retryResponse.request().headers()["idempotency-key"]).toBe(lostKeys[0]);
     await expect(dialog).toHaveCount(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("tebm:community:pending-announcement"))).toBeNull();
 
     const announcements = page.getByRole("heading", { name: "Announcements", exact: true }).locator("..");
     const activity = page.getByRole("heading", { name: "Recent Activity" }).locator("..");
@@ -90,6 +96,8 @@ test("a lost response retries one signed-in post; editing a failed draft starts 
     await dialog.getByRole("button", { name: "Post Announcement" }).click();
     await expect.poll(() => lostKeys).toHaveLength(2);
     await expect(dialog.getByRole("button", { name: "Post Announcement" })).toBeEnabled();
+    await page.reload();
+    await page.getByRole("button", { name: "New Post" }).click();
     await expect(dialog.getByPlaceholder("What's new?")).toHaveValue(titles[1]);
     await dialog.getByPlaceholder("What's new?").fill(titles[2]);
     const edited = page.waitForResponse(response => isPost(response.url(), response.request().method()));

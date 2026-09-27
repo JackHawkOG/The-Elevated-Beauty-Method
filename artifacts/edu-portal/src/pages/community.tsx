@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout";
 import { 
   useListAnnouncements,
@@ -124,21 +124,74 @@ export default function CommunityPage() {
   );
 }
 
+const pendingAnnouncementKey = "tebm:community:pending-announcement";
+
+type PendingAnnouncement = {
+  userId: string;
+  title: string;
+  body: string;
+  requestKey: string;
+};
+
 function CreateAnnouncementDialog() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const requestKey = useRef<string | null>(null);
+  const loadedUserId = useRef<string | null>(null);
+  const { user, isLoaded } = useUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  useEffect(() => {
+    if (!isLoaded || loadedUserId.current === (user?.id ?? null)) return;
+    loadedUserId.current = user?.id ?? null;
+    setTitle("");
+    setBody("");
+    requestKey.current = null;
+    try {
+      const raw = sessionStorage.getItem(pendingAnnouncementKey);
+      if (!raw) return;
+      const pending: PendingAnnouncement = JSON.parse(raw);
+      if (pending.userId !== user?.id || typeof pending.title !== "string" ||
+          typeof pending.body !== "string" || typeof pending.requestKey !== "string" ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pending.requestKey)) {
+        sessionStorage.removeItem(pendingAnnouncementKey);
+        return;
+      }
+      setTitle(pending.title);
+      setBody(pending.body);
+      requestKey.current = pending.requestKey;
+    } catch {
+      // A damaged or inaccessible entry cannot safely be reused.
+      try { sessionStorage.removeItem(pendingAnnouncementKey); } catch { /* unavailable storage */ }
+    }
+  }, [isLoaded, user?.id]);
+
+  const editDraft = () => {
+    requestKey.current = null;
+    try { sessionStorage.removeItem(pendingAnnouncementKey); } catch { /* submit will report unavailable storage */ }
+  };
+
   const createMutation = useMutation({
       mutationFn: (data: { title: string; body: string }) => {
-        requestKey.current ??= crypto.randomUUID();
+        if (!user?.id) throw new Error("Sign in before posting an announcement.");
+        const key = requestKey.current ?? crypto.randomUUID();
+        // Write before the request: a committed post whose reply is lost must
+        // still have the same key and exact draft after a page refresh.
+        try {
+          sessionStorage.setItem(pendingAnnouncementKey, JSON.stringify({
+            userId: user.id, ...data, requestKey: key,
+          } satisfies PendingAnnouncement));
+        } catch {
+          throw new Error("Unable to save this draft for a safe retry. Check browser storage and try again.");
+        }
+        requestKey.current = key;
         return createAnnouncement(data, { headers: { "Idempotency-Key": requestKey.current } });
       },
       onSuccess: () => {
         requestKey.current = null;
+        try { sessionStorage.removeItem(pendingAnnouncementKey); } catch { /* retry key remains safe */ }
         queryClient.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetRecentActivityQueryKey() });
         toast({ title: "Announcement posted", description: "Your announcement is now live." });
@@ -146,14 +199,15 @@ function CreateAnnouncementDialog() {
         setTitle("");
         setBody("");
       },
-      onError: () => {
-        toast({ title: "Failed to post", description: "There was an error posting your announcement.", variant: "destructive" });
+      onError: (error) => {
+        toast({ title: "Failed to post", description: error instanceof Error && error.message.startsWith("Unable to save")
+          ? error.message : "There was an error posting your announcement.", variant: "destructive" });
       },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !body.trim()) return;
+    if (!isLoaded || !user?.id || !title.trim() || !body.trim()) return;
     createMutation.mutate({ title, body });
   };
 
@@ -174,7 +228,7 @@ function CreateAnnouncementDialog() {
               <label className="text-sm font-medium text-muted-foreground">Title</label>
               <Input 
                 value={title}
-                onChange={(e) => { requestKey.current = null; setTitle(e.target.value); }}
+                onChange={(e) => { editDraft(); setTitle(e.target.value); }}
                 disabled={createMutation.isPending}
                 placeholder="What's new?"
                 className="bg-input border-border focus-visible:ring-primary text-foreground"
@@ -185,7 +239,7 @@ function CreateAnnouncementDialog() {
               <label className="text-sm font-medium text-muted-foreground">Message</label>
               <Textarea 
                 value={body}
-                onChange={(e) => { requestKey.current = null; setBody(e.target.value); }}
+                onChange={(e) => { editDraft(); setBody(e.target.value); }}
                 disabled={createMutation.isPending}
                 placeholder="Share the details with the community..."
                 className="min-h-[150px] bg-input border-border focus-visible:ring-primary text-foreground resize-none"
@@ -195,7 +249,7 @@ function CreateAnnouncementDialog() {
           </div>
           <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={createMutation.isPending} className="hover:bg-muted text-muted-foreground">Cancel</Button>
-            <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90" disabled={createMutation.isPending || !title.trim() || !body.trim()}>
+            <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90" disabled={createMutation.isPending || !isLoaded || !user?.id || !title.trim() || !body.trim()}>
               {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Post Announcement
             </Button>
