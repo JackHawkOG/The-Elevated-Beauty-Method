@@ -1,0 +1,1 @@
+- [Wouter server rendering in tests](wouter-ssr-tests.md) — static rendering of linked components needs a synchronous router hook; memoryLocation lacks a server snapshot.
