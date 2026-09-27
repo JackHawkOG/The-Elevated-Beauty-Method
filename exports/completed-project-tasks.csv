@@ -1,0 +1,207 @@
+"Task","Title","Status","Created (UTC)","Last updated (UTC)","Category","Description"
+"#4","Turn the strategy into EBM’s new-member journey","MERGED","2026-09-07T03:12:07.524Z","2026-09-07T03:25:43.714Z","next_steps","# Turn the strategy into EBM’s new-member journey
+
+## What & Why
+The competitive analysis identifies one clear product priority: combine EBM’s premium transformation promise with a more specific, personalized learning path. Applying the recommendation would make the portal easier to understand and more likely to convert new members.
+
+## Done looks like
+- A short beauty diagnostic captures skin type, undertone, feature needs, life stage, and visibility goal
+- Members receive a recommended “Your Method” pathway
+- A free five-part Elevated Everyday Face sequence provides a concrete first win
+- Courses and resources visibly show membership-tier access
+- Transformation stories appear beside relevant learning paths
+
+## Relevant files
+- artifacts/edu-portal/src/pages/landing.tsx
+- artifacts/edu-portal/src/pages/dashboard.tsx
+- artifacts/edu-portal/src/pages/courses.tsx
+- lib/api-spec/openapi.yaml
+- artifacts/api-server/src/routes/"
+"#8","Catalog TEBM reference assets","MERGED","2026-09-27T02:45:31.680Z","2026-09-27T02:47:57.731Z","","# Catalog TEBM Reference Assets
+
+## What & Why
+Make the seven uploaded files easy to find and use in future EduPortal Dashboard build-out, launches, tech architecture planning, and TEBM foundations and brand identity work. The files already exist in the workspace; this task is to organize their references and intended uses, not to begin those builds.
+
+## Done looks like
+- Project guidance has a clear reference index linking all seven original files to their intended uses: dashboard and tier content, launch materials, product references, technical architecture proposals, curriculum, the Radiant Audit, and signature brand IP.
+- The original uploads remain intact and accessible.
+- Future work can distinguish approved project decisions from ideas or assumptions in the uploads, including older membership language and the proposed multi-cloud architecture.
+
+## Out of scope
+- Building or changing the EduPortal Dashboard, mobile app, membership checkout, MARI, or a launch campaign.
+- Adopting the technical blueprint's proposed hosting, database, account, or integration setup.
+- Silently overriding currently approved brand, tier, price, or Founding Member rules with conflicting material in these files.
+
+## Steps
+1. **Preserve and catalog** -- Keep the uploaded source files unchanged and add a concise, navigable index in the project's collaborator-facing guidance, grouped by the user's requested work areas.
+2. **Mark authority and conflicts** -- State that technical and product proposals are references for future decisions, and note where their assumptions need reconciliation with newer approved project guidance rather than applying them automatically.
+3. **Check discoverability** -- Verify that every link points to an existing upload and that the index describes the intended use of all seven files.
+
+## Relevant files
+- `replit.md`
+- `docs/tebm-branding-marketing-blueprint-review.md`
+- `attached_assets/TEBM_TECH_STACK_-_Beta_Founding_Member_Launch_1790476874611.md`
+- `attached_assets/TEBM_Products_List_1790476874613.xlsx`
+- `attached_assets/Membership_Tier_1__“The_Beauty_Method”_1790476874614.md`
+- `attached_assets/Membership_Tier_2__“The_Elevated_Method”_1790476874615.md`
+- `attached_assets/Educational_Content_1790476874616.md`
+- `attached_assets/The-Radiant-Audit_(2)_1790476874616.pdf`
+- `attached_assets/The_Elevated_Beauty_Experience™_—_Our_Signature_IP_1790476874617.md`"
+"#9","Show the approved membership offer on the landing page","MERGED","2026-09-27T02:47:38.443Z","2026-09-27T02:52:43.039Z","next_steps","# Show the approved membership offer on the landing page
+
+## What & Why
+The public EduPortal landing page currently shows $29/month for The Elevated Method and a $49/month premium tier with a $1,500 Masterclass add-on. Those claims conflict with the confirmed Tier 1/Tier 2 launch offer and could mislead visitors.
+
+## Done looks like
+- The landing page presents only The Beauty Method (free) and The Elevated Method ($48/month, with the $24/month Founding Member offer when enrollment is open).
+- The Founding Member limit of 50 and price-lock wording reflect the current approved rules without inventing cancellation or failed-payment policy.
+- Unapproved future tiers and outdated prices are not displayed.
+
+## Relevant files
+- artifacts/edu-portal/src/pages/landing.tsx
+- replit.md
+- docs/tebm-branding-marketing-blueprint-review.md
+- attached_assets/Membership_Tier_1__“The_Beauty_Method”_1790476874614.md
+- attached_assets/Membership_Tier_2__“The_Elevated_Method”_1790476874615.md"
+"#10","Give paid members a guided learning dashboard","MERGED","2026-09-27T02:47:38.443Z","2026-09-27T03:02:33.943Z","next_steps","# Give paid members a guided learning dashboard
+
+## What & Why
+The newly supplied Tier 2 and educational-content references describe the four-module Beauty Mindset Accelerator, course progress, and live group session. Make these reference materials usable for an approved future EduPortal dashboard build-out.
+
+## Done looks like
+- Paid members can find their approved course modules, progress, and upcoming session information in the dashboard.
+- The experience uses the confirmed Tier 1/Tier 2 access boundaries and brand guidance, without treating proposed AI or future-tier features as already launched.
+- Enrollment and purchase-channel details remain separate decisions, not assumed in this dashboard task.
+
+## Relevant files
+- artifacts/edu-portal/src/pages/
+- replit.md
+- attached_assets/Membership_Tier_2__“The_Elevated_Method”_1790476874615.md
+- attached_assets/Educational_Content_1790476874616.md
+- attached_assets/The_Elevated_Beauty_Experience™_—_Our_Signature_IP_1790476874617.md"
+"#14","Turn approved lesson drafts into complete member lessons","MERGED","2026-09-27T02:51:47.971Z","2026-09-27T03:09:46.291Z","next_steps","# Turn approved lesson drafts into complete member lessons
+
+## What & Why
+The Accelerator currently contains the four approved module introductions, while the larger educational-content reference remains draft. Review and approve full teaching material before publishing it as lessons or trackers.
+
+## Done looks like
+- The four modules include reviewed, substantive lessons and any approved worksheets or trackers.
+- Draft topics are not silently published and the existing Tier 1/Tier 2 boundaries remain intact.
+- Members can complete the lessons and see their progress persist.
+
+## Relevant files
+- attached_assets/Educational_Content_1790476874616.md
+- artifacts/api-server/src/lib/seed-member-journey.ts
+- artifacts/edu-portal/src/pages/lesson.tsx"
+"#15","Catch lost or misleading lesson progress before members encounter it","MERGED","2026-09-27T03:06:27.834Z","2026-09-27T03:33:45.951Z","test_gaps","# Catch lost or misleading lesson progress before members encounter it
+
+## What & Why
+The Accelerator now displays individual completion records. There are no development enrollments available to confirm the authenticated flow end to end. Add repeatable coverage for completion, refresh, revisit, out-of-order completion, and tier isolation so progress regressions are caught before members encounter them.
+
+## Done looks like
+- A Tier 2 member can enroll, finish all four lessons, reload, and see the same progress
+- Repeated or out-of-order completion does not inflate counts
+- Free members cannot read or complete Elevated lessons
+
+## Relevant files
+- artifacts/api-server/src/routes/enrollments.ts
+- artifacts/edu-portal/src/pages/lesson.tsx
+- artifacts/edu-portal/src/components/accelerator-dashboard.tsx"
+"#16","Review the remaining beauty topic bank before creating new courses","MERGED","2026-09-27T03:06:27.834Z","2026-09-27T03:21:05.057Z","next_steps","# Review the remaining beauty topic bank before creating new courses
+
+## What & Why
+The broader educational reference includes hair, body-style, and transformation topics that are still drafts, along with unsupported or unsafe instructions. Review, edit, and approve those topics separately before any are published.
+
+## Done looks like
+- Proposed topics are checked for accuracy and safety, with questionable advice removed or corrected
+- The owner explicitly approves the exact teaching copy and its intended tier before publication
+- Only approved topics become new lessons; the existing four-module Tier 2 Accelerator remains unchanged
+
+## Relevant files
+- attached_assets/Educational_Content_1790476874616.md
+- docs/accelerator-lesson-review.md
+- artifacts/api-server/src/lib/seed-member-journey.ts"
+"#19","Prevent unapproved lessons from appearing in the course catalog","MERGED","2026-09-27T03:17:23.722Z","2026-09-27T05:14:45.604Z","next_steps","# Prevent unapproved lessons from appearing in the course catalog
+
+## What & Why
+The course and lesson creation routes currently require a signed-in user but do not check an owner/editor role. That allows unreviewed content to enter the member-facing catalog outside the documented approval gate.
+
+## Done looks like
+- Only an authorized owner/editor can create or change published course and lesson copy
+- New or changed teaching copy must be explicitly approved before publication
+- Ordinary members cannot create courses or lessons through the API
+
+## Relevant files
+- artifacts/api-server/src/routes/courses.ts
+- docs/beauty-topic-bank-review.md"
+"#21","Let owners review and approve draft lessons from the portal","MERGED","2026-09-27T03:37:34.493Z","2026-09-27T05:33:01.496Z","next_steps","# Let owners review and approve draft lessons from the portal
+
+## What & Why
+The draft and version-checked approval API is now available, but an owner currently has to call it directly. A restricted editorial screen would make exact-copy review practical without exposing drafts to members.
+
+## Done looks like
+- Only editor/owner accounts see a draft review surface; ordinary members never see draft content
+- Owners can inspect a course's tier, copy and lessons, then approve the revision they actually reviewed
+- Stale approval responses prompt another review rather than silently publishing
+
+## Relevant files
+- artifacts/edu-portal/src/
+- artifacts/api-server/src/routes/courses.ts
+- lib/api-spec/openapi.yaml"
+"#22","Catch unauthorized publication before it reaches members","MERGED","2026-09-27T03:37:34.493Z","2026-09-27T05:34:05.100Z","test_gaps","# Catch unauthorized publication before it reaches members
+
+## What & Why
+Role and revision checks protect the catalog, but there are no automated signed-in API checks across member, editor and owner identities. Add regression tests so a future route change cannot accidentally publish a draft.
+
+## Done looks like
+- Tests confirm members cannot create or edit courses/lessons
+- Draft content is absent from catalog, details, enrollment and progress until owner approval
+- Editing published copy withdraws it, and a stale revision cannot be approved after another edit
+
+## Relevant files
+- artifacts/api-server/src/routes/courses.ts
+- artifacts/api-server/src/routes/enrollments.ts
+- artifacts/api-server/src/routes/dashboard.ts"
+"#25","See how many visitors complete the Radiant Audit","MERGED","2026-09-27T05:49:00.294Z","2026-09-27T10:02:16.627Z","custom_analytics","# See how many visitors complete the Radiant Audit
+
+## What & Why
+The new public Audit-to-free-account journey has no custom analytics event for its successful outcome. Knowing how many people reach and complete it would help assess the launch without collecting their private answers.
+
+## Done looks like
+- A privacy-safe event records successful Audit saves after account verification, without sending email, name, score responses, or written answers.
+- The event works only when the published site has analytics enabled and never interrupts account creation.
+
+## Relevant files
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/edu-portal/src/components/radiant-audit-form.tsx
+
+Read .local/skills/project-analytics/SKILL.md and check analytics access before editing."
+"#26","See where Audit visitors leave before creating an account","MERGED","2026-09-27T10:00:17.524Z","2026-09-27T10:26:19.624Z","custom_analytics","# See where Audit visitors leave before creating an account
+
+## What & Why
+The new radiant_audit_saved event shows successful saves, but it cannot distinguish visitors who never finish the Audit form from those who continue to sign-up and do not verify. Add a privacy-safe milestone when an unsigned visitor submits a completed Audit and heads to sign-up; compare it with Audit pageviews and the saved event.
+
+## Done looks like
+- A fixed-name, no-answer event records the transition to account sign-up only after Audit answers are successfully staged
+- The tracker remains optional and cannot block navigation or account creation
+
+## Relevant files
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/edu-portal/src/lib/analytics.ts
+
+Read .local/skills/project-analytics/SKILL.md and check analytics access before editing."
+"#27","Tell first-time Audit saves apart from retakes","MERGED","2026-09-27T10:00:17.524Z","2026-09-27T10:26:18.726Z","next_steps","# Tell first-time Audit saves apart from retakes
+
+## What & Why
+The radiant_audit_saved event counts successful saves, including signed-in retakes. A safe, fixed completion-kind dimension would let the team report first-time completions separately from repeat saves without sending member identities or answers to analytics.
+
+## Done looks like
+- The app can reliably distinguish an account's first successful Audit save from a later retake, including after reloads
+- Completion analytics use only a fixed first-time or retake value, with no account identifiers or answers
+
+## Relevant files
+- artifacts/edu-portal/src/pages/radiant-audit.tsx
+- artifacts/edu-portal/src/lib/analytics.ts
+- artifacts/api-server/src/routes/
+
+Read .local/skills/project-analytics/SKILL.md and check analytics access before editing."

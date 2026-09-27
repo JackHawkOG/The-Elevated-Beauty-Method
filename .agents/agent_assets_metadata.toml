@@ -98,3 +98,17 @@ mtime_ms = 1790419518051
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/3fce615a-d624-4df5-80aa-ff670af5fc9e/6c4e3cc4-f3ff-44f1-8994-2d47dd5c2dc7"
 storage_version_token = "1790419522315078"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "l1bbQR07x9hNmRzjLKJNc"
+uri = "file://exports/completed-project-tasks.csv"
+type = "table"
+title = "Completed project tasks (CSV)"
+description = "Downloadable record of 13 merged tasks with titles, dates, and descriptions."
+logical_id = "1eb27b91-9ba6-4a2d-bb5f-44a8b1850fe2"
+content_hash = "sha256:d362afde5330392a5715f7a7e1f3933ee9cf46e020e46ad78200ad1e1dd2da7c"
+size = 14179
+mtime_ms = 1790504855341
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/1eb27b91-9ba6-4a2d-bb5f-44a8b1850fe2/9b7018be-aec2-47b6-988d-688f8536e0fc"
+storage_version_token = "1790504866439698"
+content_type = "text/csv"
