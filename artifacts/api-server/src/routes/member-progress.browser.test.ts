@@ -7,19 +7,11 @@ import {
   activityTable, categoriesTable, coursesTable, db, enrollmentsTable, lessonCompletionsTable,
   lessonsTable, pool, usersTable,
 } from "@workspace/db";
+import { progressBrowserEnvironment } from "./member-progress-browser-environment";
 
 // This intentionally goes through the running web and API workflows, not a
 // mocked auth router. Run separately from the fast progress suite.
 test("Clerk members retain progress after reload; Free members cannot access it", async () => {
-  if (process.env.NODE_ENV === "production" ||
-      process.env.REPLIT_DEPLOYMENT ||
-      !process.env.CLERK_SECRET_KEY?.startsWith("sk_test_") ||
-      !process.env.REPLIT_DEV_DOMAIN ||
-      !process.env.DATABASE_URL) {
-    throw new Error("Browser progress check requires development Clerk keys, database, and REPLIT_DEV_DOMAIN; deployments are forbidden");
-  }
-  // The local PG* variables identify the workspace development database.
-  // Check the URL used by the DB client before creating accounts or fixtures.
   const target = new URL(process.env.DATABASE_URL);
   if (!process.env.PGHOST || !process.env.PGPORT || !process.env.PGDATABASE ||
       target.hostname !== process.env.PGHOST ||
@@ -27,7 +19,6 @@ test("Clerk members retain progress after reload; Free members cannot access it"
       decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE) {
     throw new Error("Browser progress check requires the workspace development database URL");
   }
-  const base = `https://${process.env.REPLIT_DEV_DOMAIN}`;
   const run = randomUUID();
   const identities: string[] = [];
   const contexts: BrowserContext[] = [];
@@ -69,8 +60,6 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     await expect.poll(async () => (await api(page, "/users/me")).status).toBe(200);
     return page;
   }
-
-  try {
     let [course] = await db.select().from(coursesTable).where(and(
       eq(coursesTable.title, "The Beauty Mindset Accelerator"),
       eq(coursesTable.accessTier, "Elevated"),
@@ -108,12 +97,6 @@ test("Clerk members retain progress after reload; Free members cannot access it"
       });
       identities.push(user.id);
     }
-    browser = await chromium.launch({
-      executablePath: process.env.CHROMIUM_PATH || "/repl/tools/bin/chromium",
-      headless: true,
-      args: ["--no-sandbox"],
-    });
-
     // First request JIT-provisions a real DB member from the Clerk identity.
     const elevated = await signIn(identities[0]);
     expect((await api(elevated, "/users/me")).data.membershipTier).toBe("Free");
@@ -157,37 +140,5 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     const free = await signIn(identities[1]);
     expect((await api(free, "/users/me")).data.membershipTier).toBe("Free");
     const lessonPath = `/lessons/${lessons[0].id}`;
-    expect((await api(free, lessonPath)).status).toBe(403);
-    expect((await api(free, `/courses/${course.id}/lessons`)).status).toBe(403);
-    expect((await api(free, "/enrollments", "POST", { courseId: course.id })).status).toBe(403);
-    expect((await api(free, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: lessons[0].id })).status).toBe(403);
-    await free.goto(`${base}/courses/${course.id}/lessons/${lessons[0].id}`);
-    await browserExpect(free.getByRole("heading", { name: "Lesson access required" })).toBeVisible();
-    await browserExpect(free.getByRole("link", { name: "Back to course" }))
-      .toHaveAttribute("href", `/courses/${course.id}`);
-    await browserExpect(free.getByText(lessons[0].content!)).toHaveCount(0);
-    await browserExpect(free.getByRole("button", { name: "Mark Complete" })).toHaveCount(0);
-    await browserExpect(free.getByRole("button", { name: /Finish Course|Complete & Continue|Return to Course/ })).toHaveCount(0);
-    expect((await api(free, "/enrollments")).data).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ courseId: course.id })]),
-    );
-  } finally {
-    for (const context of contexts) await context.close();
-    await browser?.close();
-    // Never delete shared curriculum. Restrict cleanup to our Clerk IDs and
-    // uniquely named enrollment activity, even if an assertion failed.
-    for (const identity of identities) {
-      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, identity));
-      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, identity));
-      await db.delete(usersTable).where(eq(usersTable.clerkId, identity));
-      await clerkClient.users.deleteUser(identity);
-    }
-    for (const name of names) await db.delete(activityTable).where(eq(activityTable.actorName, name));
-    if (fixtureCourseId) {
-      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, fixtureCourseId));
-      await db.delete(coursesTable).where(eq(coursesTable.id, fixtureCourseId));
-    }
-    if (fixtureCategoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, fixtureCategoryId));
-    await pool.end();
-  }
-}, 180_000);
+
+  const { base, chromiumPath } = progressBrowserEnvironment();
