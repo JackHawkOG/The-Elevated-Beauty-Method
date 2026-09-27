@@ -27,6 +27,79 @@ tags:
   - name: method
     description: Personalized beauty method
 paths:
+  /member-stories:
+    get:
+      operationId: listPublishedMemberStories
+      tags: [member-stories]
+      summary: Publicly visible member stories
+      responses:
+        "200":
+          description: Published stories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PublicMemberStory"
+    post:
+      operationId: publishMemberStory
+      tags: [member-stories]
+      summary: Owner records permission and publishes a member story
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberStoryInput"
+      responses:
+        "201":
+          description: Published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerMemberStory"
+        "400":
+          description: Missing or invalid permission
+        "403":
+          description: Owner access required
+  /member-stories/manage:
+    get:
+      operationId: listManagedMemberStories
+      tags: [member-stories]
+      summary: Owner list including withdrawn stories and permission records
+      responses:
+        "200":
+          description: Stories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OwnerMemberStory"
+        "403":
+          description: Owner access required
+  /member-stories/{storyId}/withdraw:
+    post:
+      operationId: withdrawMemberStory
+      tags: [member-stories]
+      summary: Owner withdraws one published story
+      parameters:
+        - in: path
+          name: storyId
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Story withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerMemberStory"
+        "404":
+          description: Story not found
+        "403":
+          description: Owner access required
   /membership/offer:
     get:
       operationId: getMembershipOffer
@@ -737,6 +810,34 @@ paths:
 
 components:
   schemas:
+    PublicMemberStory:
+      type: object
+      required: [id, quote, attribution]
+      properties:
+        id: { type: number }
+        quote: { type: string }
+        attribution: { type: string }
+    OwnerMemberStory:
+      type: object
+      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy]
+      properties:
+        id: { type: number }
+        quote: { type: string }
+        attribution: { type: string }
+        permissionRecord: { type: string }
+        permissionRecordedAt: { type: string }
+        permissionRecordedBy: { type: string }
+        publishedAt: { type: string }
+        withdrawnAt: { type: ["string", "null"] }
+        withdrawnBy: { type: ["string", "null"] }
+    MemberStoryInput:
+      type: object
+      required: [quote, attribution, permissionRecord, permissionConfirmed]
+      properties:
+        quote: { type: string, minLength: 1, maxLength: 2000 }
+        attribution: { type: string, minLength: 1, maxLength: 120 }
+        permissionRecord: { type: string, minLength: 1, maxLength: 2000, description: "How and when this member explicitly authorized the exact quote and public attribution" }
+        permissionConfirmed: { type: boolean, enum: [true] }
     MembershipOffer:
       type: object
       required: [phase, foundingAvailable, foundingPrice, standardPrice]

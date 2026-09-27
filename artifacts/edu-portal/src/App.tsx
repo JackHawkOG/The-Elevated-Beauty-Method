@@ -149,6 +149,7 @@ import LessonPage from '@/pages/lesson';
 import CommunityPage from '@/pages/community';
 import ProfilePage from '@/pages/profile';
 import EditorialPage from '@/pages/editorial';
+import MemberStoriesPage from '@/pages/member-stories';
 import RadiantAuditPage, { RadiantAuditCompletePage } from '@/pages/radiant-audit';
 import { readPendingAudit } from '@/lib/radiant-audit-session';
 
@@ -167,6 +168,14 @@ function EditorialRoute() {
   const role = user?.publicMetadata.role;
   if (role !== "admin" && role !== "owner" && role !== "editor") return <NotFound />;
   return <EditorialPage />;
+}
+
+function MemberStoriesRoute() {
+  const { user, isLoaded } = useUser();
+  if (!isLoaded) return null;
+  const role = user?.publicMetadata.role;
+  if (role !== "admin" && role !== "owner") return <NotFound />;
+  return <MemberStoriesPage />;
 }
 
 function Router() {
@@ -188,6 +197,7 @@ function Router() {
       <Route path="/community" component={() => <ProtectedRoute component={CommunityPage} />} />
       <Route path="/profile" component={() => <ProtectedRoute component={ProfilePage} />} />
       <Route path="/editorial" component={() => <ProtectedRoute component={EditorialRoute} />} />
+      <Route path="/member-stories" component={() => <ProtectedRoute component={MemberStoriesRoute} />} />
       <Route component={NotFound} />
     </Switch>
   );

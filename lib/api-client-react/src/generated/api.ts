@@ -42,11 +42,14 @@ import type {
   LessonInput,
   ListAnnouncementsParams,
   ListCoursesParams,
+  MemberStoryInput,
   MembershipCheckoutInput,
   MembershipOffer,
   MembershipRedirect,
   MyMembership,
+  OwnerMemberStory,
   ProgressUpdate,
+  PublicMemberStory,
   RadiantAudit,
   RadiantAuditHistoryEntry,
   RadiantAuditInput,
@@ -81,6 +84,302 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getListPublishedMemberStoriesUrl = () => {
+
+
+
+
+  return `/api/member-stories`
+}
+
+/**
+ * @summary Publicly visible member stories
+ */
+export const listPublishedMemberStories = async ( options?: Parameters<typeof customFetch>[1]): Promise<PublicMemberStory[]> => {
+
+  return customFetch<PublicMemberStory[]>(getListPublishedMemberStoriesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPublishedMemberStoriesQueryKey = () => {
+    return [
+    `/api/member-stories`
+    ] as const;
+    }
+
+
+export const getListPublishedMemberStoriesQueryOptions = <TData = Awaited<ReturnType<typeof listPublishedMemberStories>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPublishedMemberStories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPublishedMemberStoriesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPublishedMemberStories>>> = ({ signal }) => listPublishedMemberStories({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPublishedMemberStories>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPublishedMemberStoriesQueryResult = NonNullable<Awaited<ReturnType<typeof listPublishedMemberStories>>>
+export type ListPublishedMemberStoriesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Publicly visible member stories
+ */
+
+export function useListPublishedMemberStories<TData = Awaited<ReturnType<typeof listPublishedMemberStories>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPublishedMemberStories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPublishedMemberStoriesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getPublishMemberStoryUrl = () => {
+
+
+
+
+  return `/api/member-stories`
+}
+
+/**
+ * @summary Owner records permission and publishes a member story
+ */
+export const publishMemberStory = async (memberStoryInput: MemberStoryInput, options?: Parameters<typeof customFetch>[1]): Promise<OwnerMemberStory> => {
+
+  return customFetch<OwnerMemberStory>(getPublishMemberStoryUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(memberStoryInput)
+  }
+);}
+
+
+
+
+
+export const getPublishMemberStoryMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishMemberStory>>, TError,{data: BodyType<MemberStoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishMemberStory>>, TError,{data: BodyType<MemberStoryInput>}, TContext> => {
+
+const mutationKey = ['publishMemberStory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishMemberStory>>, {data: BodyType<MemberStoryInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  publishMemberStory(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishMemberStoryMutationResult = NonNullable<Awaited<ReturnType<typeof publishMemberStory>>>
+    export type PublishMemberStoryMutationBody = BodyType<MemberStoryInput>
+    export type PublishMemberStoryMutationError = ErrorType<void>
+
+    /**
+ * @summary Owner records permission and publishes a member story
+ */
+export const usePublishMemberStory = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishMemberStory>>, TError,{data: BodyType<MemberStoryInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishMemberStory>>,
+        TError,
+        {data: BodyType<MemberStoryInput>},
+        TContext
+      > => {
+      return useMutation(getPublishMemberStoryMutationOptions(options));
+    }
+
+export const getListManagedMemberStoriesUrl = () => {
+
+
+
+
+  return `/api/member-stories/manage`
+}
+
+/**
+ * @summary Owner list including withdrawn stories and permission records
+ */
+export const listManagedMemberStories = async ( options?: Parameters<typeof customFetch>[1]): Promise<OwnerMemberStory[]> => {
+
+  return customFetch<OwnerMemberStory[]>(getListManagedMemberStoriesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListManagedMemberStoriesQueryKey = () => {
+    return [
+    `/api/member-stories/manage`
+    ] as const;
+    }
+
+
+export const getListManagedMemberStoriesQueryOptions = <TData = Awaited<ReturnType<typeof listManagedMemberStories>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagedMemberStories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListManagedMemberStoriesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listManagedMemberStories>>> = ({ signal }) => listManagedMemberStories({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listManagedMemberStories>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListManagedMemberStoriesQueryResult = NonNullable<Awaited<ReturnType<typeof listManagedMemberStories>>>
+export type ListManagedMemberStoriesQueryError = ErrorType<void>
+
+
+/**
+ * @summary Owner list including withdrawn stories and permission records
+ */
+
+export function useListManagedMemberStories<TData = Awaited<ReturnType<typeof listManagedMemberStories>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listManagedMemberStories>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListManagedMemberStoriesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getWithdrawMemberStoryUrl = (storyId: number,) => {
+
+
+
+
+  return `/api/member-stories/${storyId}/withdraw`
+}
+
+/**
+ * @summary Owner withdraws one published story
+ */
+export const withdrawMemberStory = async (storyId: number, options?: Parameters<typeof customFetch>[1]): Promise<OwnerMemberStory> => {
+
+  return customFetch<OwnerMemberStory>(getWithdrawMemberStoryUrl(storyId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getWithdrawMemberStoryMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof withdrawMemberStory>>, TError,{storyId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof withdrawMemberStory>>, TError,{storyId: number}, TContext> => {
+
+const mutationKey = ['withdrawMemberStory'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof withdrawMemberStory>>, {storyId: number}> = (props) => {
+          const {storyId} = props ?? {};
+
+          return  withdrawMemberStory(storyId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type WithdrawMemberStoryMutationResult = NonNullable<Awaited<ReturnType<typeof withdrawMemberStory>>>
+
+    export type WithdrawMemberStoryMutationError = ErrorType<void>
+
+    /**
+ * @summary Owner withdraws one published story
+ */
+export const useWithdrawMemberStory = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof withdrawMemberStory>>, TError,{storyId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof withdrawMemberStory>>,
+        TError,
+        {storyId: number},
+        TContext
+      > => {
+      return useMutation(getWithdrawMemberStoryMutationOptions(options));
+    }
 
 export const getGetMembershipOfferUrl = () => {
 

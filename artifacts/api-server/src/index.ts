@@ -7,6 +7,7 @@ import { ensurePublicationSchema } from "./lib/ensure-publication-schema";
 import { ensureRadiantAuditSchema } from "./lib/ensure-radiant-audit-schema";
 import { ensureMembershipSchema } from "./lib/ensure-membership-schema";
 import { ensureAnnouncementSchema } from "./lib/ensure-announcement-schema";
+import { ensureMemberStoriesSchema } from "./lib/ensure-member-stories-schema";
 import { getStripeSync } from "./lib/stripeClient";
 import { startMembershipReconciliation } from "./lib/membership-reconciliation";
 import { runMigrations } from "stripe-replit-sync";
@@ -27,6 +28,7 @@ if (Number.isNaN(port) || port <= 0) {
 
 await ensureEnrollmentSchema();
 await ensureAnnouncementSchema();
+await ensureMemberStoriesSchema();
 await ensureProgressSchema();
 await ensureRadiantAuditSchema();
 await ensureMembershipSchema();

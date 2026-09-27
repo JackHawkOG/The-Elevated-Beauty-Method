@@ -4,12 +4,13 @@ import { Sparkles, ArrowRight, Crown, Eye, Star, CheckCircle2 } from "lucide-rea
 import heroImage from "@assets/generated_images/hero-beauty.jpg";
 import diagnosticImage from "@assets/generated_images/diagnostic-preview.jpg";
 import everydayFaceImage from "@assets/generated_images/everyday-face.jpg";
-import { useGetMembershipOffer, getGetMembershipOfferQueryKey } from "@workspace/api-client-react";
+import { useGetMembershipOffer, getGetMembershipOfferQueryKey, useListPublishedMemberStories, getListPublishedMemberStoriesQueryKey } from "@workspace/api-client-react";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
 export default function LandingPage() {
   const { data: offer } = useGetMembershipOffer({ query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 30000, staleTime: 15000 } });
+  const { data: stories } = useListPublishedMemberStories({ query: { queryKey: getListPublishedMemberStoriesQueryKey(), staleTime: 0, refetchOnMount: "always", refetchOnWindowFocus: "always", refetchInterval: 5000 } });
   const foundingOpen = offer?.phase === "open" && offer.foundingAvailable;
   const standardOpen = offer?.phase === "closed" || offer?.phase === "open";
   const offerMessage = !offer ? "Enrollment availability is being checked"
@@ -272,6 +273,18 @@ export default function LandingPage() {
             </div>
           </div>
         </section>
+
+        {!!stories?.length && <section aria-labelledby="member-stories-heading" className="border-t border-border/50 bg-card/30 px-6 py-20 md:px-12 lg:px-24">
+          <div className="mx-auto max-w-6xl">
+            <h2 id="member-stories-heading" className="mb-10 text-center font-serif text-4xl font-bold">Member stories</h2>
+            <div className="grid gap-6 md:grid-cols-2">
+              {stories.map(story => <figure key={story.id} className="rounded-2xl border border-primary/20 bg-background/70 p-8">
+                <blockquote className="whitespace-pre-wrap break-words font-serif text-xl leading-relaxed">“{story.quote}”</blockquote>
+                <figcaption className="mt-6 break-words text-sm text-primary">— {story.attribution}</figcaption>
+              </figure>)}
+            </div>
+          </div>
+        </section>}
 
         {/* Final CTA */}
         <section className="py-24 px-6 md:px-12 lg:px-24 bg-card/30 border-t border-border/50">

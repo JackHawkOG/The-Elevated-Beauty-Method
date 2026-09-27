@@ -7,3 +7,4 @@ export * from "./announcements";
 export * from "./users";
 export * from "./activity";
 export * from "./radiant-audits";
+export * from "./member-stories";

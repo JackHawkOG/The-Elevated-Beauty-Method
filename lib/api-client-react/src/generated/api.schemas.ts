@@ -5,6 +5,46 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+export interface PublicMemberStory {
+  id: number;
+  quote: string;
+  attribution: string;
+}
+
+export interface OwnerMemberStory {
+  id: number;
+  quote: string;
+  attribution: string;
+  permissionRecord: string;
+  permissionRecordedAt: string;
+  permissionRecordedBy: string;
+  publishedAt: string;
+  /** @nullable */
+  withdrawnAt: string | null;
+  /** @nullable */
+  withdrawnBy: string | null;
+}
+
+export interface MemberStoryInput {
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  quote: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  attribution: string;
+  /**
+     * How and when this member explicitly authorized the exact quote and public attribution
+     * @minLength 1
+     * @maxLength 2000
+     */
+  permissionRecord: string;
+  permissionConfirmed: true;
+}
+
 export type MembershipOfferPhase = typeof MembershipOfferPhase[keyof typeof MembershipOfferPhase];
 
 

@@ -9,6 +9,85 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Publicly visible member stories
+ */
+export const ListPublishedMemberStoriesResponseItem = zod.object({
+  "id": zod.number(),
+  "quote": zod.string(),
+  "attribution": zod.string()
+})
+export const ListPublishedMemberStoriesResponse = zod.array(ListPublishedMemberStoriesResponseItem)
+
+
+/**
+ * @summary Owner records permission and publishes a member story
+ */
+export const publishMemberStoryBodyQuoteMax = 2000;
+
+export const publishMemberStoryBodyAttributionMax = 120;
+
+export const publishMemberStoryBodyPermissionRecordMax = 2000;
+
+
+
+export const PublishMemberStoryBody = zod.object({
+  "quote": zod.string().min(1).max(publishMemberStoryBodyQuoteMax),
+  "attribution": zod.string().min(1).max(publishMemberStoryBodyAttributionMax),
+  "permissionRecord": zod.string().min(1).max(publishMemberStoryBodyPermissionRecordMax).describe('How and when this member explicitly authorized the exact quote and public attribution'),
+  "permissionConfirmed": zod.literal(true)
+})
+
+export const PublishMemberStoryResponse = zod.object({
+  "id": zod.number(),
+  "quote": zod.string(),
+  "attribution": zod.string(),
+  "permissionRecord": zod.string(),
+  "permissionRecordedAt": zod.string(),
+  "permissionRecordedBy": zod.string(),
+  "publishedAt": zod.string(),
+  "withdrawnAt": zod.string().nullable(),
+  "withdrawnBy": zod.string().nullable()
+})
+
+
+/**
+ * @summary Owner list including withdrawn stories and permission records
+ */
+export const ListManagedMemberStoriesResponseItem = zod.object({
+  "id": zod.number(),
+  "quote": zod.string(),
+  "attribution": zod.string(),
+  "permissionRecord": zod.string(),
+  "permissionRecordedAt": zod.string(),
+  "permissionRecordedBy": zod.string(),
+  "publishedAt": zod.string(),
+  "withdrawnAt": zod.string().nullable(),
+  "withdrawnBy": zod.string().nullable()
+})
+export const ListManagedMemberStoriesResponse = zod.array(ListManagedMemberStoriesResponseItem)
+
+
+/**
+ * @summary Owner withdraws one published story
+ */
+export const WithdrawMemberStoryParams = zod.object({
+  "storyId": zod.coerce.number()
+})
+
+export const WithdrawMemberStoryResponse = zod.object({
+  "id": zod.number(),
+  "quote": zod.string(),
+  "attribution": zod.string(),
+  "permissionRecord": zod.string(),
+  "permissionRecordedAt": zod.string(),
+  "permissionRecordedBy": zod.string(),
+  "publishedAt": zod.string(),
+  "withdrawnAt": zod.string().nullable(),
+  "withdrawnBy": zod.string().nullable()
+})
+
+
+/**
  * @summary Current founding offer availability
  */
 export const GetMembershipOfferResponse = zod.object({
