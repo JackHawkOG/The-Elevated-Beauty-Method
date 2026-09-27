@@ -302,6 +302,7 @@ export function RadiantAuditCompletePage() {
   const deleteCurrent = useDeleteRadiantAudit();
   const { data: saved, isLoading, isError } = useGetRadiantAudit({
     query: { queryKey: getGetRadiantAuditQueryKey(), enabled: !pending },
+    request: { responseType: "json" },
   });
   const { data: history, isLoading: historyLoading, isError: historyError } = useGetRadiantAuditHistory({
     query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !isLoading && !isError },
@@ -320,7 +321,20 @@ export function RadiantAuditCompletePage() {
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditQueryKey() });
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
     } catch {
-      setDeleteError("We couldn't delete your current Audit. Please try again.");
+      try {
+        // The server may have committed the deletion before the response was lost.
+        // Read its current state rather than assuming a failed request left the Audit intact.
+        const current = await getRadiantAudit({ responseType: "json" });
+        queryClient.setQueryData(getGetRadiantAuditQueryKey(), current);
+        if (current === null) {
+          setConfirmDeleteCurrent(false);
+          void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+        } else {
+          setDeleteError("We couldn't delete your current Audit. Please try again.");
+        }
+      } catch {
+        setDeleteError("We couldn't confirm whether your current Audit was deleted. Please refresh to check before trying again.");
+      }
     }
   }
 
