@@ -85,7 +85,7 @@ export async function reconcileSubscription(
   }
 }
 
-export async function reconcileMemberships(): Promise<void> {
+export async function reconcileMemberships(subscriptionId?: string): Promise<void> {
   const client = await pool.connect();
   try {
     // Only one server instance sweeps at a time. This session lock is released
@@ -97,8 +97,8 @@ export async function reconcileMemberships(): Promise<void> {
       let after = "0";
       while (true) {
         const batch = await client.query<{ id: string; stripe_subscription_id: string }>(
-          "SELECT id, stripe_subscription_id FROM membership_checkouts WHERE status = 'confirmed' AND stripe_subscription_id IS NOT NULL AND id > $1 ORDER BY id LIMIT 100",
-          [after],
+          "SELECT id, stripe_subscription_id FROM membership_checkouts WHERE status = 'confirmed' AND stripe_subscription_id IS NOT NULL AND id > $1 AND ($2::text IS NULL OR stripe_subscription_id = $2) ORDER BY id LIMIT 100",
+          [after, subscriptionId ?? null],
         );
         if (!batch.rows.length) break;
         for (const row of batch.rows) {
