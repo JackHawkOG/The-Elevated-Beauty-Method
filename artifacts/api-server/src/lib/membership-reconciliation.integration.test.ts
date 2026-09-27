@@ -350,3 +350,77 @@ test("a temporary Stripe retrieval failure rolls back the event so redelivery ca
     await pool.query("DELETE FROM users WHERE clerk_id = $1", [retryClerkId]);
   }
 });
+
+test("a lost cancellation response rolls back the webhook, then redelivery observes canceled Stripe state", async () => {
+  const lostClerkId = `billing-cancel-lost-${id}`;
+  const lostSubscriptionId = `sub_billing_cancel_lost_${id}`;
+  const eventId = `evt_billing_cancel_lost_${id}`;
+  const failures = [
+    invoice("lost-mar", "2026-03-01", "open"),
+    invoice("lost-feb", "2026-02-01", "open"),
+    invoice("lost-jan", "2026-01-01", "uncollectible"),
+  ];
+  const event = {
+    object: "invoice",
+    id: failures[0].id,
+    parent: { subscription_details: { subscription: lostSubscriptionId } },
+  };
+  let stripeStatus: Stripe.Subscription.Status = "active";
+  const retrieve = vi.fn(async (requestedId: string) => {
+    expect(requestedId).toBe(lostSubscriptionId);
+    return { status: stripeStatus, cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+  });
+  const cancel = vi.fn(async (requestedId: string) => {
+    expect(requestedId).toBe(lostSubscriptionId);
+    stripeStatus = "canceled"; // Stripe committed the cancellation, but its reply was lost.
+    throw new Error("Cancellation response lost");
+  });
+  const list = vi.fn(async (params: { subscription: string }) => {
+    expect(params.subscription).toBe(lostSubscriptionId);
+    return { data: failures, has_more: false };
+  });
+  vi.mocked(getStripeSync).mockResolvedValue({ processWebhook: vi.fn().mockResolvedValue(undefined) } as never);
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: { retrieve, cancel },
+    invoices: { list },
+  } as unknown as Stripe);
+
+  await pool.query(
+    "INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [lostClerkId, "Lost cancellation response fixture", `${lostClerkId}@example.invalid`],
+  );
+  try {
+    await pool.query(
+      "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)",
+      [lostClerkId, lostSubscriptionId],
+    );
+    const recordedEvents = async () =>
+      (await pool.query("SELECT id FROM membership_webhook_events WHERE id = $1", [eventId])).rows;
+
+    expect(await deliver("invoice.payment_failed", event, eventId)).toBe(400);
+    expect(stripeStatus).toBe("canceled");
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(await recordedEvents()).toEqual([]);
+    expect(await state(lostSubscriptionId)).toEqual({
+      status: "confirmed", failed_months: 0, last_failed_invoice: null, membership_tier: "Elevated",
+    });
+
+    expect(await deliver("invoice.payment_failed", event, eventId)).toBe(200);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenCalledTimes(1); // Canceled subscriptions need no further invoice lookup.
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(await recordedEvents()).toEqual([{ id: eventId }]);
+    expect(await state(lostSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 0, last_failed_invoice: null, membership_tier: "Free",
+    });
+
+    expect(await deliver("invoice.payment_failed", event, eventId)).toBe(200);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(await state(lostSubscriptionId)).toMatchObject({ status: "forfeited", membership_tier: "Free" });
+  } finally {
+    await pool.query("DELETE FROM membership_webhook_events WHERE id = $1", [eventId]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [lostClerkId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [lostClerkId]);
+  }
+});
