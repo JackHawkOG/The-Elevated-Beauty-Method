@@ -1,6 +1,12 @@
-# The Elevated Beauty Method
+# The Elevated Beauty Method ™
 
 A free educational community portal where anyone can sign up, browse courses across 8 subject areas, track their learning progress, and connect with the community.
+
+## Brand usage
+
+- In customer-facing copy, use the exact names `The Elevated Beauty Method ™` and `The Elevated Beauty Experience ™` (including the space before ™).
+- `The Beauty Method` and `The Elevated Method` are distinct membership names; do not replace them with the brand name.
+- Use the transparent master logo for the website. Its wordmark is part of the original artwork, preserving the Ablation lettering; do not substitute a CSS font for it.
 
 ## Run & Operate
 

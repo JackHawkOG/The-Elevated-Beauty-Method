@@ -197,7 +197,7 @@ function ClerkProviderWithRoutes() {
       signUpUrl={`${basePath}/sign-up`}
       localization={{
         signIn: { start: { title: "Welcome back", subtitle: "Sign in to continue learning" } },
-        signUp: { start: { title: "Join The Elevated Beauty Method", subtitle: "Verify your email to save your Radiant Audit and create a free account" } },
+        signUp: { start: { title: "Join The Elevated Beauty Method ™", subtitle: "Verify your email to save your Radiant Audit and create a free account" } },
       }}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}

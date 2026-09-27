@@ -293,7 +293,7 @@ export default function EditorialPage() {
       <div data-testid="page-editorial" className="min-h-[100dvh] bg-background text-foreground">
         <div className="border-b border-border bg-card/40">
           <div className="mx-auto max-w-[1500px] px-5 py-10 sm:px-8 sm:py-12 xl:px-12">
-            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.26em] text-primary"><ShieldCheck className="size-3.5" /> The Elevated Beauty Method <span className="mx-1 text-muted-foreground">/</span> Editorial desk</div>
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.26em] text-primary"><ShieldCheck className="size-3.5" /> The Elevated Beauty Method ™ <span className="mx-1 text-muted-foreground">/</span> Editorial desk</div>
             <div className="mt-5 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
                 <h1 className="font-serif text-5xl leading-none tracking-[-0.025em] sm:text-7xl">The review room<span className="text-primary">.</span></h1>

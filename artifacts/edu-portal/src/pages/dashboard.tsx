@@ -48,7 +48,7 @@ export default function Dashboard() {
       <div className="space-y-8 pb-12">
         <header className="mb-8">
           <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Welcome back.</h1>
-          <p className="text-muted-foreground text-lg">Here's what's happening in The Elevated Beauty Method community today.</p>
+          <p className="text-muted-foreground text-lg">Here's what's happening in The Elevated Beauty Method ™ community today.</p>
         </header>
 
         {!auditLoading && (

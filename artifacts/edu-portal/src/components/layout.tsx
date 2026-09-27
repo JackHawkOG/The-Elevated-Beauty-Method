@@ -4,8 +4,7 @@ import { LayoutDashboard, Library, User, LogOut, MessageSquare, ClipboardCheck }
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
-const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-1920x1080.png`;
-const masterMonogram = `${import.meta.env.BASE_URL}brand/tebm-master-monogram.png`;
+const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -19,11 +18,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <Sidebar className="border-r border-border bg-sidebar text-sidebar-foreground">
           <SidebarHeader className="p-4">
             <Link href="/dashboard" className="flex items-center justify-center overflow-hidden rounded-xl transition-opacity hover:opacity-90">
-              <img
-                src={masterLogo}
-                alt="The Elevated Beauty Method"
-                className="h-auto w-full object-contain"
-              />
+              <span className="relative block w-full">
+                <img src={masterLogo} alt="The Elevated Beauty Method ™" className="block h-auto w-full object-contain" />
+                <span aria-hidden="true" className="absolute bottom-[17%] right-[5.5%] translate-y-1/2 text-[clamp(5px,0.9vw,12px)] leading-none text-[#c9a478]/80">™</span>
+              </span>
             </Link>
           </SidebarHeader>
           <SidebarContent className="px-2 py-4">
@@ -76,13 +74,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </SidebarFooter>
         </Sidebar>
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-          <header className="h-16 flex items-center px-6 border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10 md:hidden">
+          <header className="h-20 flex items-center px-4 border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10 md:hidden">
             <SidebarTrigger />
-            <img
-              src={masterMonogram}
-              alt="The Elevated Beauty Method"
-               className="ml-4 h-11 w-auto object-contain"
-            />
+            <Link href="/dashboard" aria-label="The Elevated Beauty Method ™ home" className="ml-3 block w-[min(44vw,150px)]">
+              <span className="relative block w-full">
+                <img src={masterLogo} alt="The Elevated Beauty Method ™" className="block h-auto w-full object-contain" />
+                <span aria-hidden="true" className="absolute bottom-[17%] right-[5.5%] translate-y-1/2 text-[clamp(5px,1.1vw,8px)] leading-none text-[#c9a478]/80">™</span>
+              </span>
+            </Link>
           </header>
           <div className="flex-1 overflow-auto">
             {children}

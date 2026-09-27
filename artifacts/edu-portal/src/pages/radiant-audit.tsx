@@ -141,7 +141,7 @@ export function RadiantAuditCompletePage() {
             <p className="text-xs font-semibold uppercase tracking-widest text-primary">Your reflection is saved</p>
             <h1 className="mt-3 font-serif text-4xl sm:text-5xl">Your Radiant Audit</h1>
             <p className="mt-4 text-muted-foreground">
-              Fewer checks in Section I, more in Section II? That space between where your routine is and what you truly value is where The Elevated Beauty Method™ begins.
+              Fewer checks in Section I, more in Section II? That space between where your routine is and what you truly value is where The Elevated Beauty Method ™ begins.
             </p>
             <div className="mt-8 grid gap-4 sm:grid-cols-2">
               <div className="rounded-2xl border border-border p-5">

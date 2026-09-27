@@ -7,6 +7,7 @@ import {
   GetFeaturedCoursesResponse,
   GetRecentActivityResponse,
 } from "@workspace/api-zod";
+import { withBrandTrademarks } from "../lib/brand-copy";
 
 const router = Router();
 
@@ -65,7 +66,11 @@ router.get("/dashboard/featured", async (req, res): Promise<void> => {
 router.get("/dashboard/recent-activity", async (req, res): Promise<void> => {
   const rows = await db.select().from(activityTable).orderBy(desc(activityTable.createdAt)).limit(15);
 
-  res.json(GetRecentActivityResponse.parse(rows.map(r => ({ ...r, createdAt: r.createdAt?.toISOString() }))));
+  res.json(GetRecentActivityResponse.parse(rows.map(r => ({
+    ...r,
+    entityTitle: r.entityTitle ? withBrandTrademarks(r.entityTitle) : r.entityTitle,
+    createdAt: r.createdAt?.toISOString(),
+  }))));
 });
 
 export default router;

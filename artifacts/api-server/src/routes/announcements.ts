@@ -8,6 +8,7 @@ import {
   CreateAnnouncementResponse,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
+import { withBrandTrademarks } from "../lib/brand-copy";
 
 const router = Router();
 
@@ -24,7 +25,12 @@ router.get("/announcements", async (req, res): Promise<void> => {
     .orderBy(desc(announcementsTable.pinned), desc(announcementsTable.createdAt))
     .limit(limit);
 
-  res.json(ListAnnouncementsResponse.parse(rows.map(r => ({ ...r, createdAt: r.createdAt?.toISOString() }))));
+  res.json(ListAnnouncementsResponse.parse(rows.map(r => ({
+    ...r,
+    title: withBrandTrademarks(r.title),
+    body: withBrandTrademarks(r.body),
+    createdAt: r.createdAt?.toISOString(),
+  }))));
 });
 
 // POST /announcements

@@ -5,7 +5,7 @@ import heroImage from "@assets/generated_images/hero-beauty.jpg";
 import diagnosticImage from "@assets/generated_images/diagnostic-preview.jpg";
 import everydayFaceImage from "@assets/generated_images/everyday-face.jpg";
 
-const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-1920x1080.png`;
+const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
 export default function LandingPage() {
   return (
@@ -13,14 +13,13 @@ export default function LandingPage() {
       <nav className="relative flex min-h-[31rem] items-center justify-center border-b border-border/50 bg-background/90 px-6 pb-8 pt-24 backdrop-blur md:min-h-[42rem] md:px-12 md:pt-28 lg:min-h-[58rem]">
         <Link
           href="/"
-          aria-label="The Elevated Beauty Method home"
+          aria-label="The Elevated Beauty Method ™ home"
           className="mx-auto block w-full max-w-[1320px] transition-opacity hover:opacity-95"
         >
-          <img
-            src={masterLogo}
-            alt="The Elevated Beauty Method"
-            className="block h-auto w-full object-contain"
-          />
+          <span className="relative mx-auto block w-full">
+            <img src={masterLogo} alt="The Elevated Beauty Method ™" className="block h-auto w-full object-contain" />
+            <span aria-hidden="true" className="absolute bottom-[17%] right-[5.5%] translate-y-1/2 text-[clamp(5px,0.9vw,12px)] leading-none text-[#c9a478]/80">™</span>
+          </span>
         </Link>
         <div className="absolute right-4 top-4 flex items-center gap-3 md:right-12 md:top-8 md:gap-4">
           <Link href="/sign-in" className="text-muted-foreground hover:text-primary transition-colors text-sm font-medium">
@@ -141,7 +140,7 @@ export default function LandingPage() {
               </div>
               <h2 className="font-serif text-4xl md:text-5xl font-bold leading-tight">The Elevated Everyday Face</h2>
               <p className="text-lg text-muted-foreground leading-relaxed">
-                Start with a quick win. Every member receives our foundational 5-part video series completely free. Learn the core principles of the Elevated Beauty Method to look polished and put-together in under 10 minutes.
+                Start with a quick win. Every member receives our foundational 5-part video series completely free. Learn the core principles of The Elevated Beauty Method ™ to look polished and put-together in under 10 minutes.
               </p>
               <ul className="space-y-4 mt-6">
                 {[
@@ -308,13 +307,12 @@ export default function LandingPage() {
 
       <footer className="py-12 px-6 md:px-12 lg:px-24 bg-card/50 border-t border-border flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center text-muted-foreground">
-          <img
-            src={masterLogo}
-            alt="The Elevated Beauty Method"
-            className="h-24 w-auto rounded-xl object-contain"
-          />
+          <span className="relative block w-[min(82vw,360px)]">
+            <img src={masterLogo} alt="The Elevated Beauty Method ™" className="block h-auto w-full object-contain" />
+            <span aria-hidden="true" className="absolute bottom-[17%] right-[5.5%] translate-y-1/2 text-[clamp(5px,0.9vw,12px)] leading-none text-[#c9a478]/80">™</span>
+          </span>
         </div>
-        <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} The Elevated Beauty Method™ by Blushing Beauty By Nikki.</p>
+        <p className="text-sm text-muted-foreground">© {new Date().getFullYear()} The Elevated Beauty Method ™ by Blushing Beauty By Nikki.</p>
       </footer>
     </div>
   );

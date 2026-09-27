@@ -216,7 +216,7 @@ export function RadiantAuditForm({
         <header className="mx-auto mb-12 max-w-3xl text-center sm:mb-16">
           <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/[0.07] px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.23em] text-primary sm:text-xs">
             <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-            The Elevated Beauty Method™
+            The Elevated Beauty Method ™
           </div>
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.28em] text-muted-foreground">
             A personal reflection · 10 quiet minutes
@@ -388,7 +388,7 @@ export function RadiantAuditForm({
               </div>
               <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
                 Fewer checks in Section I, more in Section II? That space between where your routine is
-                and what you truly value is exactly where The Elevated Beauty Method™ begins.
+                and what you truly value is exactly where The Elevated Beauty Method ™ begins.
               </p>
               <div className="mt-6 grid gap-3 sm:grid-cols-2">
                 <div className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 px-4 py-3">
@@ -452,7 +452,7 @@ export function RadiantAuditForm({
           <div className="mx-auto mb-10 max-w-2xl text-center">
             <p className="text-[0.65rem] font-bold uppercase tracking-[0.25em] text-primary">The foundation of the proprietary method™</p>
             <h2 id="framework-title" className="mt-3 font-serif text-3xl font-bold sm:text-5xl">The 5-Stage Transformation Framework</h2>
-            <p className="mt-3 text-sm text-muted-foreground">The Elevated Beauty Experience™</p>
+            <p className="mt-3 text-sm text-muted-foreground">The Elevated Beauty Experience ™</p>
           </div>
           <div className="mb-8 flex flex-wrap items-center justify-center gap-x-2 gap-y-3 text-xs font-bold uppercase tracking-[0.16em] text-primary sm:gap-x-4 sm:text-sm">
             {framework.map((stage, index) => (
@@ -489,7 +489,7 @@ export function RadiantAuditForm({
             Join our free community and start building your personal beauty blueprint today.
           </p>
           <p className="mt-6 text-[0.65rem] font-semibold uppercase tracking-[0.22em] text-muted-foreground/75">
-            The Elevated Beauty Method™
+            The Elevated Beauty Method ™
           </p>
         </footer>
       </main>
