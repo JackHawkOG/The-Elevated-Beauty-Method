@@ -8,6 +8,7 @@ import {
   lessonsTable, pool, usersTable,
 } from "@workspace/db";
 import { progressBrowserEnvironment } from "./member-progress-browser-environment";
+import { runWithCleanup } from "./member-progress-browser-cleanup";
 
 // This intentionally goes through the running web and API workflows, not a
 // mocked auth router. Run separately from the fast progress suite.
@@ -61,8 +62,8 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     await expect.poll(async () => (await api(page, "/users/me")).status).toBe(200);
     return page;
   }
-  browser = await chromium.launch({ executablePath: chromiumPath, headless: true, args: ["--no-sandbox"] });
-  try {
+  await runWithCleanup(async () => {
+    browser = await chromium.launch({ executablePath: chromiumPath, headless: true, args: ["--no-sandbox"] });
     let [course] = await db.select().from(coursesTable).where(and(
       eq(coursesTable.title, "The Beauty Mindset Accelerator"),
       eq(coursesTable.accessTier, "Elevated"),
@@ -147,21 +148,35 @@ test("Clerk members retain progress after reload; Free members cannot access it"
     expect((await api(free, "/enrollments", "POST", { courseId: course.id })).status).toBe(403);
     await free.goto(`${base}/dashboard`);
     await browserExpect(free.getByTestId("text-accelerator-progress")).toHaveCount(0);
-  } finally {
-    for (const context of contexts) await context.close();
-    await browser?.close();
-    for (const identity of identities) {
-      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, identity));
-      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, identity));
-      await db.delete(usersTable).where(eq(usersTable.clerkId, identity));
-      await clerkClient.users.deleteUser(identity);
-    }
-    if (fixtureCourseId) {
-      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, fixtureCourseId));
-      await db.delete(coursesTable).where(eq(coursesTable.id, fixtureCourseId));
-    }
-    if (fixtureCategoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, fixtureCategoryId));
-    await db.delete(activityTable).where(eq(activityTable.actorName, names[0]));
-    await pool.end();
-  }
+  }, () => {
+    const courseId = fixtureCourseId;
+    const categoryId = fixtureCategoryId;
+    return [
+      ...contexts.map((context, index) => ({
+        name: `Close browser context ${index + 1}`, run: () => context.close(),
+      })),
+      { name: "Close browser", run: async () => { await browser?.close(); } },
+      ...identities.flatMap((identity, index) => [
+        { name: `Delete lesson completions for member ${index + 1}`, run: () =>
+          db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, identity)) },
+        { name: `Delete enrollments for member ${index + 1}`, run: () =>
+          db.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, identity)) },
+        { name: `Delete member ${index + 1}`, run: () =>
+          db.delete(usersTable).where(eq(usersTable.clerkId, identity)) },
+        { name: `Delete Clerk user ${index + 1}`, run: () => clerkClient.users.deleteUser(identity) },
+      ]),
+      ...(courseId !== undefined ? [
+        { name: "Delete fixture lessons", run: () =>
+          db.delete(lessonsTable).where(eq(lessonsTable.courseId, courseId)) },
+        { name: "Delete fixture course", run: () =>
+          db.delete(coursesTable).where(eq(coursesTable.id, courseId)) },
+      ] : []),
+      ...(categoryId !== undefined ? [
+        { name: "Delete fixture category", run: () =>
+          db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId)) },
+      ] : []),
+      { name: "Delete activity", run: () => db.delete(activityTable).where(eq(activityTable.actorName, names[0])) },
+      { name: "Close database pool", run: () => pool.end() },
+    ];
+  });
 }, 120_000);

@@ -28,8 +28,12 @@ enrolls and completes two lessons using the app's controls, checks dashboard
 and lesson markers after a browser reload, and confirms Free lesson and progress
 requests are rejected. If no published Accelerator exists, it creates a
 temporary published course and four lessons rather than publishing an existing
-draft. In `finally`, it deletes the accounts and only their associated
-database rows and temporary curriculum, even when an assertion fails.
+draft. After the check, it attempts to delete the accounts and only their
+associated database rows and temporary curriculum, even when an assertion
+fails. Every cleanup step is attempted even if another fails; the command
+reports the original browser failure together with any named cleanup failures.
+If cleanup fails, inspect and remove any remaining disposable development
+records before rerunning the gate.
 
 Routine `pnpm run check` and the fast `pnpm run test:progress` suite remain
 browser/Clerk-independent. Run the pre-release gate only where all prerequisites
