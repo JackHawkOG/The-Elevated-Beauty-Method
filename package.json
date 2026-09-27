@@ -12,6 +12,7 @@
     "test:membership": "vitest run artifacts/api-server/src/routes/membership-reservations.test.ts artifacts/api-server/src/routes/membership-flow.test.ts artifacts/api-server/src/lib/membership-reconciliation.test.ts artifacts/api-server/src/lib/membership-reconciliation.integration.test.ts artifacts/edu-portal/src/pages/membership.test.tsx --maxWorkers=1",
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
     "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",
+    "test:membership-ui": "playwright test artifacts/edu-portal/tests/membership-conversion.spec.ts",
     "test:audit-live": "playwright test --config playwright.audit-live.config.ts",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"

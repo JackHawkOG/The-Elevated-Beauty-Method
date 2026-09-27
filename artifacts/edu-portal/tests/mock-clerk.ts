@@ -6,6 +6,7 @@ export function useUser() {
     isSignedIn: !!account,
     user: account ? {
       id: account,
+      publicMetadata: {},
       primaryEmailAddress: {
         emailAddress: `${account}@example.invalid`,
         verification: { status: verified ? "verified" : "unverified" },
