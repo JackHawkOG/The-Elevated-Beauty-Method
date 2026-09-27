@@ -22,6 +22,8 @@ const otherClerkId = `billing-bystander-${id}`;
 const otherSubscriptionId = `sub_billing_bystander_${id}`;
 const paginatedClerkId = `billing-paginated-${id}`;
 const paginatedSubscriptionId = `sub_billing_paginated_${id}`;
+const paidDuringReviewClerkId = `billing-paid-during-review-${id}`;
+const paidDuringReviewSubscriptionId = `sub_billing_paid_during_review_${id}`;
 const eventIds: string[] = [];
 let seeded = false;
 function invoice(name: string, date: string, status: Stripe.Invoice.Status): Stripe.Invoice {
@@ -83,13 +85,19 @@ beforeAll(async () => {
     "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)",
     [paginatedClerkId, paginatedSubscriptionId],
   );
+  await pool.query("INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [paidDuringReviewClerkId, "Paid during billing review fixture", `${paidDuringReviewClerkId}@example.invalid`]);
+  await pool.query(
+    "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)",
+    [paidDuringReviewClerkId, paidDuringReviewSubscriptionId],
+  );
 });
 
 afterAll(async () => {
   if (!seeded) return;
   await pool.query("DELETE FROM membership_webhook_events WHERE id = ANY($1::text[])", [eventIds]);
-  await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId]]);
-  await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId]]);
+  await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId, paidDuringReviewClerkId]]);
+  await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId, paidDuringReviewClerkId]]);
 });
 
 test("late invoice and subscription notices use current Stripe state; sweeps cannot undo forfeiture", async () => {
@@ -191,6 +199,49 @@ test("late invoice and subscription notices use current Stripe state; sweeps can
   );
   expect(bystander.rows[0]).toEqual({
     status: "confirmed", failed_months: 2, last_failed_invoice: null, membership_tier: "Elevated",
+  });
+});
+
+test("a renewal paid after invoice history is read keeps the founding place", async () => {
+  const march = invoice("review-mar", "2026-03-01", "open");
+  const february = invoice("review-feb", "2026-02-01", "open");
+  const january = invoice("review-jan", "2026-01-01", "open");
+  let invoices = [march, february, january];
+  let firstRead!: () => void;
+  const historyRead = new Promise<void>(resolve => { firstRead = resolve; });
+  let resume!: () => void;
+  const continueReview = new Promise<void>(resolve => { resume = resolve; });
+  const list = vi.fn(async (params: { subscription: string; limit: number; starting_after?: string }) => {
+    expect(params).toEqual({ subscription: paidDuringReviewSubscriptionId, limit: 100 });
+    const snapshot = [...invoices];
+    if (list.mock.calls.length === 1) {
+      firstRead();
+      await continueReview;
+    }
+    return { data: snapshot, has_more: false };
+  });
+  const cancel = vi.fn();
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: {
+      retrieve: async (requestedId: string) => {
+        expect(requestedId).toBe(paidDuringReviewSubscriptionId);
+        return { status: "active", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+      },
+      cancel,
+    },
+    invoices: { list },
+  } as unknown as Stripe);
+
+  const reconciliation = reconcileMemberships(paidDuringReviewSubscriptionId);
+  await historyRead;
+  invoices = [{ ...march, status: "paid" }, february, january];
+  resume();
+  await reconciliation;
+
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(cancel).not.toHaveBeenCalled();
+  expect(await state(paidDuringReviewSubscriptionId)).toEqual({
+    status: "confirmed", failed_months: 0, last_failed_invoice: null, membership_tier: "Elevated",
   });
 });
 

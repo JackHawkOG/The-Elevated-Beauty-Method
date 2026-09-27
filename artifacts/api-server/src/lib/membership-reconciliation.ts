@@ -35,6 +35,21 @@ export function isSubscriptionEnded(subscription: Stripe.Subscription, now = Dat
   return end !== null && end * 1000 <= now;
 }
 
+async function currentFailedBillingMonths(stripe: Stripe, subscriptionId: string): Promise<{ count: number; lastId: string | null }> {
+  // Three distinct months are sufficient to trigger forfeiture; paginate
+  // until a paid renewal or the beginning of the subscription is reached.
+  const invoices: Stripe.Invoice[] = [];
+  let startingAfter: string | undefined;
+  while (true) {
+    const page = await stripe.invoices.list({ subscription: subscriptionId, limit: 100, ...(startingAfter ? { starting_after: startingAfter } : {}) });
+    invoices.push(...page.data);
+    const failed = failedBillingMonths(invoices);
+    if (failed.count >= 3 || !page.has_more || page.data.length === 0 ||
+        page.data.some(invoice => invoice.billing_reason === "subscription_cycle" && invoice.status === "paid")) return failed;
+    startingAfter = page.data[page.data.length - 1].id;
+  }
+}
+
 // Call under a transaction. Lock BEFORE reading Stripe so an older webhook
 // cannot write after a newer webhook or sweep has committed.
 export async function reconcileSubscription(
@@ -52,17 +67,11 @@ export async function reconcileSubscription(
   let subscription = await stripe.subscriptions.retrieve(subscriptionId);
   let failed = { count: 0, lastId: null as string | null };
   if (row.kind === "founding" && !isSubscriptionEnded(subscription)) {
-    // Three distinct months are sufficient to trigger forfeiture; paginate
-    // until a paid renewal or the beginning of the subscription is reached.
-    const invoices: Stripe.Invoice[] = [];
-    let startingAfter: string | undefined;
-    while (true) {
-      const page = await stripe.invoices.list({ subscription: subscriptionId, limit: 100, ...(startingAfter ? { starting_after: startingAfter } : {}) });
-      invoices.push(...page.data);
-      failed = failedBillingMonths(invoices);
-      if (failed.count >= 3 || !page.has_more || page.data.length === 0 ||
-          page.data.some(invoice => invoice.billing_reason === "subscription_cycle" && invoice.status === "paid")) break;
-      startingAfter = page.data[page.data.length - 1].id;
+    failed = await currentFailedBillingMonths(stripe, subscriptionId);
+    if (failed.count >= 3) {
+      // The invoice snapshot can change while it is being paginated. Confirm
+      // from a new first page before making the irreversible Stripe call.
+      failed = await currentFailedBillingMonths(stripe, subscriptionId);
     }
     if (failed.count >= 3) {
       // Stripe is the source of truth; a retry after a successful cancellation
