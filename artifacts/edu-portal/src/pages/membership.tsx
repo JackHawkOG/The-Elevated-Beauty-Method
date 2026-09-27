@@ -7,6 +7,22 @@ import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { trackConfirmedMembershipReturn, trackMembershipCheckoutStarted } from "@/lib/analytics";
 
+function stripeCheckoutUrl(value: unknown): string {
+  const message = "Checkout could not be started. Please try again.";
+  if (typeof value !== "string" || !value || value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value) || !/^https:\/\//i.test(value)) {
+    throw new Error(message);
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:" && url.hostname === "checkout.stripe.com" && !url.port && !url.username && !url.password) {
+      return url.href;
+    }
+  } catch {
+    // Treat malformed URLs the same as unexpected destinations.
+  }
+  throw new Error(message);
+}
+
 export default function MembershipPage() {
   const { user } = useUser();
   const isOwner = user?.publicMetadata.role === "owner" || user?.publicMetadata.role === "admin";
@@ -40,11 +56,9 @@ export default function MembershipPage() {
     setError("");
     try {
       const result = await checkout.mutateAsync({ data: { kind } });
-      if (typeof result?.url !== "string" || !result.url.trim()) {
-        throw new Error("Checkout could not be started. Please try again.");
-      }
+      const checkoutUrl = stripeCheckoutUrl(result?.url);
       trackMembershipCheckoutStarted(kind);
-      window.location.assign(result.url);
+      window.location.assign(checkoutUrl);
     } catch (err) {
       queryClient.invalidateQueries({ queryKey: getGetMembershipOfferQueryKey() });
       setError(err instanceof Error ? err.message : "Checkout could not be started. Please try again.");

@@ -45,6 +45,45 @@ for (const { kind, failure } of [
   });
 }
 
+for (const url of [
+  "not a URL",
+  "/dashboard",
+  "javascript:alert('bad')",
+  "http://checkout.stripe.com/pay/test",
+  "https://checkout.stripe.com.evil.example/pay/test",
+  "https://evil.example/pay/test",
+  "https://user@checkout.stripe.com/pay/test",
+  "https://checkout.stripe.com:444/pay/test",
+  "https://checkout.stripe.com/pay/test\njavascript:alert(1)",
+]) {
+  test(`malformed checkout destination ${JSON.stringify(url)} stays on membership without conversion events`, async ({ page }) => {
+    const events: Event[] = [];
+    await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
+      events.push(event);
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem("audit-test-account", "membership-test-member");
+      (window as unknown as { umami: { track: (name: string, data?: Record<string, string>) => void } }).umami = {
+        track: (name, data) => {
+          void (window as unknown as { __recordMembershipEvent: (event: Event) => Promise<void> })
+            .__recordMembershipEvent({ name, data });
+        },
+      };
+    });
+    await page.route("**/api/membership/offer", route => route.fulfill({
+      json: { phase: "open", foundingAvailable: true, foundingPrice: 24, standardPrice: 48 },
+    }));
+    await page.route("**/api/membership/me", route => route.fulfill({ json: { membership: null } }));
+    await page.route("**/api/membership/checkout", route => route.fulfill({ json: { url } }));
+
+    await page.goto("/tests/membership-harness.html");
+    await page.getByRole("button", { name: "Continue to secure checkout" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Checkout could not be started. Please try again." })).toBeVisible();
+    await expect(page).toHaveURL(/\/tests\/membership-harness\.html$/);
+    expect(events).toEqual([]);
+  });
+}
+
 for (const kind of ["founding", "standard"] as const) {
   test(`${kind} cancelled checkout stays pending without a paid conversion and can be continued`, async ({ page }) => {
     const events: Event[] = [];
@@ -109,7 +148,7 @@ for (const kind of ["founding", "standard"] as const) {
     const events: Event[] = [];
     let status: "pending" | "confirmed" = "pending";
     let membership: { kind: Kind; status: "pending" | "confirmed" } | null = null;
-    const checkoutUrl = `https://checkout.stripe.test/session/${kind}`;
+    const checkoutUrl = `https://checkout.stripe.com/session/${kind}`;
 
     await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
       events.push(event);
@@ -135,7 +174,7 @@ for (const kind of ["founding", "standard"] as const) {
       membership = { kind, status: "pending" };
       await route.fulfill({ json: { url: checkoutUrl } });
     });
-    await page.route("https://checkout.stripe.test/**", route => route.fulfill({
+    await page.route("https://checkout.stripe.com/**", route => route.fulfill({
       contentType: "text/html",
       body: "<!doctype html><title>Stripe checkout test</title>",
     }));
