@@ -35,6 +35,29 @@ reports the original browser failure together with any named cleanup failures.
 If cleanup fails, inspect and remove any remaining disposable development
 records before rerunning the gate.
 
+An interrupted process cannot perform cleanup. In the **development validation
+workspace only**, run `pnpm run inspect:progress-leftovers` from the root. This
+read-only dry run lists matching disposable Clerk identities, provisioned
+members and fixture categories older than one hour, with their run UUIDs
+and the associated course and lesson IDs.
+It requires the same development database, test Clerk keys, preview and
+Chromium safeguards as the browser check. No production keys or deployment
+environment are permitted. It does not discover records whose original marker
+names or emails were changed; review those manually.
+
+Check the reported IDs against the interrupted run before deleting. To remove
+one confirmed run, run
+`pnpm run inspect:progress-leftovers --delete <run-uuid> <same-run-uuid>`.
+The repeated UUID is an intentional confirmation, not a wildcard. Deletion
+refuses records less than an hour old, mismatched names/emails, or curriculum
+with non-fixture lessons or unrelated enrollments/completions. It removes only
+the run's member progress, course/category (if present), activity and Clerk
+users. If a database reference blocks deletion, it stops without cascading;
+investigate before retrying. If Clerk deletion fails after database cleanup,
+the dry run will still list the remaining Clerk identity for another attempt.
+Do not run this command against production or edit its filters to broaden a
+match.
+
 Routine `pnpm run check` and the fast `pnpm run test:progress` suite remain
 browser/Clerk-independent. Run the pre-release gate only where all prerequisites
 are available; do not add it to the routine unit-check workflow.

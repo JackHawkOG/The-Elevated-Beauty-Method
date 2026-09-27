@@ -29,6 +29,17 @@ export function progressBrowserEnvironment(env: NodeJS.ProcessEnv = process.env)
       decodeURIComponent(target.username) !== env.PGUSER) {
     throw new Error("Progress browser check requires DATABASE_URL to match the workspace development PG* target");
   }
+  // pg-connection-string applies URL query parameters after URL components.
+  // In particular ?host= or ?port= can silently redirect a matching URL.
+  // Permit connection-only options, never alternative targets or unknown keys.
+  const connectionOptions = new Set([
+    "sslmode", "sslcert", "sslkey", "sslrootcert", "application_name",
+    "connect_timeout", "keepalives", "keepalives_idle", "keepalives_interval",
+    "keepalives_count",
+  ]);
+  if ([...target.searchParams.keys()].some(key => !connectionOptions.has(key))) {
+    throw new Error("Progress browser check rejects DATABASE_URL target-changing or unknown connection options");
+  }
   const chromiumPath = env.CHROMIUM_PATH || "/repl/tools/bin/chromium";
   try {
     accessSync(chromiumPath, constants.X_OK);

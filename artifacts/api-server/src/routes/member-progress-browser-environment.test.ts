@@ -17,6 +17,9 @@ const development = {
 
 test("accepts only a matched development workspace target", () => {
   expect(progressBrowserEnvironment(development).base).toBe("https://example.replit.dev");
+  expect(progressBrowserEnvironment({
+    ...development, DATABASE_URL: `${development.DATABASE_URL}?sslmode=require`,
+  }).base).toBe("https://example.replit.dev");
 });
 
 test.each([
@@ -27,6 +30,10 @@ test.each([
   [{ VITE_CLERK_PUBLISHABLE_KEY: "pk_test_different" }, /development Clerk/],
   [{ REPLIT_DEV_DOMAIN: "published.example.com" }, /development preview/],
   [{ DATABASE_URL: "postgresql://member@production-db/memberdb" }, /development PG\* target/],
+  [{ DATABASE_URL: `${development.DATABASE_URL}?host=production-db` }, /connection options/],
+  [{ DATABASE_URL: `${development.DATABASE_URL}?port=5434` }, /connection options/],
+  [{ DATABASE_URL: `${development.DATABASE_URL}?database=production` }, /connection options/],
+  [{ DATABASE_URL: `${development.DATABASE_URL}?hostaddr=192.0.2.1` }, /connection options/],
   [{ PGDATABASE: "other" }, /development PG\* target/],
   [{ DATABASE_URL: "not-a-url" }, /development DATABASE_URL/],
   [{ CHROMIUM_PATH: "/missing/progress-check-browser" }, /executable Chromium/],
