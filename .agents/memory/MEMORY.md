@@ -3,6 +3,7 @@
 - [Audit browser test boundary](audit-browser-test-boundary.md) — the repeatable comparison browser test isolates auth/API; pair it with server isolation checks rather than treating it as live Clerk coverage.
 - [Clerk test tickets](clerk-test-tickets.md) — consumed sign-in tickets cannot be revoked; keep them short-lived and clean up disposable users.
 - [Clerk UI email-code timing](clerk-ui-code-timing.md) — wait for first-factor preparation before entering a test code; the OTP field can submit early.
+- [Clerk signup identity timing](clerk-signup-identity-timing.md) — a new Clerk user may not exist until the signup email code is verified; check preverification saves without requiring a user ID.
 - [Audit checkbox browser interaction](audit-checkbox-browser-interaction.md) — live Playwright checks should click the visible label, not the visually hidden checkbox.
 - [Concurrent task merges](concurrent-task-merges.md) — a task completion check can see newly merged test code; reread the current worktree before addressing feedback.
 - [Stripe sync in bundled server](stripe-sync-bundling.md) — keep the sync library external so its filesystem migrations remain available at runtime; connector credentials may use different field names than examples.

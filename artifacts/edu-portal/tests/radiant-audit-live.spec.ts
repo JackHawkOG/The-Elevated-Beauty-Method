@@ -24,7 +24,9 @@ function requireDevelopment() {
   if (target.hostname !== process.env.PGHOST ||
       decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
       decodeURIComponent(target.username) !== process.env.PGUSER ||
-      (process.env.PGPORT && (target.port || "5432") !== process.env.PGPORT)) {
+      (process.env.PGPORT && (target.port || "5432") !== process.env.PGPORT) ||
+      [...target.searchParams.keys()].some(key =>
+        ["host", "hostaddr", "port", "dbname", "user", "service", "options"].includes(key.toLowerCase()))) {
     throw new Error("DATABASE_URL does not match the workspace development database.");
   }
 }
@@ -315,6 +317,101 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
     expect(right[0].masteryGoal).toBe(reflections(marker).masteryGoal);
   } finally {
     await cleanUpAccounts(client, created);
+  }
+});
+
+test("a visitor's staged Audit saves only after the new account verifies its email", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = `audit-signup-${tag}+clerk_test@example.com`;
+  const answers = reflections(`signup-${tag}`);
+  const created: string[] = [];
+  const auditWrites: Array<{ status?: number; body: string }> = [];
+  try {
+    await setupClerkTestingToken({ page });
+    // Never attach this check to an existing identity, even if the email somehow collides.
+    expect((await client.users.getUserList({ emailAddress: [email] })).data).toHaveLength(0);
+    page.on("request", request => {
+      if (request.method() === "PUT" && new URL(request.url()).pathname === "/api/users/me/radiant-audit") {
+        auditWrites.push({ body: request.postData() ?? "" });
+        void request.response().then(response => {
+          const write = auditWrites.find(item => item.body === (request.postData() ?? "") && item.status === undefined);
+          if (write) write.status = response?.status();
+        });
+      }
+    });
+
+    await page.goto("/radiant-audit");
+    await page.locator('label[for="routine-skincare-consistency"]').click();
+    await page.locator('label[for="values-quality-over-price"]').click();
+    await page.locator("#beauty-trend").fill(answers.beautyTrend);
+    await page.locator("#mastery-goal").fill(answers.masteryGoal);
+    await page.locator("#research-time").fill(answers.researchTime);
+    await page.getByLabel("Email address").fill(email);
+    await page.getByRole("button", { name: /continue|save my audit/i }).click();
+    await expect(page).toHaveURL(/\/sign-up(?:\/|$)/);
+    const pending = await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"));
+    expect(pending).not.toBeNull();
+    expect(JSON.parse(pending!)).toMatchObject({
+      email, routineChecks: ["skincare-consistency"], valuesChecks: ["quality-over-price"], ...answers,
+    });
+    expect(auditWrites).toHaveLength(0);
+
+    // Sign up through Clerk's visible form, not an API-created verified account.
+    await expect(page.getByLabel("Email address")).toHaveValue(email);
+    const password = page.getByLabel("Password", { exact: true });
+    if (await password.isVisible()) await password.fill(`Audit!${randomUUID()}9a`);
+    const prepared = page.waitForResponse(response =>
+      response.url().includes("/prepare_verification") && response.status() === 200,
+    );
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await prepared;
+    await expect(page.getByLabel("Enter verification code")).toBeVisible();
+    expect(auditWrites).toHaveLength(0);
+
+    const [{ db, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    expect(await db.select().from(usersTable).where(eq(usersTable.email, email))).toHaveLength(0);
+    // Clerk may not create a user record until the signup's email code is verified.
+    const unverified = (await client.users.getUserList({ emailAddress: [email] })).data;
+    if (unverified.length) expect(unverified[0].primaryEmailAddress?.verification.status).not.toBe("verified");
+    expect(unverified.length).toBeLessThanOrEqual(1);
+    if (unverified.length) created.push(unverified[0].id);
+    expect(created.length ? await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0])) : []).toHaveLength(0);
+
+    await page.getByLabel("Enter verification code").fill("424242");
+    await expect.poll(async () => (await client.users.getUserList({ emailAddress: [email] })).data.length).toBe(1);
+    const verified = (await client.users.getUserList({ emailAddress: [email] })).data[0];
+    if (!created.length) created.push(verified.id);
+    expect(verified.id).toBe(created[0]);
+    const currentRows = () => db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0]));
+    await expect(page).toHaveURL(/\/radiant-audit\/complete(?:\/|$)/);
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    for (const answer of Object.values(answers)) await expect(page.locator("main")).toContainText(answer);
+    await expect.poll(() => auditWrites.length).toBe(1);
+    await expect.poll(() => auditWrites[0].status).toBe(200);
+    expect(JSON.parse(auditWrites[0].body)).toMatchObject({
+      routineChecks: ["skincare-consistency"], valuesChecks: ["quality-over-price"], ...answers,
+    });
+    expect((await client.users.getUser(created[0])).primaryEmailAddress?.verification.status).toBe("verified");
+    expect((await currentRows()).map(row => [
+      row.routineChecks, row.valuesChecks, row.beautyTrend, row.masteryGoal, row.researchTime,
+    ])).toEqual([[["skincare-consistency"], ["quality-over-price"], answers.beautyTrend, answers.masteryGoal, answers.researchTime]]);
+    expect(await db.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, created[0]))).toHaveLength(0);
+    expect(await db.select().from(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, created[0]))).toHaveLength(1);
+    expect(await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"))).toBeNull();
+    await page.reload();
+    await expect(page.locator("main")).toContainText(answers.masteryGoal);
+    expect(auditWrites).toHaveLength(1);
+  } finally {
+    // Signup may create the identity before the verification screen or an assertion fails.
+    // Find only the unique email allocated above, then remove its rows and Clerk identity.
+    const matches = (await client.users.getUserList({ emailAddress: [email] })).data
+      .filter(user => user.emailAddresses.some(address => address.emailAddress.toLowerCase() === email));
+    await cleanUpAccounts(client, [...new Set([...created, ...matches.map(user => user.id)])]);
   }
 });
 
