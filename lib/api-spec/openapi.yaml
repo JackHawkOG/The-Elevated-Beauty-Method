@@ -507,6 +507,44 @@ paths:
         "401":
           description: Unauthorized
 
+  /users/me/radiant-audit:
+    get:
+      operationId: getRadiantAudit
+      tags: [method]
+      summary: Get the signed-in member's Radiant Audit, if submitted
+      responses:
+        "200":
+          description: The member's audit or null if it has not been submitted
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/RadiantAudit"
+                  - type: "null"
+        "401":
+          description: Unauthorized
+    put:
+      operationId: saveRadiantAudit
+      tags: [method]
+      summary: Submit or update the signed-in member's Radiant Audit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RadiantAuditInput"
+      responses:
+        "200":
+          description: Saved audit and section scores
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RadiantAudit"
+        "400":
+          description: Invalid audit answers
+        "401":
+          description: Unauthorized
+
   /dashboard/stats:
     get:
       operationId: getDashboardStats
@@ -857,6 +895,51 @@ components:
           type: string
         bio:
           type: string
+
+    RadiantAuditInput:
+      type: object
+      required: [routineChecks, valuesChecks, beautyTrend, masteryGoal, researchTime]
+      properties:
+        routineChecks:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [skincare-consistency, makeup-application-confidence, product-spending, trend-chasing-behavior, time-spent-on-beauty-daily]
+        valuesChecks:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [quality-over-price, one-method-mastered, professional-results, authentic-expression, lasting-investment]
+        beautyTrend:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        masteryGoal:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        researchTime:
+          type: string
+          minLength: 1
+          maxLength: 1000
+
+    RadiantAudit:
+      allOf:
+        - $ref: "#/components/schemas/RadiantAuditInput"
+        - type: object
+          required: [routineScore, valuesScore, completedAt]
+          properties:
+            routineScore:
+              type: number
+            valuesScore:
+              type: number
+            completedAt:
+              type: string
+              format: date-time
 
     BeautyDiagnosticInput:
       type: object

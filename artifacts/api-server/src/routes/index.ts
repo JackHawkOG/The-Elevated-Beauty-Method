@@ -6,6 +6,7 @@ import enrollmentsRouter from "./enrollments";
 import announcementsRouter from "./announcements";
 import usersRouter from "./users";
 import dashboardRouter from "./dashboard";
+import radiantAuditsRouter from "./radiant-audits";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(enrollmentsRouter);
 router.use(announcementsRouter);
 router.use(usersRouter);
 router.use(dashboardRouter);
+router.use(radiantAuditsRouter);
 
 export default router;

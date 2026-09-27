@@ -97,17 +97,33 @@ function ClerkQueryClientCacheInvalidator() {
 }
 
 function SignInPage() {
+  const pendingAudit = readPendingAudit();
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      <SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+      <SignIn
+        routing="path"
+        path={`${basePath}/sign-in`}
+        signUpUrl={`${basePath}/sign-up`}
+        forceRedirectUrl={pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
+      />
     </div>
   );
 }
 
 function SignUpPage() {
+  const pendingAudit = readPendingAudit();
+  if (!pendingAudit && window.location.pathname === `${basePath}/sign-up`) {
+    return <Redirect to="/radiant-audit" />;
+  }
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-background px-4">
-      <SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
+      <SignUp
+        routing="path"
+        path={`${basePath}/sign-up`}
+        signInUrl={`${basePath}/sign-in`}
+        initialValues={pendingAudit ? { emailAddress: pendingAudit.email } : undefined}
+        forceRedirectUrl={pendingAudit ? `${basePath}/radiant-audit/complete` : undefined}
+      />
     </div>
   );
 }
@@ -130,6 +146,8 @@ import LessonPage from '@/pages/lesson';
 import CommunityPage from '@/pages/community';
 import ProfilePage from '@/pages/profile';
 import EditorialPage from '@/pages/editorial';
+import RadiantAuditPage, { RadiantAuditCompletePage } from '@/pages/radiant-audit';
+import { readPendingAudit } from '@/lib/radiant-audit-session';
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   return (
@@ -154,6 +172,8 @@ function Router() {
       <Route path="/" component={HomeRedirect} />
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
+      <Route path="/radiant-audit" component={RadiantAuditPage} />
+      <Route path="/radiant-audit/complete" component={() => <ProtectedRoute component={RadiantAuditCompletePage} />} />
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/courses" component={() => <ProtectedRoute component={CoursesPage} />} />
       <Route path="/courses/:courseId" component={() => <ProtectedRoute component={CourseDetailPage} />} />
@@ -177,7 +197,7 @@ function ClerkProviderWithRoutes() {
       signUpUrl={`${basePath}/sign-up`}
       localization={{
         signIn: { start: { title: "Welcome back", subtitle: "Sign in to continue learning" } },
-        signUp: { start: { title: "Join The Elevated Beauty Method", subtitle: "Free access to all content" } },
+        signUp: { start: { title: "Join The Elevated Beauty Method", subtitle: "Verify your email to save your Radiant Audit and create a free account" } },
       }}
       routerPush={(to) => setLocation(stripBase(to))}
       routerReplace={(to) => setLocation(stripBase(to), { replace: true })}

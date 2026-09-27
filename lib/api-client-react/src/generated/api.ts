@@ -42,6 +42,8 @@ import type {
   ListAnnouncementsParams,
   ListCoursesParams,
   ProgressUpdate,
+  RadiantAudit,
+  RadiantAuditInput,
   UserProfile,
   UserProfileUpdate
 } from './api.schemas';
@@ -1873,6 +1875,154 @@ export const useSaveBeautyDiagnostic = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveBeautyDiagnosticMutationOptions(options));
+    }
+
+export const getGetRadiantAuditUrl = () => {
+
+
+
+
+  return `/api/users/me/radiant-audit`
+}
+
+/**
+ * @summary Get the signed-in member's Radiant Audit, if submitted
+ */
+export const getRadiantAudit = async ( options?: Parameters<typeof customFetch>[1]): Promise<RadiantAudit | null> => {
+
+  return customFetch<RadiantAudit | null>(getGetRadiantAuditUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRadiantAuditQueryKey = () => {
+    return [
+    `/api/users/me/radiant-audit`
+    ] as const;
+    }
+
+
+export const getGetRadiantAuditQueryOptions = <TData = Awaited<ReturnType<typeof getRadiantAudit>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRadiantAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRadiantAuditQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRadiantAudit>>> = ({ signal }) => getRadiantAudit({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRadiantAudit>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetRadiantAuditQueryResult = NonNullable<Awaited<ReturnType<typeof getRadiantAudit>>>
+export type GetRadiantAuditQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get the signed-in member's Radiant Audit, if submitted
+ */
+
+export function useGetRadiantAudit<TData = Awaited<ReturnType<typeof getRadiantAudit>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRadiantAudit>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetRadiantAuditQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveRadiantAuditUrl = () => {
+
+
+
+
+  return `/api/users/me/radiant-audit`
+}
+
+/**
+ * @summary Submit or update the signed-in member's Radiant Audit
+ */
+export const saveRadiantAudit = async (radiantAuditInput: RadiantAuditInput, options?: Parameters<typeof customFetch>[1]): Promise<RadiantAudit> => {
+
+  return customFetch<RadiantAudit>(getSaveRadiantAuditUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(radiantAuditInput)
+  }
+);}
+
+
+
+
+
+export const getSaveRadiantAuditMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveRadiantAudit>>, TError,{data: BodyType<RadiantAuditInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveRadiantAudit>>, TError,{data: BodyType<RadiantAuditInput>}, TContext> => {
+
+const mutationKey = ['saveRadiantAudit'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveRadiantAudit>>, {data: BodyType<RadiantAuditInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveRadiantAudit(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveRadiantAuditMutationResult = NonNullable<Awaited<ReturnType<typeof saveRadiantAudit>>>
+    export type SaveRadiantAuditMutationBody = BodyType<RadiantAuditInput>
+    export type SaveRadiantAuditMutationError = ErrorType<void>
+
+    /**
+ * @summary Submit or update the signed-in member's Radiant Audit
+ */
+export const useSaveRadiantAudit = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveRadiantAudit>>, TError,{data: BodyType<RadiantAuditInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveRadiantAudit>>,
+        TError,
+        {data: BodyType<RadiantAuditInput>},
+        TContext
+      > => {
+      return useMutation(getSaveRadiantAuditMutationOptions(options));
     }
 
 export const getGetDashboardStatsUrl = () => {

@@ -6,3 +6,4 @@ export * from "./lesson-completions";
 export * from "./announcements";
 export * from "./users";
 export * from "./activity";
+export * from "./radiant-audits";

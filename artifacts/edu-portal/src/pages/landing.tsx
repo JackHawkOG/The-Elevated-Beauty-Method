@@ -27,7 +27,7 @@ export default function LandingPage() {
             Sign In
           </Link>
           <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium rounded-full px-6">
-            <Link href="/sign-up">Join Free</Link>
+            <Link href="/radiant-audit">Join Free</Link>
           </Button>
         </div>
       </nav>
@@ -61,7 +61,7 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center lg:justify-start">
                 <Button asChild size="lg" className="h-16 rounded-full bg-[#dccebf] px-9 text-lg font-bold text-[#0A0A0A] shadow-[0_0_40px_-10px_rgba(220,206,191,0.45)] hover:bg-[#cdbbab]">
-                  <Link href="/sign-up">
+                  <Link href="/radiant-audit">
                     Get My Free Radiant Audit <ArrowRight className="ml-2 h-5 w-5" />
                   </Link>
                 </Button>
@@ -106,13 +106,13 @@ export default function LandingPage() {
               </div>
               <h2 className="font-serif text-4xl md:text-5xl font-bold leading-tight">Your Personal Beauty Diagnostic</h2>
               <p className="text-lg text-muted-foreground leading-relaxed">
-                Beauty is not one-size-fits-all. When you join, your first step is a personalized diagnostic covering your skin type, undertone, lifestyle, and visibility goals.
+                Beauty is not one-size-fits-all. Begin with The Radiant Audit to reflect on your routine and goals. After you join, your personal beauty diagnostic explores your skin type, undertone, lifestyle, and visibility goals.
               </p>
               <p className="text-lg text-muted-foreground leading-relaxed">
                 We use this to build <span className="text-foreground font-medium">Your Method</span> — a custom pathway of education tailored exactly to what you need right now.
               </p>
               <Button asChild variant="outline" className="rounded-full px-8 h-12 mt-4 border-primary/30 text-primary hover:bg-primary/10">
-                <Link href="/sign-up">Take the Diagnostic</Link>
+                    <Link href="/radiant-audit">Take the Radiant Audit</Link>
               </Button>
             </div>
 
@@ -253,7 +253,7 @@ export default function LandingPage() {
                   ))}
                 </ul>
                 <Button asChild className="w-full rounded-full bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20">
-                  <Link href="/sign-up">Join Free</Link>
+                    <Link href="/radiant-audit">Join Free</Link>
                 </Button>
               </div>
 
@@ -287,7 +287,7 @@ export default function LandingPage() {
                   ))}
                 </ul>
                 <Button asChild className="w-full rounded-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_0_20px_-5px_rgba(255,224,153,0.3)]">
-                  <Link href="/sign-up" data-testid="link-join-free-from-elevated">Join Free While Enrollment Is Coming Soon</Link>
+                  <Link href="/radiant-audit" data-testid="link-join-free-from-elevated">Join Free While Enrollment Is Coming Soon</Link>
                 </Button>
               </div>
             </div>
@@ -300,7 +300,7 @@ export default function LandingPage() {
             <h2 className="font-serif text-4xl md:text-5xl font-bold mb-6">The next level starts here.</h2>
             <p className="text-muted-foreground text-lg mb-10">Sign up in seconds. Discover Your Method completely free.</p>
             <Button asChild size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-12 h-14 text-lg shadow-[0_0_40px_-10px_rgba(255,224,153,0.3)]">
-              <Link href="/sign-up">Create Free Account</Link>
+              <Link href="/radiant-audit">Create Free Account</Link>
             </Button>
           </div>
         </section>

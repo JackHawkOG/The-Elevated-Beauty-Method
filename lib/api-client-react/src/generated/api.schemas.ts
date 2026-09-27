@@ -230,6 +230,56 @@ export interface UserProfileUpdate {
   bio?: string;
 }
 
+export type RadiantAuditInputRoutineChecksItem = typeof RadiantAuditInputRoutineChecksItem[keyof typeof RadiantAuditInputRoutineChecksItem];
+
+
+export const RadiantAuditInputRoutineChecksItem = {
+  'skincare-consistency': 'skincare-consistency',
+  'makeup-application-confidence': 'makeup-application-confidence',
+  'product-spending': 'product-spending',
+  'trend-chasing-behavior': 'trend-chasing-behavior',
+  'time-spent-on-beauty-daily': 'time-spent-on-beauty-daily',
+} as const;
+
+export type RadiantAuditInputValuesChecksItem = typeof RadiantAuditInputValuesChecksItem[keyof typeof RadiantAuditInputValuesChecksItem];
+
+
+export const RadiantAuditInputValuesChecksItem = {
+  'quality-over-price': 'quality-over-price',
+  'one-method-mastered': 'one-method-mastered',
+  'professional-results': 'professional-results',
+  'authentic-expression': 'authentic-expression',
+  'lasting-investment': 'lasting-investment',
+} as const;
+
+export interface RadiantAuditInput {
+  /** @maxItems 5 */
+  routineChecks: RadiantAuditInputRoutineChecksItem[];
+  /** @maxItems 5 */
+  valuesChecks: RadiantAuditInputValuesChecksItem[];
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  beautyTrend: string;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  masteryGoal: string;
+  /**
+     * @minLength 1
+     * @maxLength 1000
+     */
+  researchTime: string;
+}
+
+export type RadiantAudit = RadiantAuditInput & {
+  routineScore: number;
+  valuesScore: number;
+  completedAt: string;
+};
+
 export type BeautyDiagnosticInputSkinType = typeof BeautyDiagnosticInputSkinType[keyof typeof BeautyDiagnosticInputSkinType];
 
 

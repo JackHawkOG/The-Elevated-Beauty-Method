@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { ensureMemberJourneyContent } from "./lib/seed-member-journey";
 import { ensureProgressSchema } from "./lib/ensure-progress-schema";
 import { ensurePublicationSchema } from "./lib/ensure-publication-schema";
+import { ensureRadiantAuditSchema } from "./lib/ensure-radiant-audit-schema";
 
 const rawPort = process.env["PORT"];
 
@@ -19,6 +20,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 await ensureProgressSchema();
+await ensureRadiantAuditSchema();
 const needsPublicationBackfill = await ensurePublicationSchema();
 await ensureMemberJourneyContent(needsPublicationBackfill);
 

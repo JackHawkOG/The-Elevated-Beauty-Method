@@ -10,7 +10,8 @@ import {
   useListCourses,
   useGetCourse,
   getListCoursesQueryKey,
-  getGetCourseQueryKey
+  getGetCourseQueryKey,
+  useGetRadiantAudit
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,7 @@ export default function Dashboard() {
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
   const { data: enrollments, isLoading: enrollmentsLoading } = useListEnrollments();
   const { data: method, isLoading: methodLoading } = useGetBeautyMethod();
+  const { data: audit, isLoading: auditLoading } = useGetRadiantAudit();
 
   return (
     <AppLayout>
@@ -48,6 +50,22 @@ export default function Dashboard() {
           <h1 className="text-4xl font-serif font-bold text-foreground tracking-tight mb-2">Welcome back.</h1>
           <p className="text-muted-foreground text-lg">Here's what's happening in The Elevated Beauty Method community today.</p>
         </header>
+
+        {!auditLoading && (
+          <section className="rounded-2xl border border-primary/30 bg-card/70 p-6">
+            <h2 className="font-serif text-2xl text-foreground">Your Radiant Audit</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {audit
+                ? `Your reflection is saved. Current routine: ${audit.routineScore}/5 · Your values: ${audit.valuesScore}/5.`
+                : "Begin with the scorecard and check-in worksheet from The Radiant Audit."}
+            </p>
+            <Button asChild className="mt-4 rounded-full">
+              <Link href={audit ? "/radiant-audit/complete" : "/radiant-audit"}>
+                {audit ? "Review your Audit" : "Complete your Audit"}
+              </Link>
+            </Button>
+          </section>
+        )}
 
         {(memberLoading || isElevated) && (
           <AcceleratorDashboard
