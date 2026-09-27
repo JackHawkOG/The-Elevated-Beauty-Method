@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
-import { chromium, type BrowserContext, type Page } from "playwright";
-import { expect as browserExpect } from "playwright/test";
+import { chromium, expect as browserExpect, type BrowserContext, type Page } from "@playwright/test";
 import { clerkClient } from "@clerk/express";
 import { and, eq, isNotNull } from "drizzle-orm";
 import {
