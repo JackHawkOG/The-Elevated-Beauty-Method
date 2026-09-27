@@ -69,6 +69,7 @@ router.post("/announcements", requireAuth, async (req, res): Promise<void> => {
         description: "posted an announcement",
         actorName: authorName,
         entityTitle: inserted.title,
+        sourceAnnouncementId: inserted.id,
       });
     } catch (err) {
       req.log.error({ err, announcementId: inserted.id }, "Announcement activity write failed; rolling back announcement");

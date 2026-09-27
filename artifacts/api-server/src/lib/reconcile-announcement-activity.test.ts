@@ -11,8 +11,8 @@ function post(id: number, title: string, authorName = "Nikki", legacy = true) {
   };
 }
 
-function feed(id: number, entityTitle: string, actorName = "Nikki", createdAt = later) {
-  return { id, entityTitle, actorName, createdAt };
+function feed(id: number, entityTitle: string, actorName = "Nikki", createdAt = later, sourceAnnouncementId: number | null = null) {
+  return { id, entityTitle, actorName, createdAt, sourceAnnouncementId };
 }
 
 test("repairs only uniquely absent legacy titles and recognizes a repeat run", () => {
@@ -53,4 +53,20 @@ test("two announcements without feed entries but with the same title require rev
   const result = planAnnouncementActivityRepair([post(1, "Repeat"), post(2, "Repeat")], []);
   expect(result.missing).toEqual([]);
   expect(result.review.map(row => row.announcementId)).toEqual([1, 2]);
+});
+
+test("a linked feed entry is recognized by ID even after its author label changes", () => {
+  const result = planAnnouncementActivityRepair(
+    [post(1, "Repeat"), post(2, "Repeat"), post(3, "Unique")],
+    [feed(10, "Repeat", "Old author", later, 1), feed(11, "Unique", "Old author", later, 3)],
+  );
+  expect(result.missing).toEqual([]);
+  expect(result.review).toEqual([{ announcementId: 2, activityIds: [10], reason: "repeated announcement title" }]);
+});
+
+test("an old matching feed item is not retroactively linked during repair", () => {
+  const historical = feed(7, "Original");
+  const result = planAnnouncementActivityRepair([post(1, "Original")], [historical]);
+  expect(result).toEqual({ missing: [], review: [] });
+  expect(historical.sourceAnnouncementId).toBeNull();
 });

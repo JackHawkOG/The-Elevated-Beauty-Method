@@ -16,6 +16,7 @@ type ActivityRow = {
   entityTitle: string;
   actorName: string;
   createdAt: Date;
+  sourceAnnouncementId: number | null;
 };
 
 type Review = { announcementId: number; activityIds: number[]; reason: string };
@@ -32,6 +33,7 @@ export function planAnnouncementActivityRepair(
 ): { missing: AnnouncementRow[]; review: Review[] } {
   const byTitle = new Map<string, AnnouncementRow[]>();
   const activityByTitle = new Map<string, ActivityRow[]>();
+  const linkedIds = new Set(activities.flatMap(row => row.sourceAnnouncementId === null ? [] : [row.sourceAnnouncementId]));
   for (const announcement of announcements) {
     const key = titleKey(announcement.title);
     byTitle.set(key, [...(byTitle.get(key) ?? []), announcement]);
@@ -46,6 +48,7 @@ export function planAnnouncementActivityRepair(
   for (const announcement of announcements) {
     // Newer posts have atomic activity writes. Only legacy rows need repair.
     if (announcement.actorId !== null || announcement.requestKey !== null) continue;
+    if (linkedIds.has(announcement.id)) continue;
     const key = titleKey(announcement.title);
     const matches = activityByTitle.get(key) ?? [];
     let reason: string | undefined;
@@ -81,6 +84,7 @@ export async function reconcileAnnouncementActivity(): Promise<void> {
         description: "posted an announcement",
         actorName: announcement.authorName,
         entityTitle: announcement.title,
+        sourceAnnouncementId: announcement.id,
         createdAt: announcement.createdAt,
       });
     }

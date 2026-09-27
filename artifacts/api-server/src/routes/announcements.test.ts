@@ -57,8 +57,8 @@ afterAll(async () => {
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
     if (!started) return;
-    if (ids.length) await db.delete(announcementsTable).where(inArray(announcementsTable.id, ids));
     await db.delete(activityTable).where(inArray(activityTable.entityTitle, [title, failingTitle]));
+    if (ids.length) await db.delete(announcementsTable).where(inArray(announcementsTable.id, ids));
     await db.delete(usersTable).where(eq(usersTable.clerkId, user));
   } finally {
     await pool.end();
@@ -78,9 +78,24 @@ test("retries and simultaneous requests keep one post and one feed item", async 
   const rows = await db.select().from(announcementsTable).where(eq(announcementsTable.requestKey, key));
   ids.push(...rows.filter(row => !ids.includes(row.id)).map(row => row.id));
   expect(rows).toHaveLength(2);
-  expect(await db.select().from(activityTable).where(and(
+  const linked = await db.select().from(activityTable).where(and(
     eq(activityTable.actorName, "Announcement Test"), eq(activityTable.entityTitle, title),
-  ))).toHaveLength(1);
+  ));
+  expect(linked).toHaveLength(1);
+  expect(linked[0].sourceAnnouncementId).toBe(results[0].data.id);
+  const other = rows.find(row => row.id !== results[0].data.id)!;
+  expect(await db.select().from(activityTable).where(eq(activityTable.sourceAnnouncementId, other.id))).toHaveLength(1);
+  // A changed display name or a repeated title cannot affect an explicit source link.
+  await db.update(activityTable).set({ actorName: "Previous display name" }).where(eq(activityTable.id, linked[0].id));
+  expect((await db.select().from(activityTable).where(eq(activityTable.id, linked[0].id)))[0].sourceAnnouncementId)
+    .toBe(results[0].data.id);
+  await expect(db.insert(activityTable).values({
+    type: "announcement", description: "posted an announcement",
+    actorName: "Previous display name", entityTitle: title,
+    sourceAnnouncementId: results[0].data.id!,
+  })).rejects.toThrow();
+  expect(await db.select().from(activityTable).where(eq(activityTable.sourceAnnouncementId, results[0].data.id!)))
+    .toHaveLength(1);
 });
 
 test("an activity write failure rolls back the post and permits a clean retry", async () => {
@@ -98,7 +113,9 @@ test("an activity write failure rolls back the post and permits a clean retry", 
   const retried = await post(key, { title: failingTitle, body: "An update" });
   expect(retried.status).toBe(201);
   ids.push(retried.data.id!);
-  expect(await db.select().from(activityTable).where(and(
+  const linked = await db.select().from(activityTable).where(and(
     eq(activityTable.actorName, "Announcement Test"), eq(activityTable.entityTitle, failingTitle),
-  ))).toHaveLength(1);
+  ));
+  expect(linked).toHaveLength(1);
+  expect(linked[0].sourceAnnouncementId).toBe(retried.data.id);
 });

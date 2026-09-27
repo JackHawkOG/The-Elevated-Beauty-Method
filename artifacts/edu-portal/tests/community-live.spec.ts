@@ -124,11 +124,15 @@ test("a lost response retries one signed-in post; editing a failed draft starts 
   } finally {
     if (!page.isClosed()) await page.unrouteAll({ behavior: "ignoreErrors" });
     if (userId) {
-      const [{ db, announcementsTable, activityTable, usersTable, pool }, { eq, inArray }] =
+      const [{ db, announcementsTable, activityTable, usersTable, pool }, { eq, inArray, or }] =
         await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
       try {
+        const posts = await db.select({ id: announcementsTable.id }).from(announcementsTable)
+          .where(eq(announcementsTable.actorId, userId));
+        await db.delete(activityTable).where(posts.length
+          ? or(inArray(activityTable.sourceAnnouncementId, posts.map(post => post.id)), inArray(activityTable.entityTitle, titles))
+          : inArray(activityTable.entityTitle, titles));
         await db.delete(announcementsTable).where(eq(announcementsTable.actorId, userId));
-        await db.delete(activityTable).where(inArray(activityTable.entityTitle, titles));
         await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
       } finally {
         try {
