@@ -11,11 +11,14 @@ const state = vi.hoisted(() => ({
 vi.mock("@workspace/api-client-react", () => ({
   useGetMembershipOffer: () => ({ data: state.offer, isLoading: state.isLoading, isError: state.isError }),
   useGetMyMembership: () => ({ data: { membership: null } }),
+  useGetConfirmedMembershipCounts: () => ({ data: { founding: 0, standard: 0 } }),
   useCreateMembershipCheckout: () => ({ isPending: false }),
   useCreateMembershipPortal: () => ({ isPending: false }),
   getGetMembershipOfferQueryKey: () => ["membership", "offer"],
   getGetMyMembershipQueryKey: () => ["membership", "me"],
+  getGetConfirmedMembershipCountsQueryKey: () => ["membership", "confirmed-counts"],
 }));
+vi.mock("@clerk/react", () => ({ useUser: () => ({ user: null }) }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
 vi.mock("@/components/layout", () => ({ AppLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 

@@ -202,7 +202,7 @@ test("members can remove earlier submissions without deleting the latest or anot
     researchTime: "one hour",
   };
   await request("PUT", answers, otherAccount);
-  const otherHistory = (await request("GET", undefined, otherAccount, "/history")).data;
+  const otherHistory = (await request("GET", undefined, otherAccount, "/history")).data as unknown as Array<{ id: number }>;
   expect(otherHistory).toHaveLength(1);
   const otherId = otherHistory[0].id;
 

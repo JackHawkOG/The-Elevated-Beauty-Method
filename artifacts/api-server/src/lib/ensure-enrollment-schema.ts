@@ -3,8 +3,8 @@ import { sql } from "drizzle-orm";
 
 // Keep in sync with lib/db/migrations/0005_unique_enrollments.sql. Run before
 // accepting requests so old databases are repaired before concurrent inserts.
-export async function ensureEnrollmentSchema(): Promise<void> {
-  await db.transaction(async (tx) => {
+export async function ensureEnrollmentSchema(database: Pick<typeof db, "transaction"> = db): Promise<void> {
+  await database.transaction(async (tx) => {
     await tx.execute(sql`LOCK TABLE "enrollments" IN SHARE ROW EXCLUSIVE MODE`);
     await tx.execute(sql`
       WITH ranked AS (
