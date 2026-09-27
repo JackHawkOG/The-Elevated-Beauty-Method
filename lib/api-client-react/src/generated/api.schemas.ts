@@ -347,6 +347,49 @@ export interface UserProfileUpdate {
   bio?: string;
 }
 
+export interface RadiantAuditDraftDiscarded {
+  discardedAt: string;
+}
+
+export type RadiantAuditDraftRoutineChecksItem = typeof RadiantAuditDraftRoutineChecksItem[keyof typeof RadiantAuditDraftRoutineChecksItem];
+
+
+export const RadiantAuditDraftRoutineChecksItem = {
+  'skincare-consistency': 'skincare-consistency',
+  'makeup-application-confidence': 'makeup-application-confidence',
+  'product-spending': 'product-spending',
+  'trend-chasing-behavior': 'trend-chasing-behavior',
+  'time-spent-on-beauty-daily': 'time-spent-on-beauty-daily',
+} as const;
+
+export type RadiantAuditDraftValuesChecksItem = typeof RadiantAuditDraftValuesChecksItem[keyof typeof RadiantAuditDraftValuesChecksItem];
+
+
+export const RadiantAuditDraftValuesChecksItem = {
+  'quality-over-price': 'quality-over-price',
+  'one-method-mastered': 'one-method-mastered',
+  'professional-results': 'professional-results',
+  'authentic-expression': 'authentic-expression',
+  'lasting-investment': 'lasting-investment',
+} as const;
+
+export interface RadiantAuditDraft {
+  /** @maxItems 5 */
+  routineChecks: RadiantAuditDraftRoutineChecksItem[];
+  /** @maxItems 5 */
+  valuesChecks: RadiantAuditDraftValuesChecksItem[];
+  /** @maxLength 1000 */
+  beautyTrend: string;
+  /** @maxLength 1000 */
+  masteryGoal: string;
+  /** @maxLength 1000 */
+  researchTime: string;
+}
+
+export type RadiantAuditStoredDraft = RadiantAuditDraft & {
+  updatedAt: string;
+};
+
 export type RadiantAuditInputRoutineChecksItem = typeof RadiantAuditInputRoutineChecksItem[keyof typeof RadiantAuditInputRoutineChecksItem];
 
 

@@ -1,11 +1,15 @@
 import { Router } from "express";
 import { isDeepStrictEqual } from "node:util";
-import { db, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable } from "@workspace/db";
-import { and, desc, eq } from "drizzle-orm";
-import { DeleteRadiantAuditHistoryEntryParams, GetRadiantAuditResponse, GetRadiantAuditHistoryResponse, SaveRadiantAuditBody, SaveRadiantAuditResponse } from "@workspace/api-zod";
+import { db, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditDraftsTable } from "@workspace/db";
+import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
+import { DeleteRadiantAuditHistoryEntryParams, GetRadiantAuditResponse, GetRadiantAuditHistoryResponse, GetRadiantAuditDraftResponse, SaveRadiantAuditDraftBody, SaveRadiantAuditDraftResponse, SaveRadiantAuditBody, SaveRadiantAuditResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 
 const router = Router();
+const draftLifetimeMs = 24 * 60 * 60 * 1000;
+function draftOwnerMatches(req: { userId?: string; get(name: string): string | undefined }): boolean {
+  return !!req.userId && req.get("x-audit-draft-owner") === req.userId;
+}
 
 function response(audit: typeof radiantAuditsTable.$inferSelect) {
   return {
@@ -24,6 +28,72 @@ router.get("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req,
   const [audit] = await db.select().from(radiantAuditsTable)
     .where(eq(radiantAuditsTable.clerkId, req.userId!)).limit(1);
   res.json(GetRadiantAuditResponse.parse(audit ? response(audit) : null));
+});
+
+router.get("/users/me/radiant-audit/draft", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  const [draft] = await db.select().from(radiantAuditDraftsTable)
+    .where(and(eq(radiantAuditDraftsTable.clerkId, req.userId!), gt(radiantAuditDraftsTable.expiresAt, new Date())));
+  res.json(GetRadiantAuditDraftResponse.parse(draft
+    ? ("discardedAt" in (draft.answers as object)
+      ? draft.answers : { ...(draft.answers as object), updatedAt: draft.updatedAt.toISOString() })
+    : null));
+});
+
+router.put("/users/me/radiant-audit/draft", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  if (!draftOwnerMatches(req)) {
+    res.status(409).json({ error: "The signed-in account changed. Reload your Audit." });
+    return;
+  }
+  const parsed = SaveRadiantAuditDraftBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Please review your draft answers." });
+    return;
+  }
+  const saved = await db.transaction(async tx => {
+    // Serialize a draft write with submission so a pre-submission editor cannot
+    // resurrect answers after another device commits the completed Audit.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${req.userId!}))`);
+    const [current] = await tx.select({ completedAt: radiantAuditsTable.completedAt })
+      .from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, req.userId!));
+    if (req.get("x-audit-draft-baseline") !== (current?.completedAt.toISOString() ?? "none")) return false;
+    await tx.delete(radiantAuditDraftsTable).where(lte(radiantAuditDraftsTable.expiresAt, new Date()));
+    const now = new Date();
+    await tx.insert(radiantAuditDraftsTable).values({
+      clerkId: req.userId!,
+      answers: parsed.data,
+      expiresAt: new Date(now.getTime() + draftLifetimeMs),
+      updatedAt: now,
+    }).onConflictDoUpdate({
+      target: radiantAuditDraftsTable.clerkId,
+      set: { answers: parsed.data, expiresAt: new Date(now.getTime() + draftLifetimeMs), updatedAt: now },
+    });
+    return true;
+  });
+  if (!saved) {
+    res.status(409).json({ error: "Your Audit was saved on another device. Reload before editing a new draft." });
+    return;
+  }
+  res.json(SaveRadiantAuditDraftResponse.parse(parsed.data));
+});
+
+router.delete("/users/me/radiant-audit/draft", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  if (!draftOwnerMatches(req)) {
+    res.status(409).json({ error: "The signed-in account changed. Reload your Audit." });
+    return;
+  }
+  // Retain only a short-lived deletion marker, not the written answers.
+  // Other browsers use it to reject their older local copies.
+  const discardedAt = new Date();
+  await db.insert(radiantAuditDraftsTable).values({
+    clerkId: req.userId!,
+    answers: { discardedAt: discardedAt.toISOString() },
+    expiresAt: new Date(discardedAt.getTime() + draftLifetimeMs),
+    updatedAt: discardedAt,
+  }).onConflictDoUpdate({
+    target: radiantAuditDraftsTable.clerkId,
+    set: { answers: { discardedAt: discardedAt.toISOString() }, expiresAt: new Date(discardedAt.getTime() + draftLifetimeMs), updatedAt: discardedAt },
+  });
+  res.sendStatus(204);
 });
 
 router.delete("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
@@ -115,10 +185,10 @@ router.put("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req,
   // Inserting first serializes simultaneous first saves via the account PK.
   // Lock the current row before archiving it so overlapping retakes cannot lose a snapshot.
   const outcome = await db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${req.userId!}))`);
     if (submissionId) {
       // The unique key serializes concurrent attempts, including an attempt whose
-      // first response was lost after commit. After seven days the receipt is
-      // purged; reusing its ID then behaves like a new save (including a retake).
+      // first response was lost after commit.
       const [reserved] = await tx.insert(radiantAuditSubmissionsTable)
         .values({ clerkId: req.userId!, submissionId, answers })
         .onConflictDoNothing()
@@ -131,6 +201,7 @@ router.put("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req,
           ));
         if (!existing?.result) throw new Error("Committed Audit submission has no result");
         if (!isDeepStrictEqual(existing.answers, answers)) return { conflict: true as const };
+        await tx.delete(radiantAuditDraftsTable).where(eq(radiantAuditDraftsTable.clerkId, req.userId!));
         return { result: SaveRadiantAuditResponse.parse(existing.result) };
       }
     }
@@ -169,6 +240,7 @@ router.put("/users/me/radiant-audit", requireAuth, jitProvisionUser, async (req,
           eq(radiantAuditSubmissionsTable.submissionId, submissionId),
         ));
     }
+    await tx.delete(radiantAuditDraftsTable).where(eq(radiantAuditDraftsTable.clerkId, req.userId!));
     return { result };
   });
   if ("conflict" in outcome) {

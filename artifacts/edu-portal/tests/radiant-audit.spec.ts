@@ -50,6 +50,16 @@ const originalEmail = "original@example.invalid";
 const correctedEmail = "corrected@example.invalid";
 const signedInDraftKey = "tebm:radiant-audit:signed-in-draft";
 
+test.beforeEach(async ({ page }) => {
+  // Default draft API for tests concerned with other Audit flows.
+  await page.route("**/api/users/me/radiant-audit/draft", route => {
+    const method = route.request().method();
+    if (method === "GET") return route.fulfill({ json: null });
+    if (method === "DELETE") return route.fulfill({ status: 204 });
+    return route.fulfill({ json: route.request().postDataJSON() });
+  });
+});
+
 async function stageVisitorAnswers(page: Page) {
   await page.goto("/tests/audit-harness.html");
   await page.getByLabel("Skincare consistency").check();
@@ -403,7 +413,7 @@ test("failed signed-in save preserves answers and checks until a successful retr
   await page.goto("/tests/audit-harness.html");
   await expect(page.locator("#mastery-goal")).toHaveValue("");
   await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
-  // Even identical answers are a new submission after the earlier one succeeds.
+  // An intentional new submission uses a fresh ID, even for identical answers.
   await page.getByLabel("Skincare consistency").check();
   await page.getByLabel("Quality over price").check();
   await page.getByLabel("Professional results").check();
@@ -441,6 +451,99 @@ test("a signed-in draft never appears for another account and can be discarded",
   await expect(page.locator("#mastery-goal")).toHaveValue("");
 });
 
+test("an unfinished Audit continues in a separate browser, stays private, and disappears after saving", async ({ page, browser }) => {
+  const drafts = new Map<string, Answers>();
+  const draftUpdated = new Map<string, string>();
+  const completed = new Map<string, Audit>();
+  const discards = new Map<string, string>();
+  const handler = async (route: import("@playwright/test").Route) => {
+    const request = route.request();
+    const account = request.headers().authorization?.replace("Bearer ", "");
+    if (!account) return route.fulfill({ status: 401, json: { error: "Sign in required" } });
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/draft")) {
+      if (request.method() === "GET") return route.fulfill({ json: drafts.has(account)
+        ? { ...drafts.get(account)!, updatedAt: draftUpdated.get(account)! } : (
+        discards.has(account) ? { discardedAt: discards.get(account) } : null
+      ) });
+      if (request.headers()["x-audit-draft-owner"] !== account) return route.fulfill({ status: 409 });
+      if (request.method() === "DELETE") {
+        drafts.delete(account);
+        discards.set(account, new Date().toISOString());
+        return route.fulfill({ status: 204 });
+      }
+      const answers = request.postDataJSON() as Answers;
+      discards.delete(account);
+      drafts.set(account, answers);
+      draftUpdated.set(account, new Date().toISOString());
+      return route.fulfill({ json: answers });
+    }
+    if (request.method() === "PUT") {
+      drafts.delete(account);
+      discards.delete(account);
+      const { submissionId: _id, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
+      const audit = { ...answers, routineScore: 1, valuesScore: 1, completedAt: new Date().toISOString() };
+      completed.set(account, audit);
+      return route.fulfill({ json: {
+        audit,
+        completionKind: "first_time",
+      } });
+    }
+    return route.fulfill({ json: path.endsWith("/history") ? [] : completed.get(account) ?? null });
+  };
+  await page.route("**/api/users/me/radiant-audit**", handler);
+  await signInAs(page, "member-a");
+  await page.getByLabel("Skincare consistency").check();
+  await page.locator("#beauty-trend").fill("private cross-device trend");
+  await expect.poll(() => drafts.get("member-a")?.beautyTrend).toBe("private cross-device trend");
+  // A queued write created for A must not be accepted if the session changes to B.
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "member-b"));
+  const rejected = page.waitForResponse(response =>
+    response.url().endsWith("/api/users/me/radiant-audit/draft") &&
+    response.request().method() === "PUT" && response.status() === 409,
+  );
+  await page.locator("#mastery-goal").fill("private pending from member A");
+  await rejected;
+  expect(drafts.has("member-b")).toBe(false);
+  await page.reload();
+  await expect(page.locator("body")).not.toContainText("private pending from member A");
+  await signInAs(page, "member-a");
+
+  const otherBrowser = await browser.newContext({ baseURL: "http://127.0.0.1:4179" });
+  try {
+    const secondPage = await otherBrowser.newPage();
+    await secondPage.route("**/api/users/me/radiant-audit**", handler);
+    await signInAs(secondPage, "member-b");
+    await expect(secondPage.locator("#beauty-trend")).toHaveValue("");
+    await expect(secondPage.locator("body")).not.toContainText("private cross-device trend");
+    await signInAs(secondPage, "member-a");
+    await expect(secondPage.locator("#beauty-trend")).toHaveValue("private cross-device trend");
+    await expect(secondPage.getByLabel("Skincare consistency")).toBeChecked();
+    await secondPage.locator("#beauty-trend").fill("newer answer on device two");
+    await expect.poll(() => drafts.get("member-a")?.beautyTrend).toBe("newer answer on device two");
+    await page.reload();
+    await expect(page.locator("#beauty-trend")).toHaveValue("newer answer on device two");
+    await secondPage.getByLabel("Quality over price").check();
+    await secondPage.locator("#mastery-goal").fill("my goal");
+    await secondPage.locator("#research-time").fill("one hour");
+    await secondPage.getByRole("button", { name: "Save my Audit" }).click();
+    await expect(secondPage.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    expect(drafts.has("member-a")).toBe(false);
+    await page.reload();
+    await expect(page.locator("#beauty-trend")).toHaveValue("");
+    await page.locator("#beauty-trend").fill("discarded from another device");
+    await expect.poll(() => drafts.get("member-a")?.beautyTrend).toBe("discarded from another device");
+    await signInAs(secondPage, "member-a");
+    await expect(secondPage.locator("#beauty-trend")).toHaveValue("discarded from another device");
+    await secondPage.getByRole("button", { name: "Discard draft" }).click();
+    await expect(secondPage.locator("#beauty-trend")).toHaveValue("");
+    await page.reload();
+    await expect(page.locator("#beauty-trend")).toHaveValue("");
+  } finally {
+    await otherBrowser.close();
+  }
+});
+
 for (const scenario of ["expired", "unreadable JSON", "invalid answers"] as const) {
   test(`${scenario} signed-in drafts are removed without restoring answers, and a new draft remains editable`, async ({ page }) => {
     await signInAs(page, "member-a");
@@ -457,7 +560,6 @@ for (const scenario of ["expired", "unreadable JSON", "invalid answers"] as cons
       const record = { owner: "member-a", expiresAt: Date.now() + 60_000, answers };
       if (scenario === "expired") record.expiresAt = Date.now() - 1;
       if (scenario === "invalid answers") {
-        // A parseable record with a broken field must not partially restore the other answers.
         (record.answers as { valuesChecks: unknown }).valuesChecks = "quality-over-price";
       }
       localStorage.setItem(key, scenario === "unreadable JSON"

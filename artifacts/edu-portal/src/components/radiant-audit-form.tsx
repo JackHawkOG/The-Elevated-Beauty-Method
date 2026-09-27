@@ -473,7 +473,7 @@ export function RadiantAuditForm({
             )}
             {onDiscardDraft && (
               <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <span>Your unfinished answers stay in this browser for up to 24 hours. Avoid shared devices.</span>
+                 <span>Your unfinished answers are saved privately to your account for up to 24 hours and can be continued on another device. This browser also keeps a temporary copy; avoid shared devices.</span>
                 <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={onDiscardDraft} data-testid="button-discard-audit-draft">
                   Discard draft
                 </Button>

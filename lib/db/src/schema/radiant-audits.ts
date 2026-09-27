@@ -17,6 +17,12 @@ export const insertRadiantAuditSchema = createInsertSchema(radiantAuditsTable).o
 export type InsertRadiantAudit = z.infer<typeof insertRadiantAuditSchema>;
 export type RadiantAudit = typeof radiantAuditsTable.$inferSelect;
 
+export const radiantAuditDraftsTable = pgTable("radiant_audit_drafts", {
+  clerkId: text("clerk_id").primaryKey().references(() => usersTable.clerkId),
+  answers: jsonb("answers").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("radiant_audit_drafts_expiry_idx").on(table.expiresAt)]);
 export const radiantAuditHistoryTable = pgTable("radiant_audit_history", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   clerkId: text("clerk_id").notNull().references(() => usersTable.clerkId),

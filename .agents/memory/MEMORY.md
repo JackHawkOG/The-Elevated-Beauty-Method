@@ -15,3 +15,4 @@
 - [Workspace CLI dependency boundary](workspace-cli-dependency-boundary.md) — a root script may not see package-local executables or imports; invoke tools from their owning workspace.
 - [Workspace command shims](workspace-command-shims.md) — generated package binaries can lack executable bits; distinguish launcher permissions from failing tests.
 - [Pooled PostgreSQL temp fixtures](pooled-postgres-temp-fixtures.md) — session-local tables and functions survive pool release; clean both before the next test borrows the client.
+- [Nullable JSON API responses](nullable-json-api-responses.md) — use explicit JSON response mode for nullable direct client calls; automatic inference can return the string "null".

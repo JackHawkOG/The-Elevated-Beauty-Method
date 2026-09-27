@@ -849,6 +849,84 @@ export const SaveRadiantAuditResponse = zod.object({
 
 
 /**
+ * @summary Get the signed-in member's unexpired unfinished Audit
+ */
+export const getRadiantAuditDraftResponseOneOneRoutineChecksMax = 5;
+
+export const getRadiantAuditDraftResponseOneOneValuesChecksMax = 5;
+
+export const getRadiantAuditDraftResponseOneOneBeautyTrendMax = 1000;
+
+export const getRadiantAuditDraftResponseOneOneMasteryGoalMax = 1000;
+
+export const getRadiantAuditDraftResponseOneOneResearchTimeMax = 1000;
+
+
+
+export const GetRadiantAuditDraftResponse = zod.union([zod.object({
+  "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditDraftResponseOneOneRoutineChecksMax),
+  "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(getRadiantAuditDraftResponseOneOneValuesChecksMax),
+  "beautyTrend": zod.string().max(getRadiantAuditDraftResponseOneOneBeautyTrendMax),
+  "masteryGoal": zod.string().max(getRadiantAuditDraftResponseOneOneMasteryGoalMax),
+  "researchTime": zod.string().max(getRadiantAuditDraftResponseOneOneResearchTimeMax)
+}).and(zod.object({
+  "updatedAt": zod.coerce.date()
+})),zod.object({
+  "discardedAt": zod.coerce.date()
+}),zod.null()])
+
+
+/**
+ * @summary Replace the signed-in member's unfinished Audit draft
+ */
+export const saveRadiantAuditDraftBodyRoutineChecksMax = 5;
+
+export const saveRadiantAuditDraftBodyValuesChecksMax = 5;
+
+export const saveRadiantAuditDraftBodyBeautyTrendMax = 1000;
+
+export const saveRadiantAuditDraftBodyMasteryGoalMax = 1000;
+
+export const saveRadiantAuditDraftBodyResearchTimeMax = 1000;
+
+
+
+export const SaveRadiantAuditDraftBody = zod.object({
+  "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditDraftBodyRoutineChecksMax),
+  "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditDraftBodyValuesChecksMax),
+  "beautyTrend": zod.string().max(saveRadiantAuditDraftBodyBeautyTrendMax),
+  "masteryGoal": zod.string().max(saveRadiantAuditDraftBodyMasteryGoalMax),
+  "researchTime": zod.string().max(saveRadiantAuditDraftBodyResearchTimeMax)
+})
+
+export const saveRadiantAuditDraftResponseRoutineChecksMax = 5;
+
+export const saveRadiantAuditDraftResponseValuesChecksMax = 5;
+
+export const saveRadiantAuditDraftResponseBeautyTrendMax = 1000;
+
+export const saveRadiantAuditDraftResponseMasteryGoalMax = 1000;
+
+export const saveRadiantAuditDraftResponseResearchTimeMax = 1000;
+
+
+
+export const SaveRadiantAuditDraftResponse = zod.object({
+  "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditDraftResponseRoutineChecksMax),
+  "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditDraftResponseValuesChecksMax),
+  "beautyTrend": zod.string().max(saveRadiantAuditDraftResponseBeautyTrendMax),
+  "masteryGoal": zod.string().max(saveRadiantAuditDraftResponseMasteryGoalMax),
+  "researchTime": zod.string().max(saveRadiantAuditDraftResponseResearchTimeMax)
+})
+
+
+/**
+ * @summary Discard the signed-in member's unfinished Audit draft
+ */
+export const DeleteRadiantAuditDraftResponse = zod.void()
+
+
+/**
  * @summary List the signed-in member's earlier Radiant Audit submissions, newest first
  */
 export const getRadiantAuditHistoryResponseOneOneSubmissionIdMin = 36;

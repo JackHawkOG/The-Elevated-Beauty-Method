@@ -52,6 +52,16 @@ export function readAuditDraft(accountId: string): RadiantAuditSubmission | null
   }
 }
 
+export function auditDraftWrittenAt(accountId: string): number | null {
+  if (!readAuditDraft(accountId)) return null;
+  try {
+    const record = JSON.parse(window.localStorage.getItem(key)!) as { expiresAt: number };
+    return record.expiresAt - lifetime;
+  } catch {
+    return null;
+  }
+}
+
 export function writeAuditDraft(accountId: string, answers: RadiantAuditSubmission): void {
   const existing = readAuditDraft(accountId);
   const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown } : null;

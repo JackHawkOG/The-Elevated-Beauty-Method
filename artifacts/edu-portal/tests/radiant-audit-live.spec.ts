@@ -57,10 +57,11 @@ async function cleanUpAccounts(client: ReturnType<typeof createClerkClient>, cre
   if (!created.length) return;
   // The environment guard runs before users are created. Delete only our own
   // disposable identities and their development rows, even on assertion failure.
-  const [{ db, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
+  const [{ db, radiantAuditDraftsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable, usersTable }, { eq }] =
     await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
   try {
     for (const id of created) {
+      await db.delete(radiantAuditDraftsTable).where(eq(radiantAuditDraftsTable.clerkId, id));
       await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, id));
       await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, id));
       await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, id));
@@ -130,11 +131,10 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   const created: string[] = [];
   try {
     await setupClerkTestingToken({ page });
-    for (const account of accounts) {
-      const user = await client.users.createUser({
-        emailAddress: [account.email],
-        skipPasswordRequirement: true,
-      });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
       created.push(user.id);
     }
     await signIn(page, accounts[0].email);
@@ -180,10 +180,10 @@ test("a delayed Audit response from the previous member never appears after swit
 
   try {
     for (const account of [a, b]) {
-      const user = await client.users.createUser({
-        emailAddress: [account.email],
-        skipPasswordRequirement: true,
-      });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
       created.push(user.id);
     }
     await signIn(page, a.email);
@@ -255,11 +255,10 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   const created: string[] = [];
   try {
     await setupClerkTestingToken({ page });
-    for (const email of [wrongEmail, stagedEmail]) {
-      const user = await client.users.createUser({
-        emailAddress: [email],
-        skipPasswordRequirement: true,
-      });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+    });
       created.push(user.id);
       expect(user.primaryEmailAddress?.verification.status).toBe("verified");
     }

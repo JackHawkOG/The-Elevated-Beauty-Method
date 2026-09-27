@@ -717,6 +717,54 @@ paths:
         "401":
           description: Unauthorized
 
+  /users/me/radiant-audit/draft:
+    get:
+      operationId: getRadiantAuditDraft
+      tags: [method]
+      summary: Get the signed-in member's unexpired unfinished Audit
+      responses:
+        "200":
+          description: Draft or null
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: "#/components/schemas/RadiantAuditStoredDraft"
+                  - $ref: "#/components/schemas/RadiantAuditDraftDiscarded"
+                  - type: "null"
+        "401":
+          description: Unauthorized
+    put:
+      operationId: saveRadiantAuditDraft
+      tags: [method]
+      summary: Replace the signed-in member's unfinished Audit draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RadiantAuditDraft"
+      responses:
+        "200":
+          description: Draft saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RadiantAuditDraft"
+        "400":
+          description: Invalid draft
+        "401":
+          description: Unauthorized
+    delete:
+      operationId: deleteRadiantAuditDraft
+      tags: [method]
+      summary: Discard the signed-in member's unfinished Audit draft
+      responses:
+        "204":
+          description: Draft discarded
+        "401":
+          description: Unauthorized
+
   /users/me/radiant-audit/history:
     get:
       operationId: getRadiantAuditHistory
@@ -1178,6 +1226,52 @@ components:
           type: string
         bio:
           type: string
+
+    RadiantAuditDraftDiscarded:
+      type: object
+      required: [discardedAt]
+      properties:
+        discardedAt:
+          type: string
+          format: date-time
+
+    RadiantAuditStoredDraft:
+      allOf:
+        - $ref: "#/components/schemas/RadiantAuditDraft"
+        - type: object
+          required: [updatedAt]
+          properties:
+            updatedAt:
+              type: string
+              format: date-time
+
+    RadiantAuditDraft:
+      type: object
+      required: [routineChecks, valuesChecks, beautyTrend, masteryGoal, researchTime]
+      properties:
+        routineChecks:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [skincare-consistency, makeup-application-confidence, product-spending, trend-chasing-behavior, time-spent-on-beauty-daily]
+        valuesChecks:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            type: string
+            enum: [quality-over-price, one-method-mastered, professional-results, authentic-expression, lasting-investment]
+        beautyTrend:
+          type: string
+          maxLength: 1000
+        masteryGoal:
+          type: string
+          maxLength: 1000
+        researchTime:
+          type: string
+          maxLength: 1000
 
     RadiantAuditInput:
       type: object

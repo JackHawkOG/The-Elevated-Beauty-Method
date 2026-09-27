@@ -3,12 +3,16 @@ import express from "express";
 import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
-import { db, pool, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, usersTable } from "@workspace/db";
+import { db, pool, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditDraftsTable, usersTable } from "@workspace/db";
 import { AUDIT_RECEIPT_RETENTION_MS, ensureRadiantAuditSchema, purgeExpiredRadiantAuditReceipts } from "../lib/ensure-radiant-audit-schema";
 import { requireDevelopmentDatabase } from "./test-development-database";
 
 vi.mock("../middlewares/requireAuth", () => ({
   requireAuth: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
+    if (!req.header("x-test-user")) {
+      _res.status(401).json({ error: "Sign in required" });
+      return;
+    }
     req.userId = req.header("x-test-user");
     next();
   },
@@ -21,6 +25,7 @@ vi.mock("../middlewares/requireAuth", () => ({
 const account = `audit-test-${randomUUID()}`;
 const otherAccount = `audit-test-${randomUUID()}`;
 const retryAccount = `audit-test-${randomUUID()}`;
+const draftAccount = `audit-test-${randomUUID()}`;
 const expiryAccount = `audit-test-${randomUUID()}`;
 let server: Server;
 let baseUrl: string;
@@ -29,7 +34,11 @@ let databaseSafe = false;
 async function request(method: string, body?: object, user = account, path = "") {
   const response = await fetch(`${baseUrl}/users/me/radiant-audit${path}`, {
     method,
-    headers: { "x-test-user": user, ...(body ? { "content-type": "application/json" } : {}) },
+    headers: {
+      "x-test-user": user,
+      ...(path === "/draft" ? { "x-audit-draft-owner": user } : {}),
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   return { status: response.status, data: response.status === 204 ? {} : await response.json() as Record<string, unknown> };
@@ -63,6 +72,11 @@ beforeAll(async () => {
     email: `${retryAccount}@example.invalid`,
   });
   await db.insert(usersTable).values({
+    clerkId: draftAccount,
+    displayName: "Draft audit test",
+    email: `${draftAccount}@example.invalid`,
+  });
+  await db.insert(usersTable).values({
     clerkId: expiryAccount,
     displayName: "Expiry audit test",
     email: `${expiryAccount}@example.invalid`,
@@ -73,7 +87,8 @@ afterAll(async () => {
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     if (!databaseSafe) return;
-    for (const user of [account, otherAccount, retryAccount, expiryAccount]) {
+    for (const user of [account, otherAccount, retryAccount, draftAccount, expiryAccount]) {
+      await db.delete(radiantAuditDraftsTable).where(eq(radiantAuditDraftsTable.clerkId, user));
       await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, user));
       await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, user));
       await db.delete(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user));
@@ -82,6 +97,52 @@ afterAll(async () => {
   } finally {
     await pool.end();
   }
+});
+
+test("unfinished drafts belong only to their owner, expire, and are removed on submit", async () => {
+  const draft = {
+    routineChecks: ["skincare-consistency"],
+    valuesChecks: [],
+    beautyTrend: "private unfinished answer",
+    masteryGoal: "",
+    researchTime: "",
+  };
+  const unauthenticated = await fetch(`${baseUrl}/users/me/radiant-audit/draft`);
+  expect(unauthenticated.status).toBe(401);
+  expect((await request("PUT", draft, draftAccount, "/draft")).status).toBe(200);
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toMatchObject(draft);
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toHaveProperty("updatedAt");
+  expect((await request("GET", undefined, otherAccount, "/draft")).data).toBeNull();
+  expect((await request("PUT", { ...draft, beautyTrend: "other member" }, otherAccount, "/draft")).status).toBe(200);
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toMatchObject(draft);
+  expect((await request("DELETE", undefined, otherAccount, "/draft")).status).toBe(204);
+  expect((await request("GET", undefined, otherAccount, "/draft")).data).toHaveProperty("discardedAt");
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toMatchObject(draft);
+  for (const method of ["PUT", "DELETE"]) {
+    const stolen = await fetch(`${baseUrl}/users/me/radiant-audit/draft`, {
+      method,
+      headers: { "x-test-user": otherAccount, "x-audit-draft-owner": draftAccount, "content-type": "application/json" },
+      body: method === "PUT" ? JSON.stringify(draft) : undefined,
+    });
+    expect(stolen.status).toBe(409);
+  }
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toMatchObject(draft);
+  expect((await request("PUT", { ...draft, routineChecks: ["invalid"] }, draftAccount, "/draft")).status).toBe(400);
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toMatchObject(draft);
+  await db.update(radiantAuditDraftsTable).set({ expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(radiantAuditDraftsTable.clerkId, draftAccount));
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toBeNull();
+  await request("PUT", draft, draftAccount, "/draft");
+  const complete = { ...draft, masteryGoal: "goal", researchTime: "one hour" };
+  expect((await request("PUT", { ...complete, submissionId: randomUUID() }, draftAccount)).status).toBe(200);
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toBeNull();
+  await request("PUT", draft, draftAccount, "/draft");
+  expect((await request("DELETE", undefined, draftAccount, "/draft")).status).toBe(204);
+  expect((await request("GET", undefined, draftAccount, "/draft")).data).toHaveProperty("discardedAt");
+  expect(await db.select().from(radiantAuditDraftsTable)
+    .where(eq(radiantAuditDraftsTable.clerkId, draftAccount))).toMatchObject([
+      { answers: { discardedAt: expect.any(String) } },
+    ]);
 });
 
 test("a committed save with a lost response can be retried without creating history", async () => {
@@ -108,9 +169,9 @@ test("a committed save with a lost response can be retried without creating hist
 
   const secondId = randomUUID();
   const secondAnswers = { ...answers, masteryGoal: "new goal" };
-  const retake = await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount);
+  const retake = await request("PUT", { ...answers, masteryGoal: "updated goal" });
   expect(retake.data).toMatchObject({ completionKind: "retake", audit: secondAnswers });
-  const history = (await request("GET", undefined, retryAccount, "/history")).data as unknown as Array<Record<string, unknown>>;
+  const history = (await request("GET", undefined, account, "/history")).data as unknown as Array<Record<string, unknown>>;
   expect(history).toHaveLength(1);
   expect((await request("PUT", { ...secondAnswers, submissionId: secondId }, retryAccount)).data).toEqual(retake.data);
   expect((await request("PUT", { ...answers, submissionId: firstId }, retryAccount)).data).toEqual(firstRetry.data);
@@ -151,7 +212,7 @@ test("expired receipts are purged without deleting Audits or history; their IDs 
   const newer = await request("PUT", { ...answers, masteryGoal: "new goal", submissionId: recentId }, expiryAccount);
   expect(newer.status).toBe(200);
   const current = (await request("GET", undefined, expiryAccount)).data;
-  const history = (await request("GET", undefined, expiryAccount, "/history")).data;
+  const history = (await request("GET", undefined, account, "/history")).data as unknown as Array<Record<string, unknown>>;
 
   const now = new Date();
   await db.update(radiantAuditSubmissionsTable)
@@ -169,8 +230,7 @@ test("expired receipts are purged without deleting Audits or history; their IDs 
   expect((await request("PUT", { ...answers, masteryGoal: "new goal", submissionId: recentId }, expiryAccount)).data)
     .toEqual(newer.data);
 
-  // No tombstone is retained: the expired ID is no longer recognizable as a
-  // replay, so the same answers are a new retake with one more history entry.
+  // Once purged, the former ID is no longer a replay and can create a retake.
   const replay = await request("PUT", { ...answers, submissionId: expiredId }, expiryAccount);
   expect(replay.status).toBe(200);
   expect(replay.data).toMatchObject({ completionKind: "retake", audit: answers });

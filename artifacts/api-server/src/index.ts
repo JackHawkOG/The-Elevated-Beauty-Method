@@ -4,7 +4,7 @@ import { ensureMemberJourneyContent } from "./lib/seed-member-journey";
 import { ensureProgressSchema } from "./lib/ensure-progress-schema";
 import { ensureEnrollmentSchema } from "./lib/ensure-enrollment-schema";
 import { ensurePublicationSchema } from "./lib/ensure-publication-schema";
-import { ensureRadiantAuditSchema, startRadiantAuditReceiptCleanup } from "./lib/ensure-radiant-audit-schema";
+import { ensureRadiantAuditSchema, startRadiantAuditReceiptCleanup, startRadiantAuditDraftPruning } from "./lib/ensure-radiant-audit-schema";
 import { ensureMembershipSchema } from "./lib/ensure-membership-schema";
 import { ensureAnnouncementSchema } from "./lib/ensure-announcement-schema";
 import { reconcileAnnouncementActivity } from "./lib/reconcile-announcement-activity";
@@ -53,5 +53,6 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
   startRadiantAuditReceiptCleanup();
+  startRadiantAuditDraftPruning();
   startMembershipReconciliation();
 });

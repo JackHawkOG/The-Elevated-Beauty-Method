@@ -1,6 +1,5 @@
-import { db } from "@workspace/db";
-import { radiantAuditSubmissionsTable } from "@workspace/db";
-import { lt, sql } from "drizzle-orm";
+import { db, radiantAuditDraftsTable, radiantAuditSubmissionsTable } from "@workspace/db";
+import { lt, lte, sql } from "drizzle-orm";
 import { logger } from "./logger";
 
 // Seven days covers delayed reconnects and lost responses without keeping answer
@@ -67,5 +66,25 @@ export async function ensureRadiantAuditSchema(): Promise<void> {
   // grace period on upgrade instead of deleting them immediately.
   await db.execute(sql`ALTER TABLE "radiant_audit_submissions" ADD COLUMN IF NOT EXISTS "created_at" timestamptz NOT NULL DEFAULT now()`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "radiant_audit_submissions_created_at_idx" ON "radiant_audit_submissions" ("created_at")`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "radiant_audit_drafts" (
+      "clerk_id" text PRIMARY KEY REFERENCES "users"("clerk_id"),
+      "answers" jsonb NOT NULL,
+      "expires_at" timestamptz NOT NULL,
+      "updated_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await db.execute(sql`ALTER TABLE "radiant_audit_drafts" ADD COLUMN IF NOT EXISTS "updated_at" timestamptz NOT NULL DEFAULT now()`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "radiant_audit_drafts_expiry_idx" ON "radiant_audit_drafts" ("expires_at")`);
+  await db.execute(sql`DELETE FROM "radiant_audit_drafts" WHERE "expires_at" <= now()`);
   await purgeExpiredRadiantAuditReceipts();
+}
+
+export function startRadiantAuditDraftPruning(): void {
+  const timer = setInterval(() => {
+    void db.delete(radiantAuditDraftsTable)
+      .where(lte(radiantAuditDraftsTable.expiresAt, new Date()))
+      .catch(err => logger.error({ err }, "Unable to prune expired Audit drafts"));
+  }, 60 * 60 * 1000);
+  timer.unref();
 }

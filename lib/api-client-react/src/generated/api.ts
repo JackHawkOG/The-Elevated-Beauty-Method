@@ -51,9 +51,12 @@ import type {
   ProgressUpdate,
   PublicMemberStory,
   RadiantAudit,
+  RadiantAuditDraft,
+  RadiantAuditDraftDiscarded,
   RadiantAuditHistoryEntry,
   RadiantAuditInput,
   RadiantAuditSaveResult,
+  RadiantAuditStoredDraft,
   UserProfile,
   UserProfileUpdate
 } from './api.schemas';
@@ -2773,6 +2776,225 @@ export const useSaveRadiantAudit = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getSaveRadiantAuditMutationOptions(options));
+    }
+
+export const getGetRadiantAuditDraftUrl = () => {
+
+
+
+
+  return `/api/users/me/radiant-audit/draft`
+}
+
+/**
+ * @summary Get the signed-in member's unexpired unfinished Audit
+ */
+export const getRadiantAuditDraft = async ( options?: Parameters<typeof customFetch>[1]): Promise<RadiantAuditStoredDraft | RadiantAuditDraftDiscarded | null> => {
+
+  return customFetch<RadiantAuditStoredDraft | RadiantAuditDraftDiscarded | null>(getGetRadiantAuditDraftUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRadiantAuditDraftQueryKey = () => {
+    return [
+    `/api/users/me/radiant-audit/draft`
+    ] as const;
+    }
+
+
+export const getGetRadiantAuditDraftQueryOptions = <TData = Awaited<ReturnType<typeof getRadiantAuditDraft>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRadiantAuditDraft>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRadiantAuditDraftQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRadiantAuditDraft>>> = ({ signal }) => getRadiantAuditDraft({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRadiantAuditDraft>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetRadiantAuditDraftQueryResult = NonNullable<Awaited<ReturnType<typeof getRadiantAuditDraft>>>
+export type GetRadiantAuditDraftQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get the signed-in member's unexpired unfinished Audit
+ */
+
+export function useGetRadiantAuditDraft<TData = Awaited<ReturnType<typeof getRadiantAuditDraft>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRadiantAuditDraft>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetRadiantAuditDraftQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveRadiantAuditDraftUrl = () => {
+
+
+
+
+  return `/api/users/me/radiant-audit/draft`
+}
+
+/**
+ * @summary Replace the signed-in member's unfinished Audit draft
+ */
+export const saveRadiantAuditDraft = async (radiantAuditDraft: RadiantAuditDraft, options?: Parameters<typeof customFetch>[1]): Promise<RadiantAuditDraft> => {
+
+  return customFetch<RadiantAuditDraft>(getSaveRadiantAuditDraftUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(radiantAuditDraft)
+  }
+);}
+
+
+
+
+
+export const getSaveRadiantAuditDraftMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveRadiantAuditDraft>>, TError,{data: BodyType<RadiantAuditDraft>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveRadiantAuditDraft>>, TError,{data: BodyType<RadiantAuditDraft>}, TContext> => {
+
+const mutationKey = ['saveRadiantAuditDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveRadiantAuditDraft>>, {data: BodyType<RadiantAuditDraft>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveRadiantAuditDraft(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveRadiantAuditDraftMutationResult = NonNullable<Awaited<ReturnType<typeof saveRadiantAuditDraft>>>
+    export type SaveRadiantAuditDraftMutationBody = BodyType<RadiantAuditDraft>
+    export type SaveRadiantAuditDraftMutationError = ErrorType<void>
+
+    /**
+ * @summary Replace the signed-in member's unfinished Audit draft
+ */
+export const useSaveRadiantAuditDraft = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveRadiantAuditDraft>>, TError,{data: BodyType<RadiantAuditDraft>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveRadiantAuditDraft>>,
+        TError,
+        {data: BodyType<RadiantAuditDraft>},
+        TContext
+      > => {
+      return useMutation(getSaveRadiantAuditDraftMutationOptions(options));
+    }
+
+export const getDeleteRadiantAuditDraftUrl = () => {
+
+
+
+
+  return `/api/users/me/radiant-audit/draft`
+}
+
+/**
+ * @summary Discard the signed-in member's unfinished Audit draft
+ */
+export const deleteRadiantAuditDraft = async ( options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteRadiantAuditDraftUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteRadiantAuditDraftMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRadiantAuditDraft>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteRadiantAuditDraft>>, TError,void, TContext> => {
+
+const mutationKey = ['deleteRadiantAuditDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteRadiantAuditDraft>>, void> = () => {
+
+
+          return  deleteRadiantAuditDraft(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteRadiantAuditDraftMutationResult = NonNullable<Awaited<ReturnType<typeof deleteRadiantAuditDraft>>>
+
+    export type DeleteRadiantAuditDraftMutationError = ErrorType<void>
+
+    /**
+ * @summary Discard the signed-in member's unfinished Audit draft
+ */
+export const useDeleteRadiantAuditDraft = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRadiantAuditDraft>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteRadiantAuditDraft>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDeleteRadiantAuditDraftMutationOptions(options));
     }
 
 export const getGetRadiantAuditHistoryUrl = () => {

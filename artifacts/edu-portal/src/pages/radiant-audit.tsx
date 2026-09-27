@@ -10,12 +10,17 @@ import {
   getGetRadiantAuditQueryKey,
   getGetRadiantAuditHistoryQueryKey,
   type RadiantAuditInput,
+  type RadiantAuditDraft,
+  getRadiantAuditDraft,
+  getRadiantAudit,
+  saveRadiantAuditDraft,
+  deleteRadiantAuditDraft,
 } from "@workspace/api-client-react";
 import { RadiantAuditForm, type RadiantAuditSubmission } from "@/components/radiant-audit-form";
 import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
 import { trackEvent, trackRadiantAuditSaved } from "@/lib/analytics";
 import { clearPendingAudit, isAuditReadyToSave, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
-import { clearAuditDraft, getAuditSubmissionId, readAuditDraft, writeAuditDraft } from "@/lib/radiant-audit-draft";
+import { auditDraftWrittenAt, clearAuditDraft, getAuditSubmissionId, readAuditDraft, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -41,12 +46,109 @@ export default function RadiantAuditPage() {
   const [error, setError] = useState<string | null>(null);
   const [draftWarning, setDraftWarning] = useState<string | null>(null);
   const [draftRevision, setDraftRevision] = useState(0);
+  const [loadedDraft, setLoadedDraft] = useState<{ accountId: string; answers: RadiantAuditSubmission | null } | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftWrite = useRef<Promise<void>>(Promise.resolve());
+  const draftBlocked = useRef(false);
+  const draftBaseline = useRef<{ owner: string; completedAt: string } | null>(null);
+  const draftHadAnswers = useRef(false);
   const save = useSaveRadiantAudit();
   const attempt = useRef<{ accountId: string; answers: string; id: string } | null>(null);
   const email = user?.primaryEmailAddress?.emailAddress;
   const accountId = isLoaded && isSignedIn ? user?.id : undefined;
-  const persistDraft = useCallback((answers: RadiantAuditSubmission) => {
+  useEffect(() => {
     if (!accountId) return;
+    let active = true;
+    setLoadedDraft(null);
+    draftBaseline.current = null;
+    draftHadAnswers.current = false;
+    const local = readAuditDraft(accountId);
+    void getRadiantAuditDraft({ responseType: "json" }).then(async remote => {
+      let localAnswer = local;
+      const current = await getRadiantAudit({ responseType: "json" });
+      const completedAt = current ? Date.parse(current.completedAt) : null;
+      let remoteAnswer = remote;
+      if (remoteAnswer && "updatedAt" in remoteAnswer && completedAt != null &&
+          Date.parse(remoteAnswer.updatedAt) <= completedAt) {
+        remoteAnswer = null;
+      }
+      const discardedAt = remote && "discardedAt" in remote ? Date.parse(remote.discardedAt) : null;
+      if (discardedAt != null && localAnswer) {
+        const writtenAt = auditDraftWrittenAt(accountId);
+        if (writtenAt == null || writtenAt <= discardedAt) {
+          clearAuditDraft(accountId);
+          localAnswer = null;
+        }
+      }
+      if (remote && "updatedAt" in remote && localAnswer) {
+        const writtenAt = auditDraftWrittenAt(accountId);
+        if (writtenAt == null || writtenAt <= Date.parse(remote.updatedAt)) {
+          clearAuditDraft(accountId);
+          localAnswer = null;
+        }
+      }
+      if (localAnswer && completedAt != null) {
+        const writtenAt = auditDraftWrittenAt(accountId);
+        if (writtenAt == null || writtenAt <= completedAt) {
+          clearAuditDraft(accountId);
+          localAnswer = null;
+        }
+      }
+      if (active) {
+        const answers = localAnswer ?? (remoteAnswer && !("discardedAt" in remoteAnswer)
+          ? { ...remoteAnswer, email: email ?? "" } : readPendingAudit());
+        draftBaseline.current = { owner: accountId, completedAt: current?.completedAt ?? "none" };
+        draftHadAnswers.current = !!(answers?.routineChecks.length || answers?.valuesChecks.length ||
+          answers?.beautyTrend || answers?.masteryGoal || answers?.researchTime);
+        setLoadedDraft({ accountId, answers });
+      }
+    }).catch(() => {
+      if (active) {
+        setLoadedDraft({ accountId, answers: local ?? readPendingAudit() });
+        setDraftWarning("Your online draft couldn't be loaded. Your answers can still be saved on this device.");
+      }
+    });
+    return () => {
+      active = false;
+      if (draftTimer.current) clearTimeout(draftTimer.current);
+    };
+  }, [accountId, email]);
+
+  const queueDraft = useCallback((owner: string, answers: RadiantAuditSubmission) => {
+    const baseline = draftBaseline.current?.owner === owner ? draftBaseline.current.completedAt : null;
+    if (!baseline) return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      draftTimer.current = null;
+      if (draftBlocked.current) return;
+      const data = auditAnswers(answers) as RadiantAuditDraft;
+      // Serial writes prevent an older response from replacing the newest answers.
+      draftWrite.current = draftWrite.current.catch(() => {}).then(async () => {
+        await saveRadiantAuditDraft(data, { headers: {
+          "x-audit-draft-owner": owner,
+          "x-audit-draft-baseline": baseline,
+        } });
+      }).catch(() => {
+        setDraftWarning("Your online draft couldn't be saved. Your answers are still in this browser.");
+      });
+    }, 600);
+  }, []);
+  const queueClearDraft = useCallback((owner: string) => {
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      draftTimer.current = null;
+      if (draftBlocked.current) return;
+      draftWrite.current = draftWrite.current.catch(() => {}).then(async () => {
+        await deleteRadiantAuditDraft({ headers: { "x-audit-draft-owner": owner } });
+      }).catch(() => {
+        setDraftWarning("Your online draft couldn't be cleared. Please try discarding it.");
+      });
+    }, 600);
+  }, []);
+  const persistDraft = useCallback((answers: RadiantAuditSubmission) => {
+    if (!accountId || draftBlocked.current) return;
+    const hasAnswers = !!(answers.routineChecks.length || answers.valuesChecks.length ||
+      answers.beautyTrend || answers.masteryGoal || answers.researchTime);
     try {
       if (!answers.routineChecks.length && !answers.valuesChecks.length &&
           !answers.beautyTrend && !answers.masteryGoal && !answers.researchTime &&
@@ -59,18 +161,29 @@ export default function RadiantAuditPage() {
     } catch {
       setDraftWarning("This browser couldn't keep your draft. Keep this page open until your Audit is saved.");
     }
-  }, [accountId, email]);
+    if (hasAnswers) queueDraft(accountId, answers);
+    else if (draftHadAnswers.current) queueClearDraft(accountId);
+    draftHadAnswers.current = hasAnswers;
+  }, [accountId, email, queueDraft, queueClearDraft]);
 
-  function discardDraft() {
+  async function discardDraft() {
+    draftBlocked.current = true;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
     try {
+      await draftWrite.current;
+      await deleteRadiantAuditDraft({ headers: { "x-audit-draft-owner": accountId! } });
       clearAuditDraft(accountId);
       clearPendingAudit();
       attempt.current = null;
+      draftHadAnswers.current = false;
       setDraftWarning(null);
       setError(null);
+      setLoadedDraft({ accountId: accountId!, answers: null });
       setDraftRevision(revision => revision + 1);
     } catch {
-      setDraftWarning("This browser couldn't remove your draft. Please clear this site's browser data.");
+      setDraftWarning("Your draft couldn't be removed everywhere. Please try again.");
+    } finally {
+      draftBlocked.current = false;
     }
   }
 
@@ -87,6 +200,9 @@ export default function RadiantAuditPage() {
         return;
       }
       try {
+        draftBlocked.current = true;
+        if (draftTimer.current) clearTimeout(draftTimer.current);
+        await draftWrite.current;
         const answers = auditAnswers(audit);
         const signature = JSON.stringify(answers);
         if (attempt.current?.accountId !== user!.id || attempt.current.answers !== signature) {
@@ -108,6 +224,8 @@ export default function RadiantAuditPage() {
         try { clearPendingAudit(); } catch { /* A storage failure must not hide a confirmed save. */ }
         navigate("/radiant-audit/complete");
       } catch {
+        draftBlocked.current = false;
+        if (accountId) queueDraft(accountId, audit);
         setError("We couldn't save your Audit. Your answers are still here; please try again.");
       }
       return;
@@ -133,12 +251,13 @@ export default function RadiantAuditPage() {
   }
 
   if (!isLoaded) return <p role="status">Loading your Audit…</p>;
+  if (accountId && loadedDraft?.accountId !== accountId) return <p role="status">Loading your draft…</p>;
 
   return (
     <RadiantAuditForm
       key={`${accountId ?? "visitor"}:${draftRevision}`}
       initialEmail={email}
-      initialDraft={accountId ? readAuditDraft(accountId) ?? readPendingAudit() : null}
+      initialDraft={accountId ? loadedDraft?.answers : null}
       onDraftChange={accountId ? persistDraft : undefined}
       onDiscardDraft={accountId ? discardDraft : undefined}
       draftWarning={draftWarning}
@@ -209,6 +328,7 @@ export function RadiantAuditCompletePage() {
       queryClient.setQueryData(getGetRadiantAuditQueryKey(), result.audit);
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
       clearPendingAudit();
+      try { clearAuditDraft(user.id); } catch { /* The submission is already confirmed. */ }
       setPending(null);
     } catch {
       setError("We couldn't save your Audit. Your answers are still in this browser. Please try again.");
