@@ -24,6 +24,7 @@
     "cleanup:community-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/community-fixtures-cleanup.ts",
     "inspect:community-legacy": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/community-legacy-review-cli.ts",
     "test:community-live": "playwright test --config playwright.community-live.config.ts",
+    "test:announcement-review-live": "playwright test --config playwright.announcement-review-live.config.ts",
     "test:member-stories-live": "playwright test --config playwright.member-stories-live.config.ts",
     "cleanup:story-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/member-stories-fixtures-cleanup.ts",
     "cleanup:profile-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/profile-fixtures-cleanup.ts",
