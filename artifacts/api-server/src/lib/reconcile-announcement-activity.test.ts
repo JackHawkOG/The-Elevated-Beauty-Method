@@ -70,3 +70,22 @@ test("an old matching feed item is not retroactively linked during repair", () =
   expect(result).toEqual({ missing: [], review: [] });
   expect(historical.sourceAnnouncementId).toBeNull();
 });
+
+test("preserves the two historical short feed display names without scheduling duplicate posts", () => {
+  const announcements = [
+    post(1, "Welcome to The Elevated Beauty Method™", "Nikki — Blushing Beauty By Nikki"),
+    post(3, "The Elevated Beauty Method™ is officially open", "Nikki — Blushing Beauty By Nikki"),
+  ];
+  const activities = [
+    feed(3, announcements[0].title, "Nikki"),
+    feed(7, announcements[1].title, "Nikki"),
+  ];
+  const plan = planAnnouncementActivityRepair(announcements, activities);
+  expect(plan.missing).toEqual([]);
+  expect(plan.review).toEqual([
+    { announcementId: 1, activityIds: [3], reason: "feed entry has a different author or timestamp" },
+    { announcementId: 3, activityIds: [7], reason: "feed entry has a different author or timestamp" },
+  ]);
+  expect(activities.map(row => [row.actorName, row.sourceAnnouncementId]))
+    .toEqual([["Nikki", null], ["Nikki", null]]);
+});
