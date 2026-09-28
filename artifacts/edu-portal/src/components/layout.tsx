@@ -60,6 +60,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   <Link href="/member-stories"><Quote /> <span>Member stories</span>{removalCount > 0 && <span className="ml-auto rounded-full bg-destructive px-2 text-xs text-destructive-foreground" aria-label={`${removalCount} story removal requests`}>{removalCount}</span>}</Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>}
+              {canManageStories && <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={location === "/announcement-activity-review"}>
+                  <Link href="/announcement-activity-review"><ClipboardCheck /> <span>Announcement feed review</span></Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>}
               <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={location === "/stories"}>
                   <Link href="/stories"><Quote /> <span>View stories &amp; request removal</span></Link>

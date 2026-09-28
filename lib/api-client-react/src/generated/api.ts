@@ -22,6 +22,9 @@ import type {
 import type {
   ActivityItem,
   Announcement,
+  AnnouncementActivityEvidence,
+  AnnouncementActivityLink,
+  AnnouncementActivityReview,
   AnnouncementInput,
   BeautyDiagnosticInput,
   BeautyMethod,
@@ -163,6 +166,13 @@ export function useListPublishedMemberStories<TData = Awaited<ReturnType<typeof 
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+
+
+
+
+
+
 export const getPublishMemberStoryUrl = () => {
 
 
@@ -2636,6 +2646,155 @@ export function useGetAnnouncement<TData = Awaited<ReturnType<typeof getAnnounce
 
 
 
+export const getListAnnouncementActivityReviewUrl = () => {
+
+
+
+
+  return `/api/announcements/activity-review`
+}
+
+/**
+ * @summary Staff-only ambiguous legacy feed links
+ */
+export const listAnnouncementActivityReview = async ( options?: Parameters<typeof customFetch>[1]): Promise<AnnouncementActivityReview[]> => {
+
+  return customFetch<AnnouncementActivityReview[]>(getListAnnouncementActivityReviewUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAnnouncementActivityReviewQueryKey = () => {
+    return [
+    `/api/announcements/activity-review`
+    ] as const;
+    }
+
+
+export const getListAnnouncementActivityReviewQueryOptions = <TData = Awaited<ReturnType<typeof listAnnouncementActivityReview>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementActivityReview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAnnouncementActivityReviewQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAnnouncementActivityReview>>> = ({ signal }) => listAnnouncementActivityReview({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementActivityReview>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAnnouncementActivityReviewQueryResult = NonNullable<Awaited<ReturnType<typeof listAnnouncementActivityReview>>>
+export type ListAnnouncementActivityReviewQueryError = ErrorType<void>
+
+
+/**
+ * @summary Staff-only ambiguous legacy feed links
+ */
+
+export function useListAnnouncementActivityReview<TData = Awaited<ReturnType<typeof listAnnouncementActivityReview>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementActivityReview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAnnouncementActivityReviewQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAttachAnnouncementActivityUrl = (announcementId: number,) => {
+
+
+
+
+  return `/api/announcements/${announcementId}/activity-review`
+}
+
+/**
+ * @summary Attach a reviewed legacy feed entry with independent evidence
+ */
+export const attachAnnouncementActivity = async (announcementId: number,
+    announcementActivityEvidence: AnnouncementActivityEvidence, options?: Parameters<typeof customFetch>[1]): Promise<AnnouncementActivityLink> => {
+
+  return customFetch<AnnouncementActivityLink>(getAttachAnnouncementActivityUrl(announcementId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(announcementActivityEvidence)
+  }
+);}
+
+
+
+
+
+export const getAttachAnnouncementActivityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachAnnouncementActivity>>, TError,{announcementId: number;data: BodyType<AnnouncementActivityEvidence>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof attachAnnouncementActivity>>, TError,{announcementId: number;data: BodyType<AnnouncementActivityEvidence>}, TContext> => {
+
+const mutationKey = ['attachAnnouncementActivity'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof attachAnnouncementActivity>>, {announcementId: number;data: BodyType<AnnouncementActivityEvidence>}> = (props) => {
+          const {announcementId,data} = props ?? {};
+
+          return  attachAnnouncementActivity(announcementId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AttachAnnouncementActivityMutationResult = NonNullable<Awaited<ReturnType<typeof attachAnnouncementActivity>>>
+    export type AttachAnnouncementActivityMutationBody = BodyType<AnnouncementActivityEvidence>
+    export type AttachAnnouncementActivityMutationError = ErrorType<void>
+
+    /**
+ * @summary Attach a reviewed legacy feed entry with independent evidence
+ */
+export const useAttachAnnouncementActivity = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachAnnouncementActivity>>, TError,{announcementId: number;data: BodyType<AnnouncementActivityEvidence>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof attachAnnouncementActivity>>,
+        TError,
+        {announcementId: number;data: BodyType<AnnouncementActivityEvidence>},
+        TContext
+      > => {
+      return useMutation(getAttachAnnouncementActivityMutationOptions(options));
+    }
+
 export const getGetMeUrl = () => {
 
 
@@ -3815,3 +3974,10 @@ export function useGetRecentActivity<TData = Awaited<ReturnType<typeof getRecent
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+
+
+
+
+
+

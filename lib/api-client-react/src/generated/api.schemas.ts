@@ -397,6 +397,44 @@ export interface AnnouncementInput {
   pinned?: boolean;
 }
 
+export interface AnnouncementActivityCandidate {
+  id: number;
+  actorName: string;
+  entityTitle: string;
+  description: string;
+  createdAt: string;
+  /** @nullable */
+  sourceAnnouncementId: number | null;
+}
+
+export interface AnnouncementActivityReview {
+  announcementId: number;
+  title: string;
+  body: string;
+  authorName: string;
+  createdAt: string;
+  reason: string;
+  revision: string;
+  candidates: AnnouncementActivityCandidate[];
+}
+
+export interface AnnouncementActivityEvidence {
+  activityId: number;
+  revision: string;
+  /**
+     * @minLength 20
+     * @maxLength 2000
+     */
+  evidence: string;
+  independentlyVerified: boolean;
+}
+
+export interface AnnouncementActivityLink {
+  announcementId: number;
+  activityId: number;
+  reviewedAt: string;
+}
+
 export type UserProfileMembershipTier = typeof UserProfileMembershipTier[keyof typeof UserProfileMembershipTier];
 
 
@@ -662,3 +700,4 @@ offset?: number;
 export type ListAnnouncementsParams = {
 limit?: number;
 };
+

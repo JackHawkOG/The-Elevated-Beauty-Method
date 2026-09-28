@@ -10,6 +10,9 @@ export const activityTable = pgTable("activity", {
   actorName: text("actor_name").notNull(),
   entityTitle: text("entity_title").notNull(),
   sourceAnnouncementId: integer("source_announcement_id").references(() => announcementsTable.id),
+  sourceEvidence: text("source_evidence"),
+  sourceReviewedBy: text("source_reviewed_by"),
+  sourceReviewedAt: timestamp("source_reviewed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => [uniqueIndex("activity_source_announcement_unique").on(table.sourceAnnouncementId)]);
 

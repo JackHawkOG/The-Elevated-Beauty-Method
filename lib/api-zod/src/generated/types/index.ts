@@ -8,6 +8,10 @@
 
 export * from './activityItem';
 export * from './announcement';
+export * from './announcementActivityCandidate';
+export * from './announcementActivityEvidence';
+export * from './announcementActivityLink';
+export * from './announcementActivityReview';
 export * from './announcementInput';
 export * from './beautyDiagnosticInput';
 export * from './beautyDiagnosticInputFeatureNeedsItem';

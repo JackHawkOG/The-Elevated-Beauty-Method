@@ -143,6 +143,7 @@ import CommunityPage from '@/pages/community';
 import ProfilePage from '@/pages/profile';
 import EditorialPage from '@/pages/editorial';
 import MemberStoriesPage from '@/pages/member-stories';
+import AnnouncementActivityReviewPage from '@/pages/announcement-activity-review';
 import PublicStoriesPage from '@/pages/public-stories';
 import RadiantAuditPage, { RadiantAuditCompletePage } from '@/pages/radiant-audit';
 import { readPendingAudit } from '@/lib/radiant-audit-session';
@@ -172,6 +173,14 @@ function MemberStoriesRoute() {
   return <MemberStoriesPage />;
 }
 
+function AnnouncementActivityReviewRoute() {
+  const { user, isLoaded } = useUser();
+  if (!isLoaded) return null;
+  const role = user?.publicMetadata.role;
+  if (role !== "admin" && role !== "owner") return <NotFound />;
+  return <AnnouncementActivityReviewPage />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -192,6 +201,7 @@ function Router() {
       <Route path="/profile" component={() => <ProtectedRoute component={ProfilePage} />} />
       <Route path="/editorial" component={() => <ProtectedRoute component={EditorialRoute} />} />
       <Route path="/member-stories" component={() => <ProtectedRoute component={MemberStoriesRoute} />} />
+      <Route path="/announcement-activity-review" component={() => <ProtectedRoute component={AnnouncementActivityReviewRoute} />} />
       <Route path="/stories" component={() => <ProtectedRoute component={PublicStoriesPage} />} />
       <Route component={NotFound} />
     </Switch>

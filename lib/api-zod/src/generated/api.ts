@@ -770,6 +770,55 @@ export const GetAnnouncementResponse = zod.object({
 
 
 /**
+ * @summary Staff-only ambiguous legacy feed links
+ */
+export const ListAnnouncementActivityReviewResponseItem = zod.object({
+  "announcementId": zod.number(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "authorName": zod.string(),
+  "createdAt": zod.string(),
+  "reason": zod.string(),
+  "revision": zod.string(),
+  "candidates": zod.array(zod.object({
+  "id": zod.number(),
+  "actorName": zod.string(),
+  "entityTitle": zod.string(),
+  "description": zod.string(),
+  "createdAt": zod.string(),
+  "sourceAnnouncementId": zod.number().nullable()
+}))
+})
+export const ListAnnouncementActivityReviewResponse = zod.array(ListAnnouncementActivityReviewResponseItem)
+
+
+/**
+ * @summary Attach a reviewed legacy feed entry with independent evidence
+ */
+export const AttachAnnouncementActivityParams = zod.object({
+  "announcementId": zod.coerce.number()
+})
+
+export const attachAnnouncementActivityBodyEvidenceMin = 20;
+export const attachAnnouncementActivityBodyEvidenceMax = 2000;
+
+
+
+export const AttachAnnouncementActivityBody = zod.object({
+  "activityId": zod.number(),
+  "revision": zod.string(),
+  "evidence": zod.string().min(attachAnnouncementActivityBodyEvidenceMin).max(attachAnnouncementActivityBodyEvidenceMax),
+  "independentlyVerified": zod.boolean()
+})
+
+export const AttachAnnouncementActivityResponse = zod.object({
+  "announcementId": zod.number(),
+  "activityId": zod.number(),
+  "reviewedAt": zod.string()
+})
+
+
+/**
  * @summary Get the current user's profile
  */
 export const GetMeResponse = zod.object({
@@ -1157,3 +1206,5 @@ export const GetRecentActivityResponseItem = zod.object({
   "createdAt": zod.string()
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
+
+

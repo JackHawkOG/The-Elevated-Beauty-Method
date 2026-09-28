@@ -721,6 +721,53 @@ paths:
         "404":
           description: Announcement not found
 
+  /announcements/activity-review:
+    get:
+      operationId: listAnnouncementActivityReview
+      tags: [announcements]
+      summary: Staff-only ambiguous legacy feed links
+      responses:
+        "200":
+          description: Unresolved posts and possible feed entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnnouncementActivityReview"
+        "403":
+          description: Staff access required
+
+  /announcements/{announcementId}/activity-review:
+    post:
+      operationId: attachAnnouncementActivity
+      tags: [announcements]
+      summary: Attach a reviewed legacy feed entry with independent evidence
+      parameters:
+        - in: path
+          name: announcementId
+          required: true
+          schema: { type: number }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnnouncementActivityEvidence"
+      responses:
+        "200":
+          description: Link recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnouncementActivityLink"
+        "400":
+          description: Invalid evidence
+        "403":
+          description: Staff access required
+        "409":
+          description: Review is stale or activity already assigned
+
   /users/me:
     get:
       operationId: getMe
@@ -1365,6 +1412,47 @@ components:
           type: string
         pinned:
           type: boolean
+
+    AnnouncementActivityCandidate:
+      type: object
+      required: [id, actorName, entityTitle, description, createdAt, sourceAnnouncementId]
+      properties:
+        id: { type: number }
+        actorName: { type: string }
+        entityTitle: { type: string }
+        description: { type: string }
+        createdAt: { type: string }
+        sourceAnnouncementId: { type: ["number", "null"] }
+    AnnouncementActivityReview:
+      type: object
+      required: [announcementId, title, body, authorName, createdAt, reason, revision, candidates]
+      properties:
+        announcementId: { type: number }
+        title: { type: string }
+        body: { type: string }
+        authorName: { type: string }
+        createdAt: { type: string }
+        reason: { type: string }
+        revision: { type: string }
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnouncementActivityCandidate"
+    AnnouncementActivityEvidence:
+      type: object
+      required: [activityId, revision, evidence, independentlyVerified]
+      properties:
+        activityId: { type: number }
+        revision: { type: string }
+        evidence: { type: string, minLength: 20, maxLength: 2000 }
+        independentlyVerified: { type: boolean }
+    AnnouncementActivityLink:
+      type: object
+      required: [announcementId, activityId, reviewedAt]
+      properties:
+        announcementId: { type: number }
+        activityId: { type: number }
+        reviewedAt: { type: string }
 
     UserProfile:
       type: object
