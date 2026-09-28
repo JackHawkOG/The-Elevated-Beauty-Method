@@ -12,6 +12,7 @@
     "test:progress:browser": "vitest run artifacts/api-server/src/routes/member-progress.browser.test.ts --maxWorkers=1",
     "test:membership:browser": "vitest run artifacts/api-server/src/routes/membership-confirmed-counts.browser.test.ts --maxWorkers=1",
     "inspect:progress-leftovers": "pnpm --filter @workspace/scripts exec tsx ../artifacts/api-server/src/routes/member-progress-leftovers-cli.ts",
+    "inspect:paid-total-leftovers": "pnpm --filter @workspace/scripts exec tsx ../artifacts/api-server/src/routes/membership-counts-leftovers-cli.ts",
     "test:membership": "vitest run artifacts/api-server/src/routes/membership-reservations.test.ts artifacts/api-server/src/routes/membership-flow.test.ts artifacts/api-server/src/routes/membership-confirmed-counts.test.ts artifacts/api-server/src/routes/membership-status.test.ts artifacts/api-server/src/lib/membership-reconciliation.test.ts artifacts/api-server/src/lib/membership-reconciliation.integration.test.ts artifacts/edu-portal/src/pages/membership.test.tsx --maxWorkers=1",
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
     "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",

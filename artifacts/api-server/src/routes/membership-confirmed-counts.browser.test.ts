@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 import { progressBrowserEnvironment } from "./member-progress-browser-environment";
 import { runWithCleanup } from "./member-progress-browser-cleanup";
 import { requireDevelopmentDatabase } from "./test-development-database";
+import { PAID_TOTAL_FIXTURE } from "./membership-counts-leftovers";
 
 // Run against the development preview, which routes /api through the same
 // Clerk middleware and Express mount as the published web application.
@@ -65,6 +66,7 @@ test("real Clerk sessions protect paid totals from visitors and members", async 
         firstName: "Membership Counts Check",
         password: `A!${randomUUID()}z9`,
         publicMetadata: { role },
+         privateMetadata: { paidTotalCheck: PAID_TOTAL_FIXTURE },
       });
       identities.push(user.id);
     }
