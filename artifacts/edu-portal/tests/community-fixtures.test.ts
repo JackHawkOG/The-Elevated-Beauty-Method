@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   communityFixtureEmail, communityFixturePrivateMetadata, isCommunityFixtureActivity,
-  isCommunityFixturePost, newCommunityFixtureTag, requireCommunityDevelopment, staleCommunityFixtureTag,
+  isCommunityFixturePost, newCommunityFixtureTag, possibleLegacyCommunityIdentity,
+  requireCommunityDevelopment, staleCommunityFixtureTag,
 } from "./community-fixtures";
 
 const env = {
@@ -38,6 +39,31 @@ describe("community fixture cleanup boundaries", () => {
     expect(staleCommunityFixtureTag({ ...user, emailAddresses: [{ emailAddress: "member@example.com" }] }, now)).toBeUndefined();
     expect(staleCommunityFixtureTag({ ...user, emailAddresses: [...user.emailAddresses, { emailAddress: "other@example.com" }] }, now)).toBeUndefined();
     expect(() => communityFixtureEmail("non-random")).toThrow();
+  });
+
+  it("reports unmarked older email leads without mistaking them for owned fixtures", () => {
+    const historicalEmail = "community-550e8400-e29+clerk_test@example.com";
+    expect(possibleLegacyCommunityIdentity(user, now)).toBeUndefined();
+    expect(possibleLegacyCommunityIdentity({ ...user, privateMetadata: {} }, now)).toBe(communityFixtureEmail(tag));
+    expect(possibleLegacyCommunityIdentity({
+      ...user, privateMetadata: {}, emailAddresses: [{ emailAddress: historicalEmail }],
+    }, now)).toBe(historicalEmail);
+    expect(staleCommunityFixtureTag({
+      ...user, privateMetadata: communityFixturePrivateMetadata,
+      emailAddresses: [{ emailAddress: historicalEmail }],
+    }, now)).toBeUndefined();
+    expect(possibleLegacyCommunityIdentity({
+      ...user, privateMetadata: {}, emailAddresses: [
+        { emailAddress: "another@example.com" }, ...user.emailAddresses,
+      ],
+    }, now)).toBe(communityFixtureEmail(tag));
+    expect(possibleLegacyCommunityIdentity({
+      ...user, privateMetadata: {}, createdAt: now - 23 * 60 * 60 * 1000,
+    }, now)).toBeUndefined();
+    expect(possibleLegacyCommunityIdentity({
+      ...user, privateMetadata: {}, emailAddresses: [{ emailAddress: "member@example.com" }],
+    }, now)).toBeUndefined();
+    expect(staleCommunityFixtureTag({ ...user, privateMetadata: {} }, now)).toBeUndefined();
   });
 
   it("requires development Clerk, preview, and database", () => {

@@ -4,6 +4,9 @@ import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 const marker = "community-live-v1";
 const emailPattern = /^community-([0-9a-f]{12})\+clerk_test@example\.com$/;
+// Before fixture metadata, the browser test used randomUUID().slice(0, 12):
+// eight hex digits, a hyphen, then three more hex digits.
+const legacyEmailPattern = /^community-(?:[0-9a-f]{8}-[0-9a-f]{3}|[0-9a-f]{12})\+clerk_test@example\.com$/;
 const staleAfterMs = 24 * 60 * 60 * 1000;
 
 export const communityFixturePrivateMetadata = { communityLiveFixture: marker };
@@ -28,6 +31,18 @@ export function staleCommunityFixtureTag(
     user.firstName === "Community" && user.lastName === "Check" &&
     Number.isFinite(user.createdAt) && user.createdAt <= now - staleAfterMs
     ? tag || undefined : undefined;
+}
+
+// A possible legacy identity is not an owned fixture. Never use this predicate
+// to authorize deletion: email patterns and age are only leads for human review.
+export function possibleLegacyCommunityIdentity(
+  user: Pick<User, "emailAddresses" | "privateMetadata" | "createdAt">,
+  now = Date.now(),
+) {
+  return user.privateMetadata.communityLiveFixture === undefined &&
+    Number.isFinite(user.createdAt) && user.createdAt <= now - staleAfterMs
+    ? user.emailAddresses.find(address => legacyEmailPattern.test(address.emailAddress))?.emailAddress
+    : undefined;
 }
 
 export function isCommunityFixturePost(
