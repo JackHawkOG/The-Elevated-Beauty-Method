@@ -1583,6 +1583,173 @@ for (const kind of ["selected", "all"] as const) {
   });
 }
 
+test("a rejected selected-history deletion leaves both earlier Audits available and can be retried", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = auditFixtureEmail("delete-failure", tag);
+  const markers = [`first-${tag}`, `second-${tag}`, `current-${tag}`];
+  const created: string[] = [];
+  try {
+    await setupClerkTestingToken({ page });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
+    });
+    created.push(user.id);
+    await signIn(page, email);
+    for (const [index, marker] of markers.entries()) {
+      if (index) await page.goto("/radiant-audit");
+      await save(page, email, marker);
+    }
+
+    const [{ db, radiantAuditHistoryTable, radiantAuditsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const historyRows = () => db.select().from(radiantAuditHistoryTable)
+      .where(eq(radiantAuditHistoryTable.clerkId, user.id));
+    const currentRows = () => db.select().from(radiantAuditsTable)
+      .where(eq(radiantAuditsTable.clerkId, user.id));
+    const original = await historyRows();
+    const firstId = original.find(row => row.masteryGoal === reflections(markers[0]).masteryGoal)!.id;
+    const deletePath = `/api/users/me/radiant-audit/history/${firstId}`;
+    const comparison = page.getByRole("region", { name: "How your answers have changed" });
+    const choices = comparison.getByRole("combobox", { name: "Compare with" });
+    await choices.selectOption(String(firstId));
+    let rejected = 0;
+    await page.route(`**${deletePath}`, route => {
+      if (route.request().method() !== "DELETE") return route.continue();
+      rejected++;
+      return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+    });
+    await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Delete this earlier Audit?" });
+    await dialog.getByRole("button", { name: "Delete earlier Audit" }).click();
+    await expect(dialog.getByRole("alert")).toHaveText("We couldn't delete your earlier Audit. Please try again.");
+    expect(rejected).toBe(1);
+    await expect(dialog.getByRole("button", { name: "Delete earlier Audit" })).toBeEnabled();
+    await expect(page.locator("main")).not.toContainText("Earlier submission deleted.");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(choices).toHaveValue(String(firstId));
+    for (const answer of Object.values(reflections(markers[0]))) await expect(comparison).toContainText(answer);
+    await choices.selectOption({ index: 0 });
+    for (const answer of Object.values(reflections(markers[1]))) await expect(comparison).toContainText(answer);
+    for (const answer of Object.values(reflections(markers[2]))) await expect(page.locator("main")).toContainText(answer);
+    expect((await historyRows()).map(row => row.id).sort()).toEqual(original.map(row => row.id).sort());
+
+    await page.reload();
+    await expect(choices.locator("option")).toHaveCount(2);
+    for (const marker of markers.slice(0, 2)) {
+      await choices.selectOption(String(original.find(row => row.masteryGoal === reflections(marker).masteryGoal)!.id));
+      for (const answer of Object.values(reflections(marker))) await expect(comparison).toContainText(answer);
+    }
+    for (const answer of Object.values(reflections(markers[2]))) await expect(page.locator("main")).toContainText(answer);
+    expect((await historyRows()).map(row => row.id).sort()).toEqual(original.map(row => row.id).sort());
+    expect((await currentRows()).map(row => row.masteryGoal)).toEqual([reflections(markers[2]).masteryGoal]);
+
+    await page.unroute(`**${deletePath}`);
+    await choices.selectOption(String(firstId));
+    await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    const retry = page.waitForResponse(response =>
+      response.request().method() === "DELETE" && new URL(response.url()).pathname === deletePath,
+    );
+    await dialog.getByRole("button", { name: "Delete earlier Audit" }).click();
+    expect((await retry).status()).toBe(204);
+    await expect(choices.locator("option")).toHaveCount(1);
+    await expect(page.locator("main")).toContainText(reflections(markers[2]).masteryGoal);
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await cleanUpAccounts(client, created);
+  }
+});
+
+test("an uncertain earlier-history deletion with a failed confirmation read asks for refresh without hiding answers", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = auditFixtureEmail("delete-failure", tag);
+  const markers = [`first-${tag}`, `second-${tag}`, `current-${tag}`];
+  const created: string[] = [];
+  try {
+    await setupClerkTestingToken({ page });
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
+    });
+    created.push(user.id);
+    await signIn(page, email);
+    for (const [index, marker] of markers.entries()) {
+      if (index) await page.goto("/radiant-audit");
+      await save(page, email, marker);
+    }
+
+    const [{ db, radiantAuditHistoryTable, radiantAuditsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const historyRows = () => db.select().from(radiantAuditHistoryTable)
+      .where(eq(radiantAuditHistoryTable.clerkId, user.id));
+    const original = await historyRows();
+    const firstId = original.find(row => row.masteryGoal === reflections(markers[0]).masteryGoal)!.id;
+    const historyPath = "/api/users/me/radiant-audit/history";
+    const deletePath = `${historyPath}/${firstId}`;
+    const comparison = page.getByRole("region", { name: "How your answers have changed" });
+    const choices = comparison.getByRole("combobox", { name: "Compare with" });
+    await choices.selectOption(String(firstId));
+    let interrupted = 0;
+    let failedReads = 0;
+    await page.route("**/api/users/me/radiant-audit/history**", route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === deletePath && route.request().method() === "DELETE") {
+        interrupted++;
+        return route.abort("failed");
+      }
+      if (path === historyPath && route.request().method() === "GET") {
+        failedReads++;
+        return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+      }
+      return route.continue();
+    });
+    await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Delete this earlier Audit?" });
+    await dialog.getByRole("button", { name: "Delete earlier Audit" }).click();
+    await expect(dialog.getByRole("alert")).toHaveText(
+      "We couldn't confirm whether your earlier Audit was deleted. Please refresh to check before trying again.",
+    );
+    expect(interrupted).toBe(1);
+    expect(failedReads).toBeGreaterThan(0);
+    await expect(dialog.getByRole("button", { name: "Delete earlier Audit" })).toBeDisabled();
+    await expect(page.locator("main")).not.toContainText("Earlier submission deleted.");
+    // Radix hides the underlying section from accessibility while the dialog is open.
+    const visibleAnswers = page.locator('section[aria-labelledby="audit-history-heading"]');
+    for (const answer of Object.values(reflections(markers[0]))) await expect(visibleAnswers).toContainText(answer);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(choices.locator("option")).toHaveCount(2);
+    await choices.selectOption({ index: 0 });
+    for (const answer of Object.values(reflections(markers[1]))) await expect(comparison).toContainText(answer);
+    for (const answer of Object.values(reflections(markers[2]))) await expect(page.locator("main")).toContainText(answer);
+    expect((await historyRows()).map(row => row.id).sort()).toEqual(original.map(row => row.id).sort());
+
+    await page.unroute("**/api/users/me/radiant-audit/history**");
+    await page.reload();
+    await expect(choices.locator("option")).toHaveCount(2);
+    for (const marker of markers.slice(0, 2)) {
+      await choices.selectOption(String(original.find(row => row.masteryGoal === reflections(marker).masteryGoal)!.id));
+      for (const answer of Object.values(reflections(marker))) await expect(comparison).toContainText(answer);
+    }
+    for (const answer of Object.values(reflections(markers[2]))) await expect(page.locator("main")).toContainText(answer);
+    expect((await historyRows()).map(row => row.id).sort()).toEqual(original.map(row => row.id).sort());
+    expect((await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user.id)))
+      .map(row => row.masteryGoal)).toEqual([reflections(markers[2]).masteryGoal]);
+  } finally {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await cleanUpAccounts(client, created);
+  }
+});
+
 test("failed current Audit deletion keeps saved answers and history through reload, then retry succeeds", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
