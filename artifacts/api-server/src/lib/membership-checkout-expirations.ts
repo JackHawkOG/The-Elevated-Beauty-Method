@@ -1,4 +1,4 @@
-import { pool } from "@workspace/db";
+import { pool, type PoolClient } from "@workspace/db";
 import type Stripe from "stripe";
 import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
@@ -36,10 +36,10 @@ export async function queueCheckoutExpiration(sessionId: string): Promise<void> 
   );
 }
 
-export async function recoverCheckoutExpiration(sessionId: string, stripe: Stripe): Promise<void> {
+export async function recoverCheckoutExpiration(sessionId: string, stripe: Stripe, lockedClient?: PoolClient): Promise<void> {
   const session = await stripe.checkout.sessions.retrieve(sessionId);
   if (session.status === "complete" && session.payment_status === "paid") {
-    const client = await pool.connect();
+    const client = lockedClient ?? await pool.connect();
     try {
       await client.query("BEGIN");
       await restorePaidCheckout(client, stripe, sessionId);
@@ -48,7 +48,7 @@ export async function recoverCheckoutExpiration(sessionId: string, stripe: Strip
       await client.query("ROLLBACK");
       throw error;
     } finally {
-      client.release();
+      if (!lockedClient) client.release();
     }
   }
   // A paid session must never be expired, even if its status is unexpectedly still open.
@@ -57,7 +57,39 @@ export async function recoverCheckoutExpiration(sessionId: string, stripe: Strip
   } else if (session.status !== "expired" && session.status !== "complete" && session.payment_status !== "paid") {
     throw new Error(`Unexpected checkout session status: ${session.status}`);
   }
-  await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = $1", [sessionId]);
+  await (lockedClient ?? pool).query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = $1", [sessionId]);
+}
+
+// Use the same per-session lock in staff retries and scheduled sweeps. The lock
+// stays held through Stripe and database reconciliation, across server instances.
+export async function retryQueuedCheckoutExpiration(
+  sessionId: string,
+  getStripe: () => Promise<Stripe>,
+  overdueOnly = false,
+): Promise<"resolved" | "not_queued" | "busy"> {
+  const client = await pool.connect();
+  try {
+    const lock = await client.query<{ acquired: boolean }>(
+      "SELECT pg_try_advisory_lock(20261001, hashtext($1)) AS acquired",
+      [sessionId],
+    );
+    if (!lock.rows[0]?.acquired) return "busy";
+    try {
+      const pending = await client.query(
+        `SELECT 1 FROM membership_checkout_expirations
+         WHERE stripe_session_id = $1
+         AND ($2::boolean = false OR created_at <= now() - ($3::int * interval '1 minute'))`,
+        [sessionId, overdueOnly, CHECKOUT_CLEANUP_ALERT_AFTER_MINUTES],
+      );
+      if (!pending.rowCount) return "not_queued";
+      await recoverCheckoutExpiration(sessionId, await getStripe(), client);
+      return "resolved";
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(20261001, hashtext($1))", [sessionId]);
+    }
+  } finally {
+    client.release();
+  }
 }
 
 export async function recoverQueuedCheckoutExpirations(): Promise<void> {
@@ -77,7 +109,7 @@ export async function recoverQueuedCheckoutExpirations(): Promise<void> {
         for (const { stripe_session_id } of pending.rows) {
           after = stripe_session_id;
           try {
-            await recoverCheckoutExpiration(stripe_session_id, stripe);
+            await retryQueuedCheckoutExpiration(stripe_session_id, async () => stripe);
           } catch (err) {
             logger.error({ err, stripeSessionId: stripe_session_id }, "Checkout expiration recovery failed");
           }

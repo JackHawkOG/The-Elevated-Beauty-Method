@@ -3,12 +3,12 @@ import { db, pool, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { clerkClient } from "@clerk/express";
-import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlertsResponse } from "@workspace/api-zod";
+import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlertsResponse, RetryMembershipCheckoutCleanupParams, RetryMembershipCheckoutCleanupResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
 import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "../lib/membership-reconciliation";
 import { GetMyMembershipResponse } from "@workspace/api-zod";
-import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations } from "../lib/membership-checkout-expirations";
+import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations, retryQueuedCheckoutExpiration } from "../lib/membership-checkout-expirations";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, restorePaidCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
 import { reconcileUntrackedPaidSessions } from "../lib/membership-paid-recovery";
 
@@ -140,6 +140,39 @@ router.get("/membership/checkout-cleanup-alerts", requireAuth, async (req, res):
     return;
   }
   res.json(GetMembershipCheckoutCleanupAlertsResponse.parse(await overdueCheckoutExpirations()));
+});
+
+router.post("/membership/checkout-cleanup-alerts/:sessionId/retry", requireAuth, async (req, res): Promise<void> => {
+  const params = RetryMembershipCheckoutCleanupParams.safeParse(req.params);
+  if (!params.success || !/^cs_[A-Za-z0-9_]+$/.test(params.data.sessionId)) {
+    res.status(400).json({ error: "Invalid checkout session ID" });
+    return;
+  }
+  let role: unknown;
+  try {
+    role = (await clerkClient.users.getUser(req.userId!)).publicMetadata.role;
+  } catch (error) {
+    req.log.error({ err: error }, "Could not verify checkout cleanup retry access");
+    res.status(503).json({ error: "Unable to verify staff access" });
+    return;
+  }
+  if (role !== "owner" && role !== "admin") {
+    res.status(403).json({ error: "Staff access required" });
+    return;
+  }
+  try {
+    const result = await retryQueuedCheckoutExpiration(params.data.sessionId, getUncachableStripeClient, true);
+    if (result === "not_queued") {
+      res.status(404).json({ error: "This checkout is no longer queued for overdue cleanup." });
+    } else if (result === "busy") {
+      res.status(409).json({ error: "Cleanup is already in progress for this checkout. Refresh the alert shortly." });
+    } else {
+      res.json(RetryMembershipCheckoutCleanupResponse.parse({ resolved: true }));
+    }
+  } catch (error) {
+    req.log.error({ err: error, stripeSessionId: params.data.sessionId }, "Staff checkout cleanup retry failed");
+    res.status(503).json({ error: "Cleanup retry failed. The alert remains queued; try again later." });
+  }
 });
 
 router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {

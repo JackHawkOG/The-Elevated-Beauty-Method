@@ -7,7 +7,10 @@ import { ensureMembershipSchema } from "../lib/ensure-membership-schema";
 import { confirmCheckout } from "../lib/membership-reservations";
 import { requireDevelopmentDatabase } from "./test-development-database";
 import type Stripe from "stripe";
-import { recoverCheckoutExpiration } from "../lib/membership-checkout-expirations";
+import { recoverCheckoutExpiration, retryQueuedCheckoutExpiration } from "../lib/membership-checkout-expirations";
+
+const stripeClient = vi.hoisted(() => ({ getUncachableStripeClient: vi.fn() }));
+vi.mock("../lib/stripeClient", () => ({ ...stripeClient, getStripeSync: vi.fn() }));
 
 // Keep the real authentication middleware and route, replacing only Clerk's
 // session and metadata lookups for this isolated HTTP server.
@@ -43,6 +46,14 @@ async function cleanupAlerts(user?: string) {
     headers: user ? { "x-test-user": user } : {},
   });
   return { status: response.status, body: await response.json() as Record<string, any> };
+}
+
+async function retryCleanup(sessionId: string, user?: string) {
+  const response = await fetch(`${baseUrl}/membership/checkout-cleanup-alerts/${encodeURIComponent(sessionId)}/retry`, {
+    method: "POST",
+    headers: user ? { "x-test-user": user } : {},
+  });
+  return { status: response.status, body: await response.json() as Record<string, unknown> };
 }
 
 beforeAll(async () => {
@@ -137,6 +148,97 @@ test("overdue checkout cleanup alerts are staff-only and clear after Stripe conf
     }
   } finally {
     await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = ANY($1::text[])", [[sessionId, recentId]]);
+  }
+});
+
+test("staff retry only overdue queued sessions; Stripe failures keep alerts and paid sessions are never expired", async () => {
+  const sessionId = `cs_retry_${randomUUID().replaceAll("-", "")}`;
+  const recentId = `cs_retry_${randomUUID().replaceAll("-", "")}`;
+  const expire = vi.fn();
+  const retrieve = vi.fn();
+  stripeClient.getUncachableStripeClient.mockResolvedValue({ checkout: { sessions: { retrieve, expire } } });
+  try {
+    await pool.query(
+      `INSERT INTO membership_checkout_expirations (stripe_session_id, created_at)
+       VALUES ($1, now() - interval '11 minutes'), ($2, now())`,
+      [sessionId, recentId],
+    );
+    expect((await retryCleanup(sessionId)).status).toBe(401);
+    expect((await retryCleanup(sessionId, member)).status).toBe(403);
+    expect((await retryCleanup("not-a-session", owner)).status).toBe(400);
+    expect((await retryCleanup(recentId, owner)).status).toBe(404);
+    expect(retrieve).not.toHaveBeenCalled();
+
+    retrieve.mockRejectedValueOnce(new Error("Stripe unavailable"));
+    expect((await retryCleanup(sessionId, owner)).status).toBe(503);
+    expect((await cleanupAlerts(owner)).body.sessions).toContainEqual({ sessionId, queuedAt: expect.any(String) });
+
+    retrieve.mockResolvedValueOnce({ status: "open", payment_status: "unpaid" });
+    expire.mockRejectedValueOnce(new Error("Stripe unavailable"));
+    expect((await retryCleanup(sessionId, admin)).status).toBe(503);
+    expect((await cleanupAlerts(owner)).body.sessions).toContainEqual({ sessionId, queuedAt: expect.any(String) });
+
+    for (const resolved of [
+      { status: "complete", payment_status: "unpaid" },
+      { status: "complete", payment_status: "paid" },
+      { status: "open", payment_status: "paid" },
+    ]) {
+      retrieve.mockResolvedValue(resolved);
+      expect(await retryCleanup(sessionId, owner)).toEqual({ status: 200, body: { resolved: true } });
+      expect((await cleanupAlerts(owner)).body.sessions).not.toEqual(expect.arrayContaining([{ sessionId, queuedAt: expect.any(String) }]));
+      expect(expire).toHaveBeenCalledTimes(1); // Only the earlier failed unpaid attempt.
+      if (resolved.status !== "open") await pool.query(
+        "INSERT INTO membership_checkout_expirations (stripe_session_id, created_at) VALUES ($1, now() - interval '11 minutes')",
+        [sessionId],
+      );
+    }
+    expect((await retryCleanup(sessionId, admin)).status).toBe(404);
+    retrieve.mockResolvedValue({ status: "open", payment_status: "unpaid" });
+    expire.mockResolvedValue({ status: "expired" });
+    await pool.query(
+      "INSERT INTO membership_checkout_expirations (stripe_session_id, created_at) VALUES ($1, now() - interval '11 minutes')",
+      [sessionId],
+    );
+    expect(await retryCleanup(sessionId, admin)).toEqual({ status: 200, body: { resolved: true } });
+    expect(expire).toHaveBeenCalledTimes(2);
+    expect((await cleanupAlerts(owner)).body.sessions).not.toEqual(expect.arrayContaining([{ sessionId, queuedAt: expect.any(String) }]));
+  } finally {
+    await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = ANY($1::text[])", [[sessionId, recentId]]);
+    stripeClient.getUncachableStripeClient.mockReset();
+  }
+});
+
+test("parallel queued retries finish without waiting for a second database connection", async () => {
+  const sessions = Array.from({ length: 8 }, () => `cs_parallel_${randomUUID().replaceAll("-", "")}`);
+  let arrived = 0;
+  let releaseStripe!: () => void;
+  const stripeGate = new Promise<void>(resolve => { releaseStripe = resolve; });
+  let allArrived!: () => void;
+  const reachedStripe = new Promise<void>(resolve => { allArrived = resolve; });
+  const stripe = { checkout: { sessions: {
+    retrieve: vi.fn(async () => {
+      if (++arrived === sessions.length) allArrived();
+      await stripeGate;
+      return { status: "open", payment_status: "unpaid" };
+    }),
+    expire: vi.fn(async () => ({ status: "expired" })),
+  } } } as unknown as Stripe;
+  try {
+    for (const id of sessions) await pool.query(
+      "INSERT INTO membership_checkout_expirations (stripe_session_id, created_at) VALUES ($1, now() - interval '11 minutes')",
+      [id],
+    );
+    const retries = sessions.map(id => retryQueuedCheckoutExpiration(id, async () => stripe, true));
+    await Promise.race([
+      reachedStripe,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Concurrent retries did not reach Stripe")), 5000)),
+    ]);
+    releaseStripe();
+    expect(await Promise.all(retries)).toEqual(sessions.map(() => "resolved"));
+    expect(stripe.checkout.sessions.expire).toHaveBeenCalledTimes(sessions.length);
+  } finally {
+    releaseStripe();
+    await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = ANY($1::text[])", [sessions]);
   }
 });
 

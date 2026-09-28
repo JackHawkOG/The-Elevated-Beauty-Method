@@ -26,6 +26,7 @@ vi.mock("@workspace/api-client-react", () => ({
   useGetMyMembership: () => ({ data: { membership: state.membership }, isPending: false, isError: false }),
   useGetConfirmedMembershipCounts: () => ({ data: { founding: 0, standard: 0 } }),
   useGetMembershipCheckoutCleanupAlerts: () => ({ data: state.cleanup }),
+  useRetryMembershipCheckoutCleanup: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateMembershipCheckout: () => ({ isPending: false }),
   useCreateMembershipPortal: () => ({ isPending: false }),
   getGetMembershipOfferQueryKey: () => ["membership", "offer"],
@@ -77,6 +78,7 @@ test("staff see overdue cleanup alerts without checkout links, which clear with 
   const alert = page("open", true);
   expect(alert).toContain("Checkout cleanup needs attention");
   expect(alert).toContain("cs_test_overdue");
+  expect(alert).toContain("Retry cleanup");
   expect(alert).not.toContain("checkout.stripe.com/");
   state.cleanup = { total: 0, sessions: [] };
   expect(page("open", true)).not.toContain("Checkout cleanup needs attention");

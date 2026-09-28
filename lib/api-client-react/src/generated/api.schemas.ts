@@ -217,6 +217,10 @@ export interface MembershipCheckoutCleanupAlerts {
   sessions: MembershipCheckoutCleanupAlert[];
 }
 
+export interface MembershipCheckoutCleanupRetryResult {
+  resolved: true;
+}
+
 export type MembershipCheckoutInputKind = typeof MembershipCheckoutInputKind[keyof typeof MembershipCheckoutInputKind];
 
 

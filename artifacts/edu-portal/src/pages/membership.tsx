@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useUser } from "@clerk/react";
 import { Link } from "wouter";
-import { useGetMembershipOffer, useGetMyMembership, useGetConfirmedMembershipCounts, useGetMembershipCheckoutCleanupAlerts, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey, getGetConfirmedMembershipCountsQueryKey, getGetMembershipCheckoutCleanupAlertsQueryKey } from "@workspace/api-client-react";
+import { useGetMembershipOffer, useGetMyMembership, useGetConfirmedMembershipCounts, useGetMembershipCheckoutCleanupAlerts, useRetryMembershipCheckoutCleanup, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey, getGetConfirmedMembershipCountsQueryKey, getGetMembershipCheckoutCleanupAlertsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,10 @@ export default function MembershipPage() {
   });
   const checkout = useCreateMembershipCheckout();
   const portal = useCreateMembershipPortal();
+  const retryCleanup = useRetryMembershipCheckoutCleanup();
+  const [retryingSession, setRetryingSession] = useState<string | null>(null);
+  const [cleanupMessage, setCleanupMessage] = useState("");
+  const [cleanupError, setCleanupError] = useState("");
   const [error, setError] = useState("");
   const founding = offer?.phase === "open" && offer.foundingAvailable;
   const canBuy = offer?.phase !== "upcoming" && Boolean(offer);
@@ -93,6 +97,25 @@ export default function MembershipPage() {
     }
   }
 
+  async function retrySession(sessionId: string) {
+    setRetryingSession(sessionId);
+    setCleanupError("");
+    setCleanupMessage("");
+    try {
+      await retryCleanup.mutateAsync({ sessionId });
+      setCleanupMessage(`Cleanup resolved for ${sessionId}.`);
+    } catch {
+      setCleanupError(`Cleanup retry failed for ${sessionId}. The alert remains queued; please try again later.`);
+      setRetryingSession(null);
+      return;
+    }
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: getGetMembershipCheckoutCleanupAlertsQueryKey() }),
+      queryClient.invalidateQueries({ queryKey: getGetConfirmedMembershipCountsQueryKey() }),
+    ]);
+    setRetryingSession(null);
+  }
+
   return <AppLayout>
     <div className="mx-auto max-w-2xl space-y-6 py-10">
       <h1 className="font-serif text-4xl">The Elevated Method</h1>
@@ -101,12 +124,19 @@ export default function MembershipPage() {
         ? <p role="alert" className="rounded-2xl border border-destructive p-4 text-destructive">Checkout cleanup alerts are unavailable. Check server logs for failed expiration retries.</p>
         : cleanupAlerts.data?.total ? <section role="alert" className="rounded-2xl border border-destructive bg-card p-6">
           <h2 className="font-serif text-2xl">Checkout cleanup needs attention</h2>
-          <p className="mt-2">{cleanupAlerts.data.total} unpaid checkout {cleanupAlerts.data.total === 1 ? "session has" : "sessions have"} remained queued for over 10 minutes. Check the session status in Stripe; the server will keep retrying. Do not manually expire a paid checkout.</p>
-          <ul className="mt-3 space-y-1 text-sm">
-            {cleanupAlerts.data.sessions.map(session => <li key={session.sessionId}><code>{session.sessionId}</code> · queued {new Date(session.queuedAt).toLocaleString()}</li>)}
+          <p className="mt-2">{cleanupAlerts.data.total} checkout {cleanupAlerts.data.total === 1 ? "session has" : "sessions have"} remained queued for over 10 minutes. Check the session status in Stripe or retry the server check. Paid and completed checkouts will not be expired.</p>
+          <ul className="mt-3 space-y-2 text-sm">
+            {cleanupAlerts.data.sessions.map(session => <li key={session.sessionId} className="flex flex-wrap items-center gap-2">
+              <code>{session.sessionId}</code> · queued {new Date(session.queuedAt).toLocaleString()}
+              <Button size="sm" variant="outline" disabled={retryingSession !== null} onClick={() => retrySession(session.sessionId)}>
+                {retryingSession === session.sessionId ? "Retrying…" : "Retry cleanup"}
+              </Button>
+            </li>)}
           </ul>
           {cleanupAlerts.data.total > cleanupAlerts.data.sessions.length && <p className="mt-2 text-sm">Showing the oldest 100 sessions. Check server logs for the remaining failures.</p>}
         </section> : null)}
+      {isOwner && cleanupError && <p role="alert" className="text-destructive">{cleanupError}</p>}
+      {isOwner && cleanupMessage && <p role="status">{cleanupMessage}</p>}
       {isOwner && <section aria-label="Paid enrollment counts" className="rounded-2xl border border-border bg-card p-6">
         <h2 className="font-serif text-2xl">Paid enrollments · owner view</h2>
         <p className="mt-2 text-sm text-muted-foreground">Currently confirmed membership records, including buyers who never returned from Stripe checkout. Pending and forfeited memberships are not included.</p>

@@ -337,6 +337,21 @@ export const GetMembershipCheckoutCleanupAlertsResponse = zod.object({
 
 
 /**
+ * @summary Owner or admin retries one overdue queued checkout cleanup
+ */
+
+
+
+export const RetryMembershipCheckoutCleanupParams = zod.object({
+  "sessionId": zod.coerce.string().min(1)
+})
+
+export const RetryMembershipCheckoutCleanupResponse = zod.object({
+  "resolved": zod.literal(true)
+})
+
+
+/**
  * @summary Start a monthly membership checkout
  */
 export const CreateMembershipCheckoutBody = zod.object({

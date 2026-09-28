@@ -52,6 +52,7 @@ import type {
   MemberStoryRemovalReviewInput,
   MemberStoryReviewCorrectionInput,
   MembershipCheckoutCleanupAlerts,
+  MembershipCheckoutCleanupRetryResult,
   MembershipCheckoutInput,
   MembershipOffer,
   MembershipRedirect,
@@ -993,6 +994,77 @@ export function useGetMembershipCheckoutCleanupAlerts<TData = Awaited<ReturnType
 
 
 
+
+export const getRetryMembershipCheckoutCleanupUrl = (sessionId: string,) => {
+
+
+
+
+  return `/api/membership/checkout-cleanup-alerts/${sessionId}/retry`
+}
+
+/**
+ * @summary Owner or admin retries one overdue queued checkout cleanup
+ */
+export const retryMembershipCheckoutCleanup = async (sessionId: string, options?: Parameters<typeof customFetch>[1]): Promise<MembershipCheckoutCleanupRetryResult> => {
+
+  return customFetch<MembershipCheckoutCleanupRetryResult>(getRetryMembershipCheckoutCleanupUrl(sessionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRetryMembershipCheckoutCleanupMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryMembershipCheckoutCleanup>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof retryMembershipCheckoutCleanup>>, TError,{sessionId: string}, TContext> => {
+
+const mutationKey = ['retryMembershipCheckoutCleanup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof retryMembershipCheckoutCleanup>>, {sessionId: string}> = (props) => {
+          const {sessionId} = props ?? {};
+
+          return  retryMembershipCheckoutCleanup(sessionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RetryMembershipCheckoutCleanupMutationResult = NonNullable<Awaited<ReturnType<typeof retryMembershipCheckoutCleanup>>>
+
+    export type RetryMembershipCheckoutCleanupMutationError = ErrorType<void>
+
+    /**
+ * @summary Owner or admin retries one overdue queued checkout cleanup
+ */
+export const useRetryMembershipCheckoutCleanup = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryMembershipCheckoutCleanup>>, TError,{sessionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof retryMembershipCheckoutCleanup>>,
+        TError,
+        {sessionId: string},
+        TContext
+      > => {
+      return useMutation(getRetryMembershipCheckoutCleanupMutationOptions(options));
+    }
 
 export const getCreateMembershipCheckoutUrl = () => {
 

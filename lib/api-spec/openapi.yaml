@@ -268,6 +268,35 @@ paths:
           description: Sign-in required
         "403":
           description: Owner or admin access required
+  /membership/checkout-cleanup-alerts/{sessionId}/retry:
+    post:
+      operationId: retryMembershipCheckoutCleanup
+      tags: [membership]
+      summary: Owner or admin retries one overdue queued checkout cleanup
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Stripe confirmed the checkout resolved and the queue entry was removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipCheckoutCleanupRetryResult"
+        "400":
+          description: Invalid session ID
+        "401":
+          description: Sign-in required
+        "403":
+          description: Owner or admin access required
+        "404":
+          description: Session is not an overdue queued cleanup
+        "409":
+          description: Another cleanup attempt is already running for this session
+        "503":
+          description: Stripe or cleanup failed; the queued alert remains
   /membership/checkout:
     post:
       operationId: createMembershipCheckout
@@ -1176,6 +1205,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MembershipCheckoutCleanupAlert"
+    MembershipCheckoutCleanupRetryResult:
+      type: object
+      required: [resolved]
+      properties:
+        resolved: { type: boolean, enum: [true] }
     MembershipCheckoutInput:
       type: object
       required: [kind]
