@@ -404,6 +404,7 @@ test("a lost cancellation response rolls back the webhook, then redelivery obser
     parent: { subscription_details: { subscription: lostSubscriptionId } },
   };
   let stripeStatus: Stripe.Subscription.Status = "active";
+  let invoiceOutage = false;
   const retrieve = vi.fn(async (requestedId: string) => {
     expect(requestedId).toBe(lostSubscriptionId);
     return { status: stripeStatus, cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
@@ -415,6 +416,7 @@ test("a lost cancellation response rolls back the webhook, then redelivery obser
   });
   const list = vi.fn(async (params: { subscription: string }) => {
     expect(params.subscription).toBe(lostSubscriptionId);
+    if (invoiceOutage) throw new Error("Invoice lookup unavailable");
     return { data: failures, has_more: false };
   });
   vi.mocked(getStripeSync).mockResolvedValue({ processWebhook: vi.fn().mockResolvedValue(undefined) } as never);
@@ -443,16 +445,57 @@ test("a lost cancellation response rolls back the webhook, then redelivery obser
       status: "confirmed", failed_months: 0, last_failed_invoice: null, membership_tier: "Elevated",
     });
 
+    invoiceOutage = true;
     expect(await deliver("invoice.payment_failed", event, eventId)).toBe(200);
     expect(retrieve).toHaveBeenCalledTimes(2);
-    expect(list).toHaveBeenCalledTimes(3); // The canceled retry reads history once without re-canceling.
+    expect(list).toHaveBeenCalledTimes(3); // The canceled retry tries history without re-canceling.
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(await recordedEvents()).toEqual([{ id: eventId }]);
     expect(await state(lostSubscriptionId)).toEqual({
-      status: "forfeited", failed_months: 3, last_failed_invoice: failures[0].id, membership_tier: "Free",
+      status: "forfeited", failed_months: 0, last_failed_invoice: null, membership_tier: "Free",
+    });
+    const historyState = async () => (await pool.query<{
+      invoice_history_pending: boolean; invoice_history_retry_count: number; invoice_history_retry_at: Date | null;
+    }>(
+      "SELECT invoice_history_pending, invoice_history_retry_count, invoice_history_retry_at FROM membership_checkouts WHERE stripe_subscription_id = $1",
+      [lostSubscriptionId],
+    )).rows[0];
+    expect(await historyState()).toMatchObject({ invoice_history_pending: true, invoice_history_retry_count: 1 });
+    expect((await historyState()).invoice_history_retry_at!.getTime()).toBeGreaterThan(Date.now());
+
+    await reconcileMemberships(lostSubscriptionId);
+    expect(list).toHaveBeenCalledTimes(3); // No hot-loop during the backoff window.
+    await pool.query(
+      "UPDATE membership_checkouts SET invoice_history_retry_at = now() - interval '1 second' WHERE stripe_subscription_id = $1",
+      [lostSubscriptionId],
+    );
+    await reconcileMemberships(lostSubscriptionId);
+    expect(list).toHaveBeenCalledTimes(4);
+    expect(await historyState()).toMatchObject({ invoice_history_pending: true, invoice_history_retry_count: 2 });
+    expect(await state(lostSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 0, last_failed_invoice: null, membership_tier: "Free",
     });
 
+    invoiceOutage = false;
+    await reconcileMemberships(lostSubscriptionId);
+    expect(list).toHaveBeenCalledTimes(4); // Recovery still waits for the next due retry.
+    await pool.query(
+      "UPDATE membership_checkouts SET invoice_history_retry_at = now() - interval '1 second' WHERE stripe_subscription_id = $1",
+      [lostSubscriptionId],
+    );
+    await reconcileMemberships(lostSubscriptionId);
+    expect(list).toHaveBeenCalledTimes(5);
+    expect(retrieve).toHaveBeenCalledTimes(2); // History repair never retrieves or changes subscription.
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(await historyState()).toEqual({
+      invoice_history_pending: false, invoice_history_retry_count: 0, invoice_history_retry_at: null,
+    });
+    expect(await state(lostSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 3, last_failed_invoice: failures[0].id, membership_tier: "Free",
+    });
     expect(await deliver("invoice.payment_failed", event, eventId)).toBe(200);
+    await reconcileMemberships(lostSubscriptionId);
+    expect(list).toHaveBeenCalledTimes(5);
     expect(retrieve).toHaveBeenCalledTimes(2);
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(await state(lostSubscriptionId)).toEqual({

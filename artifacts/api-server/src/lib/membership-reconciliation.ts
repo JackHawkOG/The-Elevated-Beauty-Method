@@ -5,6 +5,11 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
 
 const SWEEP_INTERVAL_MS = 15 * 60_000;
+const MAX_HISTORY_RETRY_MS = 24 * 60 * 60_000;
+
+function historyRetryDelay(attempt: number): number {
+  return Math.min(SWEEP_INTERVAL_MS * 2 ** Math.min(attempt - 1, 7), MAX_HISTORY_RETRY_MS);
+}
 
 // Paid renewal invoices end a run of failures. Retries of the same invoice
 // and multiple invoices in one calendar month never count as extra months.
@@ -60,15 +65,36 @@ export async function reconcileSubscription(
   const result = await client.query<{
     id: string; clerk_id: string; kind: string; status: string;
     failed_months: number; last_failed_invoice: string | null;
+    invoice_history_pending: boolean; invoice_history_retry_count: number;
   }>(
-    "SELECT id, clerk_id, kind, status, failed_months, last_failed_invoice FROM membership_checkouts WHERE stripe_subscription_id = $1 FOR UPDATE",
+    "SELECT id, clerk_id, kind, status, failed_months, last_failed_invoice, invoice_history_pending, invoice_history_retry_count FROM membership_checkouts WHERE stripe_subscription_id = $1 FOR UPDATE",
     [subscriptionId],
   );
   const row = result.rows[0];
-  if (!row || row.status !== "confirmed") return; // A forfeited founding place is permanent.
+  if (!row) return;
+  if (row.status === "forfeited" && row.kind === "founding" && row.invoice_history_pending) {
+    // No subscription lookup or tier write: this is history repair, never access repair.
+    try {
+      const failed = await currentFailedBillingMonths(stripe, subscriptionId);
+      await client.query(
+        "UPDATE membership_checkouts SET failed_months = $2, last_failed_invoice = $3, invoice_history_pending = false, invoice_history_retry_count = 0, invoice_history_retry_at = NULL WHERE id = $1 AND status = 'forfeited' AND invoice_history_pending",
+        [row.id, failed.count, failed.lastId],
+      );
+    } catch (err) {
+      const attempt = row.invoice_history_retry_count + 1;
+      await client.query(
+        "UPDATE membership_checkouts SET invoice_history_retry_count = $2, invoice_history_retry_at = now() + ($3::bigint * interval '1 millisecond') WHERE id = $1 AND status = 'forfeited' AND invoice_history_pending",
+        [row.id, attempt, historyRetryDelay(attempt)],
+      );
+      logger.error({ err, subscriptionId, attempt }, "Ended membership invoice history still unavailable");
+    }
+    return;
+  }
+  if (row.status !== "confirmed") return; // A forfeited founding place is permanent.
 
   let subscription = await stripe.subscriptions.retrieve(subscriptionId);
   let failed = { count: 0, lastId: null as string | null };
+  let historyPending = false;
   if (row.kind === "founding") {
     // A cancellation may have succeeded at Stripe while its response was lost.
     // Read the same invoice history on redelivery so forfeiture keeps its cause.
@@ -79,6 +105,7 @@ export async function reconcileSubscription(
         // Ending access must not depend on a second Stripe API being available.
         logger.warn({ err, subscriptionId }, "Unable to read ended membership invoice history");
         failed = { count: row.failed_months, lastId: row.last_failed_invoice };
+        historyPending = true;
       }
     } else {
       failed = await currentFailedBillingMonths(stripe, subscriptionId);
@@ -97,8 +124,8 @@ export async function reconcileSubscription(
 
   if (isSubscriptionEnded(subscription)) {
     await client.query(
-      "UPDATE membership_checkouts SET status = 'forfeited', failed_months = $2, last_failed_invoice = $3 WHERE id = $1 AND status = 'confirmed'",
-      [row.id, failed.count, failed.lastId],
+      "UPDATE membership_checkouts SET status = 'forfeited', failed_months = $2, last_failed_invoice = $3, invoice_history_pending = $4, invoice_history_retry_count = CASE WHEN $4 THEN 1 ELSE 0 END, invoice_history_retry_at = CASE WHEN $4 THEN now() + ($5::bigint * interval '1 millisecond') ELSE NULL END WHERE id = $1 AND status = 'confirmed'",
+      [row.id, failed.count, failed.lastId, historyPending, historyRetryDelay(1)],
     );
     await client.query(
       "UPDATE users SET membership_tier = 'Free' WHERE clerk_id = $1 AND NOT EXISTS (SELECT 1 FROM membership_checkouts WHERE clerk_id = $1 AND status = 'confirmed')",
@@ -125,7 +152,7 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
       let after = "0";
       while (true) {
         const batch = await client.query<{ id: string; stripe_subscription_id: string }>(
-          "SELECT id, stripe_subscription_id FROM membership_checkouts WHERE status = 'confirmed' AND stripe_subscription_id IS NOT NULL AND id > $1 AND ($2::text IS NULL OR stripe_subscription_id = $2) ORDER BY id LIMIT 100",
+          "SELECT id, stripe_subscription_id FROM membership_checkouts WHERE (status = 'confirmed' OR (status = 'forfeited' AND kind = 'founding' AND invoice_history_pending AND invoice_history_retry_at <= now())) AND stripe_subscription_id IS NOT NULL AND id > $1 AND ($2::text IS NULL OR stripe_subscription_id = $2) ORDER BY id LIMIT 100",
           [after, subscriptionId ?? null],
         );
         if (!batch.rows.length) break;
