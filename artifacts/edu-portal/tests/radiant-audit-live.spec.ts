@@ -962,6 +962,110 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
   }
 });
 
+for (const kind of ["selected", "all"] as const) {
+  test(`a committed ${kind} earlier Audit deletion with a lost reply confirms the saved history`, async ({ page }) => {
+    test.setTimeout(120_000);
+    requireAuditDevelopment();
+    await clerkSetup();
+    const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+    const tag = randomUUID().slice(0, 12);
+    const email = auditFixtureEmail("delete-lost-reply", tag);
+    const markers = [`first-${tag}`, `second-${tag}`, `current-${tag}`];
+    const created: string[] = [];
+    try {
+      await setupClerkTestingToken({ page });
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
+      });
+      created.push(user.id);
+      await signIn(page, email);
+      for (const [index, marker] of markers.entries()) {
+        if (index) await page.goto("/radiant-audit");
+        await save(page, email, marker);
+      }
+
+      const [{ db, radiantAuditHistoryTable, radiantAuditsTable }, { eq }] =
+        await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+      const historyRows = () => db.select().from(radiantAuditHistoryTable)
+        .where(eq(radiantAuditHistoryTable.clerkId, user.id));
+      const firstId = (await historyRows()).find(row =>
+        row.masteryGoal === reflections(markers[0]).masteryGoal,
+      )!.id;
+      const historyPath = "/api/users/me/radiant-audit/history";
+      const deletePath = kind === "all" ? historyPath : `${historyPath}/${firstId}`;
+      const comparison = page.getByRole("region", { name: "How your answers have changed" });
+      const choices = comparison.getByRole("combobox", { name: "Compare with" });
+      if (kind === "selected") {
+        await choices.selectOption(String(firstId));
+        await expect(comparison).toContainText(reflections(markers[0]).masteryGoal);
+      }
+
+      // Let the authenticated browser commit the real deletion, then lose only
+      // the reply seen by the application (route.fetch() can lose Clerk auth).
+      await page.evaluate(path => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = async (input, init) => {
+          const response = await originalFetch(input, init);
+          const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+          if (method === "DELETE" && new URL(url, location.href).pathname === path) {
+            throw new TypeError("The history DELETE response was lost");
+          }
+          return response;
+        };
+      }, deletePath);
+      let deletes = 0;
+      let reads = 0;
+      page.on("request", request => {
+        const path = new URL(request.url()).pathname;
+        if (path === deletePath && request.method() === "DELETE") deletes++;
+        if (path === historyPath && request.method() === "GET") reads++;
+      });
+
+      await comparison.getByRole("button", {
+        name: kind === "all" ? "Clear earlier history" : "Delete selected earlier Audit",
+      }).click();
+      const dialog = page.getByRole("alertdialog", {
+        name: kind === "all" ? "Clear all earlier Audits?" : "Delete this earlier Audit?",
+      });
+      const committed = page.waitForResponse(response =>
+        response.request().method() === "DELETE" && new URL(response.url()).pathname === deletePath,
+      );
+      await dialog.getByRole("button", {
+        name: kind === "all" ? "Clear earlier history" : "Delete earlier Audit",
+      }).click();
+      expect((await committed).status()).toBe(204);
+      await expect(dialog).toHaveCount(0);
+      expect(deletes).toBe(1);
+      expect(reads).toBeGreaterThan(0);
+      await expect(page.locator("main")).not.toContainText("We couldn't delete your earlier Audit");
+      await expect(page.locator("main")).toContainText(reflections(markers[2]).masteryGoal);
+      await expect(choices.locator("option")).toHaveCount(kind === "all" ? 0 : 1);
+      if (kind === "selected") {
+        await expect(comparison).toContainText(reflections(markers[1]).masteryGoal);
+        await expect(page.locator("body")).not.toContainText(reflections(markers[0]).masteryGoal);
+      } else {
+        await expect(comparison).toHaveCount(0);
+        await expect(page.locator("body")).not.toContainText(reflections(markers[1]).masteryGoal);
+      }
+
+      await page.reload();
+      await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+      await expect(page.locator("main")).toContainText(reflections(markers[2]).masteryGoal);
+      await expect(choices.locator("option")).toHaveCount(kind === "all" ? 0 : 1);
+      expect((await historyRows()).map(row => row.masteryGoal))
+        .toEqual(kind === "all" ? [] : [reflections(markers[1]).masteryGoal]);
+      expect((await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user.id)))
+        .map(row => row.masteryGoal)).toEqual([reflections(markers[2]).masteryGoal]);
+      expect(deletes).toBe(1);
+    } finally {
+      await cleanUpAccounts(client, created);
+    }
+  });
+}
+
 test("failed current Audit deletion keeps saved answers and history through reload, then retry succeeds", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();

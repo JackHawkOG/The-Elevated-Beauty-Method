@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  getRadiantAuditHistory,
   getGetRadiantAuditHistoryQueryKey,
   useClearRadiantAuditHistory,
   useDeleteRadiantAuditHistoryEntry,
@@ -82,10 +83,11 @@ export function RadiantAuditComparison({
   const [confirmation, setConfirmation] = useState<{ kind: "selected"; entry: RadiantAuditHistoryEntry } | { kind: "all" } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const queryClient = useQueryClient();
   const deleteEntry = useDeleteRadiantAuditHistoryEntry();
   const clearHistory = useClearRadiantAuditHistory();
-  const deleting = deleteEntry.isPending || clearHistory.isPending;
+  const deleting = deleteEntry.isPending || clearHistory.isPending || checking;
   const staleSelection = selectedId !== null && !history.some(entry => entry.id === selectedId);
   const earlier = staleSelection ? undefined : (history.find(entry => entry.id === selectedId) ?? history[0]);
   const confirmedEntryAvailable = confirmation?.kind !== "selected" || history.some(entry => entry.id === confirmation.entry.id);
@@ -94,26 +96,41 @@ export function RadiantAuditComparison({
     if (!confirmation || !confirmedEntryAvailable) return;
     setError(null);
     const key = getGetRadiantAuditHistoryQueryKey();
+    const target = confirmation;
     try {
-      if (confirmation.kind === "all") {
+      if (target.kind === "all") {
         await clearHistory.mutateAsync();
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, []);
-        try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
-        setSelectedId(null);
-        setNotice(latest ? "Earlier Audit history cleared. Your latest Audit is still saved." : "Earlier Audit history cleared. You have no current Audit.");
       } else {
-        const id = confirmation.entry.id;
+        const id = target.entry.id;
         await deleteEntry.mutateAsync({ id });
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, entries => entries?.filter(entry => entry.id !== id));
-        try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
-        setSelectedId(null);
-        setNotice(latest ? "Earlier submission deleted. Your latest Audit is still saved." : "Earlier submission deleted. You have no current Audit.");
       }
-      setConfirmation(null);
       void queryClient.invalidateQueries({ queryKey: key });
     } catch {
-      setError("We couldn't delete your earlier Audit. Please try again.");
+      setChecking(true);
+      try {
+        // The server may have committed the deletion before its reply was lost.
+        // Bypass the cached list to verify the actual state before suggesting a retry.
+        const serverHistory = await getRadiantAuditHistory();
+        queryClient.setQueryData(key, serverHistory);
+        if (target.kind === "all" ? serverHistory.length > 0 : serverHistory.some(entry => entry.id === target.entry.id)) {
+          setError("We couldn't delete your earlier Audit. Please try again.");
+          return;
+        }
+      } catch {
+        setError("We couldn't confirm whether your earlier Audit was deleted. Please refresh to check before trying again.");
+        return;
+      } finally {
+        setChecking(false);
+      }
     }
+    try { sessionStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
+    setSelectedId(null);
+    setNotice(target.kind === "all"
+      ? latest ? "Earlier Audit history cleared. Your latest Audit is still saved." : "Earlier Audit history cleared. You have no current Audit."
+      : latest ? "Earlier submission deleted. Your latest Audit is still saved." : "Earlier submission deleted. You have no current Audit.");
+    setConfirmation(null);
   }
 
   if (!history.length) {
@@ -193,7 +210,7 @@ export function RadiantAuditComparison({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleting || !confirmedEntryAvailable}
+              disabled={deleting || !confirmedEntryAvailable || error?.startsWith("We couldn't confirm")}
               onClick={event => { event.preventDefault(); void confirmDeletion(); }}
             >
               {deleting ? "Deleting…" : confirmation?.kind === "all" ? "Clear earlier history" : "Delete earlier Audit"}
