@@ -30,6 +30,8 @@ const retryId = `test-retry-${run}`;
 const retryActor = `Test Retry ${run}`;
 const blockedRetryId = `test-blocked-retry-${run}`;
 const blockedRetryActor = `Test Blocked Retry ${run}`;
+const waitingSuccessId = `test-waiting-success-${run}`;
+const waitingSuccessActor = `Test Waiting Success ${run}`;
 const courseTitle = `Accelerator progress test ${run}`;
 const requestError = vi.fn();
 let courseId: number;
@@ -102,6 +104,7 @@ beforeAll(async () => {
     { clerkId: concurrentId, displayName: "Test Concurrent", email: `${concurrentId}@example.invalid`, membershipTier: "Elevated" },
     { clerkId: retryId, displayName: retryActor, email: `${retryId}@example.invalid`, membershipTier: "Elevated" },
     { clerkId: blockedRetryId, displayName: blockedRetryActor, email: `${blockedRetryId}@example.invalid`, membershipTier: "Elevated" },
+    { clerkId: waitingSuccessId, displayName: waitingSuccessActor, email: `${waitingSuccessId}@example.invalid`, membershipTier: "Elevated" },
   ]);
 });
 
@@ -120,6 +123,7 @@ afterAll(async () => {
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, `Accelerator progress test ${run}`), eq(activityTable.actorName, "Test Concurrent")));
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, retryActor)));
       await db.delete(activityTable).where(and(eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, blockedRetryActor)));
+      await db.delete(activityTable).where(and(eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, waitingSuccessActor)));
     }
     if (categoryId) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, elevatedId));
@@ -127,6 +131,7 @@ afterAll(async () => {
     await db.delete(usersTable).where(eq(usersTable.clerkId, concurrentId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, retryId));
     await db.delete(usersTable).where(eq(usersTable.clerkId, blockedRetryId));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, waitingSuccessId));
   } finally {
     await pool.end();
   }
@@ -258,6 +263,77 @@ test("retries waiting on an open enrollment recover after its activity write fai
     expect(activity[0].type).toBe("enrollment");
   } finally {
     releaseFailure();
+    await Promise.allSettled(requests);
+    transactionSpy.mockRestore();
+  }
+});
+
+test("retries waiting on a successful enrollment do not duplicate its activity", async () => {
+  const transaction = db.transaction.bind(db);
+  let releaseActivity!: () => void;
+  const activityGate = new Promise<void>(resolve => { releaseActivity = resolve; });
+  let activityStarted!: () => void;
+  const activityReached = new Promise<void>(resolve => { activityStarted = resolve; });
+  let contendersStarted!: () => void;
+  const contendersReached = new Promise<void>(resolve => { contendersStarted = resolve; });
+  const contenderCount = 3;
+  let transactions = 0;
+  let insertAttempts = 0;
+  const transactionSpy = vi.spyOn(db, "transaction").mockImplementation((callback, config) =>
+    transaction(async tx => {
+      const insert = tx.insert.bind(tx);
+      if (transactions++ === 0) {
+        vi.spyOn(tx, "insert").mockImplementation(((table: typeof activityTable) => {
+          if (table === activityTable) return {
+            values: async (values: typeof activityTable.$inferInsert) => {
+              activityStarted();
+              await activityGate;
+              return insert(activityTable).values(values);
+            },
+          };
+          return insert(table);
+        }) as typeof tx.insert);
+      } else {
+        vi.spyOn(tx, "insert").mockImplementation(((table: typeof enrollmentsTable) => {
+          if (table === enrollmentsTable && ++insertAttempts === contenderCount) contendersStarted();
+          return insert(table);
+        }) as typeof tx.insert);
+      }
+      return callback(tx);
+    }, config),
+  );
+
+  const requests: Array<Promise<Awaited<ReturnType<typeof request>>>> = [];
+  try {
+    const first = request(waitingSuccessId, "/enrollments", "POST", { courseId });
+    requests.push(first);
+    await activityReached;
+    const contenders = Array.from({ length: contenderCount }, () =>
+      request(waitingSuccessId, "/enrollments", "POST", { courseId }));
+    requests.push(...contenders);
+    await contendersReached;
+    // The winning enrollment is not visible until its activity also commits.
+    expect(await db.select().from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.userId, waitingSuccessId), eq(enrollmentsTable.courseId, courseId),
+    ))).toHaveLength(0);
+    releaseActivity();
+
+    const results = await Promise.all(requests);
+    expect(results.map(result => result.status)).toEqual(Array(contenderCount + 1).fill(201));
+    const ids = results.map(result => (result.data as { id: number }).id);
+    expect(new Set(ids).size).toBe(1);
+    const rows = await db.select().from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.userId, waitingSuccessId), eq(enrollmentsTable.courseId, courseId),
+    ));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(ids[0]);
+    const activity = await db.select().from(activityTable).where(and(
+      eq(activityTable.entityTitle, courseTitle), eq(activityTable.actorName, waitingSuccessActor),
+    ));
+    expect(activity).toHaveLength(1);
+    expect(activity[0].type).toBe("enrollment");
+  } finally {
+    releaseActivity();
     await Promise.allSettled(requests);
     transactionSpy.mockRestore();
   }
