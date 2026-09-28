@@ -64,7 +64,11 @@ async function assertRepair(repair: "migration" | "startup repair") {
         (30, 'legacy-member', 8, 3, 51, '2022-03-01'),
         (61, 'no-valid-lesson', 7, 2, 32, '2022-01-01'),
         (62, 'no-valid-lesson', 7, 8, 51, '2023-01-01'),
-        (63, 'no-valid-lesson', 7, 4, NULL, '2024-01-01')
+        (63, 'no-valid-lesson', 7, 4, NULL, '2024-01-01'),
+        (71, 'single-draft', 7, 6, 32, '2022-02-01'),
+        (72, 'single-cross-course', 7, 7, 51, '2022-03-01'),
+        (73, 'single-published', 7, 3, 41, '2022-04-01'),
+        (74, 'single-no-lesson', 7, 2, NULL, '2022-05-01')
     `);
     const migration = await readFile(migrationUrl, "utf8");
     const rows = async () => (await client.query(`
@@ -126,6 +130,10 @@ async function assertRepair(repair: "migration" | "startup repair") {
       { id: 21, user_id: "another-member", course_id: 7, completed_lessons: 5, last_lesson_id: 41, enrolled_at: "2022-01-01" },
       { id: 30, user_id: "legacy-member", course_id: 8, completed_lessons: 3, last_lesson_id: 51, enrolled_at: "2022-03-01" },
       { id: 61, user_id: "no-valid-lesson", course_id: 7, completed_lessons: 8, last_lesson_id: null, enrolled_at: "2022-01-01" },
+      { id: 71, user_id: "single-draft", course_id: 7, completed_lessons: 6, last_lesson_id: null, enrolled_at: "2022-02-01" },
+      { id: 72, user_id: "single-cross-course", course_id: 7, completed_lessons: 7, last_lesson_id: null, enrolled_at: "2022-03-01" },
+      { id: 73, user_id: "single-published", course_id: 7, completed_lessons: 3, last_lesson_id: 41, enrolled_at: "2022-04-01" },
+      { id: 74, user_id: "single-no-lesson", course_id: 7, completed_lessons: 2, last_lesson_id: null, enrolled_at: "2022-05-01" },
     ]);
     // The installed index must prevent future duplicates as well.
     await expect(client.query(`

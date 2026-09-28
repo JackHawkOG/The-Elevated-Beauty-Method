@@ -28,6 +28,18 @@ SET "completed_lessons" = r.most_completed, "last_lesson_id" = r.latest_lesson
 FROM ranked r
 WHERE e."id" = r."id" AND r.position = 1 AND r.copies > 1;
 
+-- A single legacy enrollment can also point to a draft or another course.
+-- Preserve its progress while clearing only an unavailable resume destination.
+UPDATE "enrollments" e
+SET "last_lesson_id" = NULL
+WHERE e."last_lesson_id" IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM "lessons" l
+    WHERE l."id" = e."last_lesson_id"
+      AND l."course_id" = e."course_id"
+      AND l."published_at" IS NOT NULL
+  );
+
 DELETE FROM "enrollments" e
 USING (
   SELECT "id", row_number() OVER (

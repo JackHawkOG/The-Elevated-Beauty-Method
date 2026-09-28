@@ -31,6 +31,19 @@ export async function ensureEnrollmentSchema(database: Pick<typeof db, "transact
       FROM ranked r
       WHERE e."id" = r."id" AND r.position = 1 AND r.copies > 1
     `);
+    // Even a single legacy enrollment may point to a draft or another course.
+    // Clear only the resume pointer; recorded progress remains intact.
+    await tx.execute(sql`
+      UPDATE "enrollments" e
+      SET "last_lesson_id" = NULL
+      WHERE e."last_lesson_id" IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM "lessons" l
+          WHERE l."id" = e."last_lesson_id"
+            AND l."course_id" = e."course_id"
+            AND l."published_at" IS NOT NULL
+        )
+    `);
     await tx.execute(sql`
       DELETE FROM "enrollments" e
       USING (
