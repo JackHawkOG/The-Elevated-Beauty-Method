@@ -84,6 +84,62 @@ for (const url of [
   });
 }
 
+for (const url of [
+  undefined,
+  "",
+  "not a URL",
+  "/membership",
+  "javascript:alert('bad')",
+  "http://billing.stripe.com/p/session/test_123",
+  "https://billing.stripe.com.evil.example/p/session/test_123",
+  "https://evil.example/p/session/test_123",
+  "https://user@billing.stripe.com/p/session/test_123",
+  "https://billing.stripe.com:444/p/session/test_123",
+  "https://billing.stripe.com/other",
+  "https://billing.stripe.com/p/session/",
+  "https://billing.stripe.com/p/session/test_123\njavascript:alert(1)",
+]) {
+  test(`invalid billing portal destination ${JSON.stringify(url)} stays on membership`, async ({ page }) => {
+    let portalRequests = 0;
+    await page.route("**/api/membership/offer", route => route.fulfill({
+      json: { phase: "open", foundingAvailable: true, foundingPrice: 24, standardPrice: 48 },
+    }));
+    await page.route("**/api/membership/me", route => route.fulfill({
+      json: { membership: { kind: "standard", status: "confirmed" } },
+    }));
+    await page.route("**/api/membership/portal", route => {
+      portalRequests++;
+      expect(route.request().method()).toBe("POST");
+      return route.fulfill({ json: url === undefined ? {} : { url } });
+    });
+
+    await page.goto("/tests/membership-harness.html");
+    await page.getByRole("button", { name: "Manage billing or cancel" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Billing is temporarily unavailable. Please try again." })).toBeVisible();
+    await expect(page).toHaveURL(/\/tests\/membership-harness\.html$/);
+    expect(portalRequests).toBe(1);
+  });
+}
+
+test("valid Stripe billing portal session opens from membership", async ({ page }) => {
+  const portalUrl = "https://billing.stripe.com/p/session/test_123?prefilled_email=member%40example.com";
+  await page.route("**/api/membership/offer", route => route.fulfill({
+    json: { phase: "open", foundingAvailable: true, foundingPrice: 24, standardPrice: 48 },
+  }));
+  await page.route("**/api/membership/me", route => route.fulfill({
+    json: { membership: { kind: "standard", status: "confirmed" } },
+  }));
+  await page.route("**/api/membership/portal", route => route.fulfill({ json: { url: portalUrl } }));
+  await page.route("https://billing.stripe.com/**", route => route.fulfill({
+    contentType: "text/html",
+    body: "<!doctype html><title>Stripe billing portal test</title>",
+  }));
+
+  await page.goto("/tests/membership-harness.html");
+  await page.getByRole("button", { name: "Manage billing or cancel" }).click();
+  await expect(page).toHaveURL(portalUrl);
+});
+
 for (const kind of ["founding", "standard"] as const) {
   test(`${kind} cancelled checkout stays pending without a paid conversion and can be continued`, async ({ page }) => {
     const events: Event[] = [];

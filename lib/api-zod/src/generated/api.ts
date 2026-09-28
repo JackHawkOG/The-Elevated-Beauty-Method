@@ -29,7 +29,6 @@ export const publishMemberStoryBodyAttributionMax = 120;
 export const publishMemberStoryBodyPermissionRecordMax = 2000;
 
 
-
 export const PublishMemberStoryBody = zod.object({
   "quote": zod.string().min(1).max(publishMemberStoryBodyQuoteMax),
   "attribution": zod.string().min(1).max(publishMemberStoryBodyAttributionMax),
@@ -101,8 +100,6 @@ export const RequestMemberStoryRemovalParams = zod.object({
 })
 
 
-
-
 export const RequestMemberStoryRemovalBody = zod.object({
   "note": zod.string().min(1).describe('How the requester is connected to the story, for private owner review; at most 500 characters')
 })
@@ -149,7 +146,6 @@ export const ReviewMemberStoryRemovalParams = zod.object({
 })
 
 export const reviewMemberStoryRemovalBodyNoteMax = 2000;
-
 
 
 export const ReviewMemberStoryRemovalBody = zod.object({
@@ -209,7 +205,6 @@ export const getConfirmedMembershipCountsResponseFoundingMin = 0;
 export const getConfirmedMembershipCountsResponseStandardMin = 0;
 
 
-
 export const GetConfirmedMembershipCountsResponse = zod.object({
   "founding": zod.number().min(getConfirmedMembershipCountsResponseFoundingMin).describe('Whole count of confirmed founding members'),
   "standard": zod.number().min(getConfirmedMembershipCountsResponseStandardMin).describe('Whole count of confirmed standard members')
@@ -220,7 +215,6 @@ export const GetConfirmedMembershipCountsResponse = zod.object({
  * @summary Owner and admin alerts for checkout expiration retries queued over ten minutes
  */
 export const getMembershipCheckoutCleanupAlertsResponseTotalMin = 0;
-
 
 
 export const GetMembershipCheckoutCleanupAlertsResponse = zod.object({
@@ -309,7 +303,6 @@ export const ListCoursesResponse = zod.array(ListCoursesResponseItem)
  */
 
 
-
 export const CreateCourseBody = zod.object({
   "title": zod.string().min(1),
   "description": zod.string(),
@@ -383,8 +376,6 @@ export const UpdateCourseParams = zod.object({
 })
 
 
-
-
 export const UpdateCourseBody = zod.object({
   "title": zod.string().min(1),
   "description": zod.string(),
@@ -424,7 +415,6 @@ export const ApproveCourseParams = zod.object({
 
 export const approveCourseBodyRevisionMin = 64;
 export const approveCourseBodyRevisionMax = 64;
-
 
 
 export const ApproveCourseBody = zod.object({
@@ -477,8 +467,6 @@ export const CreateLessonParams = zod.object({
 })
 
 
-
-
 export const CreateLessonBody = zod.object({
   "title": zod.string().min(1),
   "content": zod.string().optional(),
@@ -526,8 +514,6 @@ export const UpdateLessonParams = zod.object({
 })
 
 
-
-
 export const UpdateLessonBody = zod.object({
   "title": zod.string().min(1),
   "content": zod.string().optional(),
@@ -557,7 +543,6 @@ export const ApproveLessonParams = zod.object({
 
 export const approveLessonBodyRevisionMin = 64;
 export const approveLessonBodyRevisionMax = 64;
-
 
 
 export const ApproveLessonBody = zod.object({
@@ -734,8 +719,6 @@ export const CreateAnnouncementHeader = zod.object({
 })
 
 
-
-
 export const CreateAnnouncementBody = zod.object({
   "title": zod.string().min(1),
   "body": zod.string(),
@@ -803,7 +786,6 @@ export const attachAnnouncementActivityBodyEvidenceMin = 20;
 export const attachAnnouncementActivityBodyEvidenceMax = 2000;
 
 
-
 export const AttachAnnouncementActivityBody = zod.object({
   "activityId": zod.number(),
   "revision": zod.string(),
@@ -858,7 +840,6 @@ export const UpdateMeResponse = zod.object({
  */
 
 
-
 export const GetBeautyMethodResponse = zod.object({
   "completed": zod.boolean(),
   "diagnostic": zod.union([zod.object({
@@ -885,7 +866,6 @@ export const GetBeautyMethodResponse = zod.object({
  */
 
 
-
 export const SaveBeautyDiagnosticBody = zod.object({
   "skinType": zod.enum(['Dry', 'Balanced', 'Combination', 'Oily', 'Sensitive']),
   "undertone": zod.enum(['Cool', 'Neutral', 'Warm', 'Unsure']),
@@ -893,8 +873,6 @@ export const SaveBeautyDiagnosticBody = zod.object({
   "lifeStage": zod.enum(['Starting fresh', 'Career growth', 'Entrepreneurship', 'Reinvention', 'Midlife evolution']),
   "visibilityGoal": zod.enum(['Everyday confidence', 'Camera ready', 'Executive presence', 'Personal brand', 'Special occasions'])
 })
-
-
 
 
 export const SaveBeautyDiagnosticResponse = zod.object({
@@ -937,7 +915,6 @@ export const getRadiantAuditResponseOneOneMasteryGoalMax = 1000;
 export const getRadiantAuditResponseOneOneResearchTimeMax = 1000;
 
 
-
 export const GetRadiantAuditResponse = zod.union([zod.object({
   "submissionId": zod.string().min(getRadiantAuditResponseOneOneSubmissionIdMin).max(getRadiantAuditResponseOneOneSubmissionIdMax).regex(getRadiantAuditResponseOneOneSubmissionIdRegExp).optional().describe('Stable ID for one submission; reuse on retries, generate a new ID for a new retake.'),
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditResponseOneOneRoutineChecksMax),
@@ -977,7 +954,6 @@ export const saveRadiantAuditBodyMasteryGoalMax = 1000;
 export const saveRadiantAuditBodyResearchTimeMax = 1000;
 
 
-
 export const SaveRadiantAuditBody = zod.object({
   "submissionId": zod.string().min(saveRadiantAuditBodySubmissionIdMin).max(saveRadiantAuditBodySubmissionIdMax).regex(saveRadiantAuditBodySubmissionIdRegExp).optional().describe('Stable ID for one submission; reuse on retries, generate a new ID for a new retake.'),
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditBodyRoutineChecksMax),
@@ -1001,7 +977,6 @@ export const saveRadiantAuditResponseAuditOneBeautyTrendMax = 1000;
 export const saveRadiantAuditResponseAuditOneMasteryGoalMax = 1000;
 
 export const saveRadiantAuditResponseAuditOneResearchTimeMax = 1000;
-
 
 
 export const SaveRadiantAuditResponse = zod.object({
@@ -1035,7 +1010,6 @@ export const getRadiantAuditDraftResponseOneOneMasteryGoalMax = 1000;
 export const getRadiantAuditDraftResponseOneOneResearchTimeMax = 1000;
 
 
-
 export const GetRadiantAuditDraftResponse = zod.union([zod.object({
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditDraftResponseOneOneRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(getRadiantAuditDraftResponseOneOneValuesChecksMax),
@@ -1064,7 +1038,6 @@ export const saveRadiantAuditDraftBodyMasteryGoalMax = 1000;
 export const saveRadiantAuditDraftBodyResearchTimeMax = 1000;
 
 
-
 export const SaveRadiantAuditDraftBody = zod.object({
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(saveRadiantAuditDraftBodyRoutineChecksMax),
   "valuesChecks": zod.array(zod.enum(['quality-over-price', 'one-method-mastered', 'professional-results', 'authentic-expression', 'lasting-investment'])).max(saveRadiantAuditDraftBodyValuesChecksMax),
@@ -1082,7 +1055,6 @@ export const saveRadiantAuditDraftResponseOneBeautyTrendMax = 1000;
 export const saveRadiantAuditDraftResponseOneMasteryGoalMax = 1000;
 
 export const saveRadiantAuditDraftResponseOneResearchTimeMax = 1000;
-
 
 
 export const SaveRadiantAuditDraftResponse = zod.object({
@@ -1122,7 +1094,6 @@ export const getRadiantAuditHistoryResponseOneOneMasteryGoalMax = 1000;
 export const getRadiantAuditHistoryResponseOneOneResearchTimeMax = 1000;
 
 
-
 export const GetRadiantAuditHistoryResponseItem = zod.object({
   "submissionId": zod.string().min(getRadiantAuditHistoryResponseOneOneSubmissionIdMin).max(getRadiantAuditHistoryResponseOneOneSubmissionIdMax).regex(getRadiantAuditHistoryResponseOneOneSubmissionIdRegExp).optional().describe('Stable ID for one submission; reuse on retries, generate a new ID for a new retake.'),
   "routineChecks": zod.array(zod.enum(['skincare-consistency', 'makeup-application-confidence', 'product-spending', 'trend-chasing-behavior', 'time-spent-on-beauty-daily'])).max(getRadiantAuditHistoryResponseOneOneRoutineChecksMax),
@@ -1149,7 +1120,6 @@ export const ClearRadiantAuditHistoryResponse = zod.void()
 /**
  * @summary Delete one earlier Audit submission belonging to the signed-in member
  */
-
 
 
 export const DeleteRadiantAuditHistoryEntryParams = zod.object({
@@ -1206,5 +1176,4 @@ export const GetRecentActivityResponseItem = zod.object({
   "createdAt": zod.string()
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
-
 

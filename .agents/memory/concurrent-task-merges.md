@@ -16,3 +16,9 @@ When concurrent changes touch the same test file, verify the entire suite after 
 **Why:** A merge can preserve both sides' text while displacing statements, duplicating tests, or dropping setup and assertions; a previously passing focused run no longer describes the merged file.
 
 **How to apply:** Reconcile each test's intended behavior against its pre-merge version and run the full affected suite on the merged worktree. If the configured validation excludes a repaired test file, run that suite explicitly too; typechecking alone will not catch lost assertions.
+
+If an unrelated merged fixture has extensive structural corruption rather than a local conflict, do not treat its repair as a minor validation fix inside an otherwise isolated task.
+
+**Why:** A malformed fixture may require reconstructing multiple tests and behaviors; a quick syntax patch can create a misleading green check without restoring intended coverage.
+
+**How to apply:** Identify the introducing merge and report the blocking check and the needed reconciliation separately when restoring the fixture exceeds the assigned scope.

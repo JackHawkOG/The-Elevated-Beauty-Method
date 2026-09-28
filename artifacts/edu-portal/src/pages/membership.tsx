@@ -23,6 +23,23 @@ function stripeCheckoutUrl(value: unknown): string {
   throw new Error(message);
 }
 
+function stripeBillingPortalUrl(value: unknown): string {
+  const message = "Billing is temporarily unavailable. Please try again.";
+  if (typeof value !== "string" || !value || value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value) || !/^https:\/\//i.test(value)) {
+    throw new Error(message);
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:" && url.hostname === "billing.stripe.com" && !url.port && !url.username && !url.password
+      && /^\/p\/session\/[^/]+\/?$/.test(url.pathname)) {
+      return url.href;
+    }
+  } catch {
+    // Treat malformed URLs the same as unexpected destinations.
+  }
+  throw new Error(message);
+}
+
 export default function MembershipPage() {
   const { user } = useUser();
   const isOwner = user?.publicMetadata.role === "owner" || user?.publicMetadata.role === "admin";
@@ -70,7 +87,7 @@ export default function MembershipPage() {
     setError("");
     try {
       const result = await portal.mutateAsync();
-      window.location.assign(result.url);
+      window.location.assign(stripeBillingPortalUrl(result?.url));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Billing is temporarily unavailable.");
     }

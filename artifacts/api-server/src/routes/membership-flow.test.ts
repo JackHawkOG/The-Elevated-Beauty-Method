@@ -341,13 +341,13 @@ test("lost Stripe responses leave recoverable sessions; recovery expires only un
     await originalCreate(...args); // Stripe created it, but its response never reached the server.
     throw new Error("Connection lost after Stripe accepted checkout");
   };
-  const before = new Set(sessions.keys());
+  const before = sessions.size;
   createSession.mockImplementationOnce(loseResponse).mockImplementationOnce(loseResponse);
   expect((await request("/membership/checkout", "POST", openBuyer, { kind: "standard" })).status).toBe(503);
   expect((await request("/membership/checkout", "POST", paidBuyer, { kind: "standard" })).status).toBe(503);
   expect(await row(openBuyer)).toBeUndefined();
   expect(await row(paidBuyer)).toBeUndefined();
-  const [orphan, completed] = [...sessions.values()].filter(session => !before.has(session.id));
+  const [orphan, completed] = [...sessions.values()].slice(before);
   expect(orphan.metadata).toMatchObject({ membershipCheckout: "true", reservationId: expect.any(String) });
   expect(createSession.mock.calls.some(([, options]) => options?.idempotencyKey === `membership-${orphan.metadata?.reservationId}`)).toBe(true);
   expect(expireSession).not.toHaveBeenCalledWith(orphan.id);
@@ -424,9 +424,6 @@ test("slow Stripe orphan listing cannot hold up offer or checkout requests", asy
 test("paid founding recovery via later reconciliation counts once and rejects mismatched Stripe ownership", async () => {
   clock(opens);
   const buyer = await addUser(214);
-  const foundingBefore = await pool.query<{ count: string }>(
-    "SELECT count(*)::text AS count FROM membership_checkouts WHERE kind = 'founding' AND status IN ('pending', 'confirmed', 'forfeited')",
-  );
   const originalCreate = createSession.getMockImplementation()!;
   createSession.mockImplementationOnce(async (...args: Parameters<typeof originalCreate>) => {
     await originalCreate(...args);
@@ -439,6 +436,9 @@ test("paid founding recovery via later reconciliation counts once and rejects mi
   session.payment_status = "paid";
   session.subscription = `sub_${randomUUID()}`;
   const customer = customers.get(session.customer!)!;
+  const before = await pool.query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM membership_checkouts WHERE kind = 'founding' AND status IN ('pending', 'confirmed', 'forfeited')",
+  );
   customer.metadata.clerkId = "wrong-owner";
   await reconcileUntrackedPaidSessions();
   expect(await row(buyer)).toBeUndefined();
@@ -452,7 +452,7 @@ test("paid founding recovery via later reconciliation counts once and rejects mi
   const after = await pool.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM membership_checkouts WHERE kind = 'founding' AND status IN ('pending', 'confirmed', 'forfeited')",
   );
-  expect(Number(after.rows[0].count)).toBe(Number(foundingBefore.rows[0].count) + 1);
+  expect(Number(after.rows[0].count)).toBe(Number(before.rows[0].count) + 1);
   expect((await pool.query("SELECT 1 FROM membership_checkouts WHERE stripe_session_id = $1", [session.id])).rows).toHaveLength(1);
   vi.restoreAllMocks();
 });
@@ -471,8 +471,8 @@ test("queued cleanup restores a paid checkout with no reservation without expiri
   const createdBefore = createSession.mock.calls.length;
   await recoverQueuedCheckoutExpirations();
   expect(await row(buyer)).toMatchObject({ status: "confirmed", membership_tier: "Elevated", stripe_session_id: session.id });
-  expect(expireSession.mock.calls).toHaveLength(expiredBefore);
-  expect(createSession.mock.calls).toHaveLength(createdBefore);
+  expect(expireSession.mock.calls.length).toBe(expiredBefore);
+  expect(createSession.mock.calls.length).toBe(createdBefore);
   expect((await pool.query("SELECT 1 FROM membership_checkout_expirations WHERE stripe_session_id = $1", [session.id])).rows).toHaveLength(0);
   vi.restoreAllMocks();
 });

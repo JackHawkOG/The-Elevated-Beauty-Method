@@ -56,7 +56,7 @@ router.get("/member-stories", async (_req, res): Promise<void> => {
 });
 
 router.get("/member-stories/manage", requireAuth, requireOwner, async (_req, res): Promise<void> => {
-  res.set("Cache-Control", "private, no-store");
+  res.set("Cache-Control", "no-store");
   const rows = await db.select().from(memberStoriesTable).orderBy(desc(memberStoriesTable.publishedAt));
   res.json(ListManagedMemberStoriesResponse.parse(rows.map(ownerStory)));
 });
@@ -175,11 +175,11 @@ router.post("/member-stories/:storyId/removal-review", requireAuth, requireOwner
     return;
   }
   const parsed = ReviewMemberStoryRemovalBody.safeParse(req.body);
-  const note = parsed.success ? parsed.data.note.trim() : "";
-  if (!parsed.success || !note) {
-    res.status(400).json({ error: "Review outcome and note are required" });
+  if (!parsed.success || !parsed.data.note.trim() || parsed.data.note.trim().length > 2000) {
+    res.status(400).json({ error: "Review note is required (up to 2000 characters)" });
     return;
   }
+  const note = parsed.data.note.trim();
   const [row] = await db.update(memberStoriesTable).set({
     removalReviewOutcome: parsed.data.outcome,
     removalReviewNote: note,
