@@ -78,6 +78,24 @@ paths:
                   $ref: "#/components/schemas/OwnerMemberStory"
         "403":
           description: Owner access required
+  /member-stories/removal-alerts:
+    get:
+      operationId: listMemberStoryRemovalAlerts
+      tags: [member-stories]
+      summary: Owner-only story removal notices without account or permission details
+      responses:
+        "200":
+          description: Story IDs and request times, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MemberStoryRemovalAlert"
+        "401":
+          description: Sign-in required
+        "403":
+          description: Owner access required
   /member-stories/{storyId}/removal-request:
     post:
       operationId: requestMemberStoryRemoval
@@ -919,6 +937,12 @@ components:
         id: { type: number }
         quote: { type: string }
         attribution: { type: string }
+    MemberStoryRemovalAlert:
+      type: object
+      required: [storyId, requestedAt]
+      properties:
+        storyId: { type: number }
+        requestedAt: { type: string }
     OwnerMemberStory:
       type: object
       required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote]

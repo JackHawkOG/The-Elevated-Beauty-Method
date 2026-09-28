@@ -46,6 +46,7 @@ export * from './membershipOffer';
 export * from './membershipOfferPhase';
 export * from './membershipRedirect';
 export * from './memberStoryInput';
+export * from './memberStoryRemovalAlert';
 export * from './memberStoryRemovalInput';
 export * from './memberStoryRemovalReceipt';
 export * from './methodStep';

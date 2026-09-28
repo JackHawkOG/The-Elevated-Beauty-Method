@@ -108,6 +108,15 @@ test("signed-in removal requests hide the identified story and keep the claim pr
   expect(publicList.data.some((story: { id: number }) => story.id === other.data.id)).toBe(true);
   expect(JSON.stringify(publicList.data)).not.toContain("I withdrew my permission");
   expect((await request("/member-stories/manage", member)).status).toBe(403);
+  expect((await request("/member-stories/removal-alerts")).status).toBe(401);
+  expect((await request("/member-stories/removal-alerts", member)).status).toBe(403);
+  const alerts = await request("/member-stories/removal-alerts", owner);
+  expect(alerts.cache).toContain("no-store");
+  expect(alerts.data.find((item: { storyId: number }) => item.storyId === published.data.id))
+    .toEqual({ storyId: published.data.id, requestedAt: expect.any(String) });
+  expect(JSON.stringify(alerts.data)).not.toContain(member);
+  expect(JSON.stringify(alerts.data)).not.toContain(input.permissionRecord);
+  expect(JSON.stringify(alerts.data)).not.toContain("I withdrew my permission");
   const managed = await request("/member-stories/manage", owner);
   const story = managed.data.find((row: { id: number }) => row.id === published.data.id);
   expect(story.removalRequestNote).toBe("I withdrew my permission");

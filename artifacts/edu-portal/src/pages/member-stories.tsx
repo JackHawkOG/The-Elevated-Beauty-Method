@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListManagedMemberStories, usePublishMemberStory, useWithdrawMemberStory,
@@ -16,6 +16,15 @@ export default function MemberStoriesPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [message, setMessage] = useState("");
   const [withdrawId, setWithdrawId] = useState<number | null>(null);
+  const requests = list.data?.filter(story => story.removalRequestedAt)
+    .sort((a, b) => new Date(b.removalRequestedAt!).getTime() - new Date(a.removalRequestedAt!).getTime()) ?? [];
+  useEffect(() => {
+    if (!list.data || !window.location.hash.startsWith("#story-")) return;
+    const id = Number(window.location.hash.slice("#story-".length));
+    if (Number.isSafeInteger(id) && list.data.some(story => story.id === id)) {
+      document.getElementById(`story-${id}`)?.scrollIntoView({ block: "start" });
+    }
+  }, [list.data]);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: getListManagedMemberStoriesQueryKey() });
     void qc.invalidateQueries({ queryKey: getListPublishedMemberStoriesQueryKey() });
@@ -65,13 +74,20 @@ export default function MemberStoriesPage() {
         <Button type="submit" disabled={!confirmed || publish.isPending}> {publish.isPending ? "Publishing…" : "Publish story"}</Button>
       </form>
       {message && <p role="status">{message}</p>}
+      {requests.length > 0 && <section aria-labelledby="removal-requests-title" className="rounded-2xl border border-destructive/50 bg-destructive/10 p-6">
+        <h2 id="removal-requests-title" className="font-serif text-2xl">Removal requests received ({requests.length})</h2>
+        <p className="mt-2 text-sm">These stories were hidden immediately. Review each request and its permission record privately.</p>
+        <ul className="mt-3 space-y-1">{requests.map(story => <li key={story.id}>
+          <a className="underline underline-offset-2" href={`#story-${story.id}`}>Story #{story.id} · received {new Date(story.removalRequestedAt!).toLocaleString()}</a>
+        </li>)}</ul>
+      </section>}
       <section aria-labelledby="story-list-title">
         <h2 id="story-list-title" className="mb-4 font-serif text-2xl">Stories and permission records</h2>
         {list.isPending ? <p>Loading stories…</p> :
           list.isError ? <div role="alert">Could not load stories. <Button variant="outline" onClick={() => void list.refetch()}>Retry</Button></div> :
           !list.data?.length ? <p className="text-muted-foreground">No stories have been published yet.</p> :
           <div className="space-y-4">{list.data.map(story =>
-            <article key={story.id} className="rounded-2xl border border-border bg-card p-6">
+            <article key={story.id} id={`story-${story.id}`} className="scroll-mt-6 rounded-2xl border border-border bg-card p-6">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <p className="text-xs text-muted-foreground">Story #{story.id} · {story.withdrawnAt ? "Withdrawn" : "Published"}</p>

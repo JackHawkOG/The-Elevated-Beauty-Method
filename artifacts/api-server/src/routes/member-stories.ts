@@ -5,6 +5,7 @@ import { db, memberStoriesTable } from "@workspace/db";
 import {
   ListPublishedMemberStoriesResponse,
   ListManagedMemberStoriesResponse,
+  ListMemberStoryRemovalAlertsResponse,
   PublishMemberStoryBody,
   PublishMemberStoryResponse,
   WithdrawMemberStoryResponse,
@@ -55,6 +56,20 @@ router.get("/member-stories/manage", requireAuth, requireOwner, async (_req, res
   res.set("Cache-Control", "no-store");
   const rows = await db.select().from(memberStoriesTable).orderBy(desc(memberStoriesTable.publishedAt));
   res.json(ListManagedMemberStoriesResponse.parse(rows.map(ownerStory)));
+});
+
+router.get("/member-stories/removal-alerts", requireAuth, requireOwner, async (_req, res): Promise<void> => {
+  res.set("Cache-Control", "private, no-store");
+  const rows = await db.select({
+    storyId: memberStoriesTable.id,
+    requestedAt: memberStoriesTable.removalRequestedAt,
+  }).from(memberStoriesTable)
+    .where(sql`${memberStoriesTable.removalRequestedAt} IS NOT NULL`)
+    .orderBy(desc(memberStoriesTable.removalRequestedAt));
+  res.json(ListMemberStoryRemovalAlertsResponse.parse(rows.map(row => ({
+    storyId: row.storyId,
+    requestedAt: row.requestedAt!.toISOString(),
+  }))));
 });
 
 router.post("/member-stories", requireAuth, requireOwner, async (req, res): Promise<void> => {

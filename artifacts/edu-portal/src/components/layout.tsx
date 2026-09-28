@@ -3,6 +3,7 @@ import { useClerk, useUser } from "@clerk/react";
 import { LayoutDashboard, Library, User, LogOut, MessageSquare, ClipboardCheck, Quote } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { getListMemberStoryRemovalAlertsQueryKey, useListMemberStoryRemovalAlerts } from "@workspace/api-client-react";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
@@ -12,6 +13,17 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
   const canReview = ["admin", "owner", "editor"].includes(String(user?.publicMetadata.role));
   const canManageStories = ["admin", "owner"].includes(String(user?.publicMetadata.role));
+  const removalAlerts = useListMemberStoryRemovalAlerts({
+    query: {
+      queryKey: [...getListMemberStoryRemovalAlertsQueryKey(), user?.id],
+      enabled: Boolean(user?.id && canManageStories),
+      refetchInterval: 30_000,
+      refetchOnWindowFocus: "always",
+      staleTime: 0,
+    },
+  });
+  const latestRemoval = canManageStories ? removalAlerts.data?.[0] : undefined;
+  const removalCount = canManageStories ? removalAlerts.data?.length ?? 0 : 0;
 
   return (
     <SidebarProvider>
@@ -45,7 +57,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarMenuItem>}
               {canManageStories && <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={location.startsWith("/member-stories")}>
-                  <Link href="/member-stories"><Quote /> <span>Member stories</span></Link>
+                  <Link href="/member-stories"><Quote /> <span>Member stories</span>{removalCount > 0 && <span className="ml-auto rounded-full bg-destructive px-2 text-xs text-destructive-foreground" aria-label={`${removalCount} story removal requests`}>{removalCount}</span>}</Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>}
               <SidebarMenuItem>
@@ -96,6 +108,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </span>
             </Link>
           </header>
+          {latestRemoval && <div role="status" className="border-b border-destructive/30 bg-destructive/10 px-4 py-3 text-sm">
+            <Link href={`/member-stories#story-${latestRemoval.storyId}`} className="font-semibold text-foreground underline underline-offset-2">
+              {removalCount} story removal {removalCount === 1 ? "request" : "requests"} received — review private request for story #{latestRemoval.storyId}
+            </Link>
+          </div>}
           <div className="flex-1 overflow-auto">
             {children}
           </div>

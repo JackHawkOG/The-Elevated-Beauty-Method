@@ -11,6 +11,10 @@ export interface PublicMemberStory {
   attribution: string;
 }
 
+export interface MemberStoryRemovalAlert {
+  storyId: number;
+  requestedAt: string;
+}
 export interface OwnerMemberStory {
   id: number;
   quote: string;
@@ -613,4 +617,3 @@ offset?: number;
 export type ListAnnouncementsParams = {
 limit?: number;
 };
-
