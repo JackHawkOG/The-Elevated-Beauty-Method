@@ -9,6 +9,7 @@ import { pruneInvalidAuditDraft } from "../src/lib/radiant-audit-draft";
 
 setAuthTokenGetter(async () => window.localStorage.getItem("audit-test-account"));
 import { getGetRadiantAuditHistoryQueryKey, setAuthTokenGetter } from "@workspace/api-client-react";
+import { AppLayout } from "../src/components/layout";
 const { hook } = memoryLocation({ path: new URLSearchParams(location.search).get("page") || "/radiant-audit" });
 // Match the app's startup cleanup while exercising non-Audit routes in isolation.
 pruneInvalidAuditDraft();
@@ -21,6 +22,7 @@ createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={client}>
     <Router hook={hook}>
       <Switch>
+        <Route path="/layout"><AppLayout><p>Member area</p></AppLayout></Route>
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/radiant-audit/complete" component={RadiantAuditCompletePage} />
         <Route path="/radiant-audit" component={RadiantAuditPage} />

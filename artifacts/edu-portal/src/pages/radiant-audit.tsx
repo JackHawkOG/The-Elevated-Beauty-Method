@@ -25,7 +25,7 @@ import {
   trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
 } from "@/lib/analytics";
 import { canAutoRetryPendingAudit, clearPendingAudit, isAuditReadyToSave, readPendingAudit, restartPendingAudit, stageAudit, type PendingAudit } from "@/lib/radiant-audit-session";
-import { auditDraftWrittenAt, clearAuditDraft, getAuditSubmissionId, readAuditDraft, startAuditSubmission, writeAuditDraft } from "@/lib/radiant-audit-draft";
+import { auditDraftWrittenAt, clearAuditDraft, clearAuditDraftOnSignOut, getAuditSubmissionId, readAuditDraft, startAuditSubmission, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -558,6 +558,7 @@ export default function RadiantAuditPage() {
         if (keepAnswers(audit)) {
           clearAuditVerification();
           trackAuditVerificationAction("switch_account", "form");
+          clearAuditDraftOnSignOut(accountId);
           void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
         }
       }}
@@ -750,6 +751,7 @@ export function RadiantAuditCompletePage() {
               <Button onClick={() => {
                 clearAuditVerification();
                 trackAuditVerificationAction("switch_account", "completion");
+                clearAuditDraftOnSignOut(user?.id);
                 void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
               }}>
                 Use another account

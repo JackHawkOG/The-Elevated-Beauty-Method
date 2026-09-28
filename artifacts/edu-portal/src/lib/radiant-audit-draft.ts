@@ -31,6 +31,15 @@ export function clearAuditDraft(accountId?: string): void {
   window.localStorage.removeItem(key);
 }
 
+export function clearAuditDraftOnSignOut(accountId?: string): void {
+  if (!accountId) return;
+  try {
+    clearAuditDraft(accountId);
+  } catch {
+    // Storage can be disabled; signing out must still proceed.
+  }
+}
+
 function parseAuditDraft(raw: string, now: number): { owner: string; answers: RadiantAuditSubmission } {
   const record: unknown = JSON.parse(raw);
   if (!record || typeof record !== "object") throw new Error("Invalid draft");

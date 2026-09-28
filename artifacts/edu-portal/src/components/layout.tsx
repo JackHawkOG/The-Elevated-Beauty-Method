@@ -4,6 +4,7 @@ import { LayoutDashboard, Library, User, LogOut, MessageSquare, ClipboardCheck, 
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getListMemberStoryRemovalAlertsQueryKey, useListMemberStoryRemovalAlerts } from "@workspace/api-client-react";
+import { clearAuditDraftOnSignOut } from "@/lib/radiant-audit-draft";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
@@ -95,7 +96,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton onClick={() => signOut({ redirectUrl: "/" })} className="text-muted-foreground hover:text-foreground">
+                <SidebarMenuButton onClick={() => {
+                  clearAuditDraftOnSignOut(user?.id);
+                  void signOut({ redirectUrl: "/" });
+                }} className="text-muted-foreground hover:text-foreground">
                   <LogOut /> <span>Log out</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>

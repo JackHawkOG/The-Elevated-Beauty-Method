@@ -544,7 +544,12 @@ test("signing out of the mismatched account preserves the staged answers for the
   await page.evaluate(() => localStorage.setItem("audit-test-account", "corrected"));
   await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
   await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  await page.evaluate(({ key, answers, email }) => localStorage.setItem(key, JSON.stringify({
+    owner: "corrected", expiresAt: Date.now() + 86_400_000,
+    answers: { ...answers, email },
+  })), { key: signedInDraftKey, answers: stagedAnswers, email: correctedEmail });
   await page.getByRole("button", { name: "Use another account" }).click();
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
   expect(await page.evaluate(() => ({
     account: localStorage.getItem("audit-test-account"),
     redirect: sessionStorage.getItem("audit-test-sign-out-redirect"),
@@ -1094,6 +1099,59 @@ test("a signed-in draft never appears for another account and can be discarded",
   expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
   await page.reload();
   await expect(page.locator("#mastery-goal")).toHaveValue("");
+});
+
+test("layout logout removes only the browser draft, not the online draft, and keeps it private from the next member", async ({ page }) => {
+  const online = new Map<string, Answers>([["member-a", fixture("logout")]]);
+  let deletions = 0;
+  await page.route("**/api/users/me/radiant-audit**", route => {
+    const request = route.request();
+    const account = request.headers().authorization?.replace("Bearer ", "") ?? "";
+    if (request.url().endsWith("/draft")) {
+      if (request.method() === "DELETE") deletions++;
+      return route.fulfill({ json: online.has(account)
+        ? { ...online.get(account)!, updatedAt: new Date().toISOString() } : null });
+    }
+    return route.fulfill({ json: request.url().endsWith("/history") ? [] : null });
+  });
+
+  await signInAs(page, "member-a");
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await page.evaluate(({ key, answers }) => localStorage.setItem(key, JSON.stringify({
+    owner: "member-a", expiresAt: Date.now() + 86_400_000,
+    answers: { ...answers, email: "member-a@example.invalid" },
+  })), { key: signedInDraftKey, answers: fixture("logout") });
+  await page.goto("/tests/audit-harness.html?page=/layout");
+  await page.getByRole("button", { name: "Log out" }).click();
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  expect(deletions).toBe(0);
+  expect(online.has("member-a")).toBe(true);
+
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "member-b"));
+  await page.goto("/tests/audit-harness.html");
+  await expect(page.locator("#beauty-trend")).toHaveValue("");
+  await expect(page.locator("body")).not.toContainText("logout private trend");
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  expect(online.has("member-a")).toBe(true);
+});
+
+test("switching accounts on the Audit form clears the signed-in local draft without deleting the online draft", async ({ page }) => {
+  let deletions = 0;
+  await page.route("**/api/users/me/radiant-audit/draft", route => {
+    if (route.request().method() === "DELETE") deletions++;
+    if (route.request().method() === "GET") return route.fulfill({ json: null });
+    return route.fulfill({ json: { ...route.request().postDataJSON(), updatedAt: new Date().toISOString() } });
+  });
+  await page.route("**/api/users/me/radiant-audit", route => route.fulfill({ json: null }));
+  await signInAs(page, "member-a");
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "false"));
+  await page.reload();
+  await page.locator("#beauty-trend").fill("private switching answer");
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key) !== null, signedInDraftKey)).toBe(true);
+  await page.getByRole("button", { name: "Use another account" }).click();
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem("audit-test-account"))).toBeNull();
+  expect(deletions).toBe(0);
 });
 
 test("an unfinished Audit continues in a separate browser, stays private, and disappears after saving", async ({ page, browser }) => {
