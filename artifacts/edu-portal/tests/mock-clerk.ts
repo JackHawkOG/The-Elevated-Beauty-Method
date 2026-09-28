@@ -1,5 +1,18 @@
+import { useSyncExternalStore } from "react";
+
+const authChanged = "audit-test-auth-change";
+const accountSnapshot = () =>
+  window.sessionStorage.getItem("audit-test-tab-account") ??
+  window.localStorage.getItem("audit-test-account") ??
+  "";
+
+function subscribeToAccountChange(notify: () => void) {
+  window.addEventListener(authChanged, notify);
+  return () => window.removeEventListener(authChanged, notify);
+}
+
 export function useUser() {
-  const account = window.localStorage.getItem("audit-test-account");
+  const account = useSyncExternalStore(subscribeToAccountChange, accountSnapshot);
   const verified = window.localStorage.getItem("audit-test-verified") !== "false";
   return {
     isLoaded: true,
@@ -22,6 +35,8 @@ export function useClerk() {
     },
     signOut: async ({ redirectUrl }: { redirectUrl: string }) => {
       window.localStorage.removeItem("audit-test-account");
+      window.sessionStorage.removeItem("audit-test-tab-account");
+      window.dispatchEvent(new Event(authChanged));
       window.sessionStorage.setItem("audit-test-sign-out-redirect", redirectUrl);
     },
   };

@@ -819,6 +819,103 @@ test("deleting and clearing history updates another open tab even during confirm
   expect(deletes).toEqual([101]);
 });
 
+test("history deletion signals only refresh the tab's current member after an account switch", async ({ page, context }) => {
+  const entry = (id: number, tag: string): HistoryEntry => ({
+    id, ...fixture(tag), completedAt: "2026-09-01T12:00:00.000Z",
+    routineScore: 1, valuesScore: 1,
+  });
+  const history = new Map<string, HistoryEntry[]>([
+    ["member-a", [entry(101, "a-first"), entry(102, "a-second")]],
+    ["member-b", [entry(201, "b-first")]],
+  ]);
+  const current = new Map<string, Audit>([
+    ["member-a", entry(301, "a-current")],
+    ["member-b", entry(302, "b-current")],
+  ]);
+  const historyReads: string[] = [];
+  const handleAudit = (route: import("@playwright/test").Route, trackReads = false) => {
+    const request = route.request();
+    const account = request.headers().authorization?.replace(/^Bearer /, "") ?? "";
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET" && path.endsWith("/history")) {
+      if (trackReads) historyReads.push(account);
+      return route.fulfill({ json: history.get(account) ?? [] });
+    }
+    if (request.method() === "GET") return route.fulfill({ json: current.get(account) ?? null });
+    if (request.method() === "DELETE" && path.includes("/history/")) {
+      const id = Number(path.split("/").at(-1));
+      history.set(account, (history.get(account) ?? []).filter(item => item.id !== id));
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 405 });
+  };
+  await context.route("**/api/users/me/radiant-audit**", route => handleAudit(route));
+  await signInAs(page, "member-a");
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("region", { name: "How your answers have changed" })).toContainText("a-first private goal");
+
+  const otherTab = await context.newPage();
+  await otherTab.addInitScript(() => {
+    sessionStorage.setItem("audit-test-tab-account", "member-b");
+    (window as unknown as { __historySignals: string[] }).__historySignals = [];
+    window.addEventListener("storage", event => {
+      if (event.key?.startsWith("radiant-audit:history-changed:")) {
+        (window as unknown as { __historySignals: string[] }).__historySignals.push(event.key);
+      }
+    });
+  });
+  await otherTab.route("**/api/users/me/radiant-audit**", route => handleAudit(route, true));
+  await otherTab.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  const comparison = otherTab.getByRole("region", { name: "How your answers have changed" });
+  await expect(comparison).toContainText("b-first private goal");
+  await expect(otherTab.getByText("b-current private goal").first()).toBeVisible();
+  expect(historyReads).toEqual(["member-b"]);
+
+  const deleteEntry = async (writer: Page, id: number) => {
+    const picker = writer.getByRole("region", { name: "How your answers have changed" });
+    await picker.getByRole("combobox", { name: "Compare with" }).selectOption(String(id));
+    await picker.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    await writer.getByRole("alertdialog").getByRole("button", { name: "Delete earlier Audit" }).click();
+    await expect(picker.getByRole("combobox", { name: "Compare with" }).locator(`option[value="${id}"]`)).toHaveCount(0);
+  };
+  const waitForSignal = async (key: string, count: number) => {
+    await expect.poll(() => otherTab.evaluate(() =>
+      (window as unknown as { __historySignals: string[] }).__historySignals,
+    )).toContainEqual(key);
+    await expect.poll(() => otherTab.evaluate(() =>
+      (window as unknown as { __historySignals: string[] }).__historySignals.length,
+    )).toBe(count);
+    // The storage event has arrived; give any incorrectly scheduled query invalidation time to run.
+    await otherTab.waitForTimeout(150);
+  };
+
+  await deleteEntry(page, 101);
+  await waitForSignal("radiant-audit:history-changed:member-a", 1);
+  expect(historyReads).toEqual(["member-b"]);
+  await expect(comparison).toContainText("b-first private goal");
+
+  await otherTab.evaluate(() => {
+    sessionStorage.setItem("audit-test-tab-account", "member-a");
+    window.dispatchEvent(new Event("audit-test-auth-change"));
+  });
+  // A different member's deletion must now be ignored by the replaced listener.
+  const bWriter = await context.newPage();
+  await bWriter.addInitScript(() => sessionStorage.setItem("audit-test-tab-account", "member-b"));
+  await bWriter.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(bWriter.getByRole("region", { name: "How your answers have changed" })).toContainText("b-first private goal");
+  await deleteEntry(bWriter, 201);
+  await waitForSignal("radiant-audit:history-changed:member-b", 2);
+  expect(historyReads).toEqual(["member-b"]);
+
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await deleteEntry(page, 102);
+  await waitForSignal("radiant-audit:history-changed:member-a", 3);
+  await expect.poll(() => historyReads).toEqual(["member-b", "member-a"]);
+  await expect(otherTab.getByText("a-current private goal").first()).toBeVisible();
+  await expect(otherTab.getByText("b-current private goal")).toHaveCount(0);
+  await expect(otherTab.getByText(/No earlier Audits remain/)).toBeVisible();
+});
+
 test("a retake refreshes the current Audit and new history in another open tab", async ({ page, context }) => {
   const previous: Audit = {
     ...fixture("first"), completedAt: "2026-09-01T12:00:00.000Z",

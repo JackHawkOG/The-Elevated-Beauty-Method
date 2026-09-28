@@ -7,7 +7,8 @@ import RadiantAuditPage, { RadiantAuditCompletePage } from "../src/pages/radiant
 import Dashboard from "../src/pages/dashboard";
 import { pruneInvalidAuditDraft } from "../src/lib/radiant-audit-draft";
 
-setAuthTokenGetter(async () => window.localStorage.getItem("audit-test-account"));
+setAuthTokenGetter(async () =>
+  window.sessionStorage.getItem("audit-test-tab-account") ?? window.localStorage.getItem("audit-test-account"));
 import { getGetRadiantAuditHistoryQueryKey, setAuthTokenGetter } from "@workspace/api-client-react";
 import { AppLayout } from "../src/components/layout";
 const { hook } = memoryLocation({ path: new URLSearchParams(location.search).get("page") || "/radiant-audit" });
