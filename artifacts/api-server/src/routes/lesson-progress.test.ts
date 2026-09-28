@@ -419,6 +419,9 @@ test("standalone course resume hides published lessons that no longer match revi
   const approved = approvedTopicLessons[0];
   let reviewedCourseId: number | undefined;
   try {
+    const statsBefore = await request(userId, "/dashboard/stats");
+    expect(statsBefore.status).toBe(200);
+    const ordinaryLessonTotal = (statsBefore.data as { totalLessons: number }).totalLessons;
     await db.insert(usersTable).values({
       clerkId: userId, displayName: "Reviewed Resume Test",
       email: `${userId}@example.invalid`, membershipTier: "Elevated",
@@ -447,7 +450,9 @@ test("standalone course resume hides published lessons that no longer match revi
     expect(featured.status).toBe(200);
     expect((featured.data as Array<{ id: number; lessonCount: number }>)
       .find(row => row.id === course.id)?.lessonCount).toBe(1);
-
+    const statsWithReviewedLesson = await request(userId, "/dashboard/stats");
+    expect(statsWithReviewedLesson.status).toBe(200);
+    expect(statsWithReviewedLesson.data).toMatchObject({ totalLessons: ordinaryLessonTotal + 1 });
     const initial = await request(userId, "/enrollments", "POST", { courseId: course.id });
     expect(initial.status).toBe(201);
     expect(initial.data).toMatchObject({ totalLessons: 1, completedLessons: 0 });
@@ -491,6 +496,9 @@ test("standalone course resume hides published lessons that no longer match revi
     const emptyFeatured = await request(userId, "/dashboard/featured");
     expect((emptyFeatured.data as Array<{ id: number; lessonCount: number }>)
       .find(row => row.id === course.id)?.lessonCount).toBe(0);
+    const statsWithoutReviewedLesson = await request(userId, "/dashboard/stats");
+    expect(statsWithoutReviewedLesson.status).toBe(200);
+    expect(statsWithoutReviewedLesson.data).toMatchObject({ totalLessons: ordinaryLessonTotal });
     expect(((await request(userId, "/enrollments")).data as Array<{ courseId: number }>)
       .find(row => row.courseId === course.id))
       .toMatchObject({ totalLessons: 0, completedLessons: 0, completedLessonIds: [], lastLessonId: null });
@@ -515,6 +523,9 @@ test("a draft exact duplicate before the published approved lesson cannot block 
   const approved = approvedTopicLessons[0];
   let reviewedCourseId: number | undefined;
   try {
+    const statsBefore = await request(userId, "/dashboard/stats");
+    expect(statsBefore.status).toBe(200);
+    const priorTotal = (statsBefore.data as { totalLessons: number }).totalLessons;
     await db.insert(usersTable).values({
       clerkId: userId, displayName: "Approved Duplicate Test",
       email: `${userId}@example.invalid`, membershipTier: "Elevated",
@@ -528,11 +539,13 @@ test("a draft exact duplicate before the published approved lesson cannot block 
       courseId: course.id, title: approved.title, content: approved.content,
       sortOrder: 1, publishedAt: null,
     }).returning();
+    expect((await request(userId, "/dashboard/stats")).data).toMatchObject({ totalLessons: priorTotal });
     const [published] = await db.insert(lessonsTable).values({
       courseId: course.id, title: approved.title, content: approved.content,
       sortOrder: 1, publishedAt: new Date(),
     }).returning();
     expect(draft.id).toBeLessThan(published.id);
+    expect((await request(userId, "/dashboard/stats")).data).toMatchObject({ totalLessons: priorTotal + 1 });
 
     const listing = await request(userId, `/courses/${course.id}/lessons`);
     expect(listing.status).toBe(200);
@@ -571,6 +584,9 @@ test("two published approved copies consistently select the lowest ID for listin
   const approved = approvedTopicLessons[0];
   let reviewedCourseId: number | undefined;
   try {
+    const statsBefore = await request(userId, "/dashboard/stats");
+    expect(statsBefore.status).toBe(200);
+    const priorTotal = (statsBefore.data as { totalLessons: number }).totalLessons;
     await db.insert(usersTable).values({
       clerkId: userId, displayName: actorName,
       email: `${userId}@example.invalid`, membershipTier: "Elevated",
@@ -585,6 +601,7 @@ test("two published approved copies consistently select the lowest ID for listin
       { courseId: course.id, title: approved.title, content: approved.content, sortOrder: 1, publishedAt: new Date() },
     ]).returning();
     expect(selected.id).toBeLessThan(duplicate.id);
+    expect((await request(userId, "/dashboard/stats")).data).toMatchObject({ totalLessons: priorTotal + 1 });
     // A tied SQL query may return either order; selection must not depend on it.
     expect(publishedLessonsForCourse(course.title, [duplicate, selected]).map(lesson => lesson.id))
       .toEqual([selected.id]);
