@@ -703,6 +703,109 @@ test("an earlier Audit removed in another tab cannot silently switch the deletio
   await expect.poll(() => deletes).toEqual([202]);
 });
 
+test("deleting and clearing history updates another open tab even during confirmation", async ({ page, context }) => {
+  const makeEntry = (id: number, tag: string, completedAt: string): HistoryEntry => ({
+    id, ...fixture(tag), completedAt, routineScore: 1, valuesScore: 2,
+  });
+  const removed = makeEntry(101, "first", "2026-09-01T12:00:00.000Z");
+  const remaining = makeEntry(202, "second", "2026-09-02T12:00:00.000Z");
+  const latest = makeEntry(303, "third", "2026-09-03T12:00:00.000Z");
+  let history = [remaining, removed];
+  const deletes: number[] = [];
+  let clears = 0;
+  await context.route("**/api/users/me/radiant-audit**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "GET" && path.endsWith("/history")) {
+      return route.fulfill({ json: history });
+    }
+    if (route.request().method() === "GET") return route.fulfill({ json: latest });
+    if (route.request().method() === "DELETE" && path.endsWith("/history")) {
+      clears++;
+      history = [];
+      return route.fulfill({ status: 204 });
+    }
+    if (route.request().method() === "DELETE" && path.includes("/history/")) {
+      const id = Number(path.split("/").at(-1));
+      deletes.push(id);
+      history = history.filter(entry => entry.id !== id);
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ status: 405 });
+  });
+  await signInAs(page, "member-a");
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  const otherTab = await context.newPage();
+  await otherTab.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  const comparison = page.getByRole("region", { name: "How your answers have changed" });
+  const otherComparison = otherTab.getByRole("region", { name: "How your answers have changed" });
+  await comparison.getByRole("combobox", { name: "Compare with" }).selectOption("101");
+  await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("ID 101");
+
+  await otherComparison.getByRole("combobox", { name: "Compare with" }).selectOption("101");
+  await otherComparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+  await otherTab.getByRole("alertdialog").getByRole("button", { name: "Delete earlier Audit" }).click();
+  await expect.poll(() => deletes).toEqual([101]);
+  await expect(dialog).toContainText("That submission is no longer in your history");
+  await expect(dialog).toContainText("ID 101");
+  await expect(dialog.getByRole("button", { name: "Delete earlier Audit" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(comparison.getByRole("combobox", { name: "Compare with" })).toHaveValue("");
+  await expect(comparison.getByRole("button", { name: "Delete selected earlier Audit" })).toBeDisabled();
+
+  await comparison.getByRole("combobox", { name: "Compare with" }).selectOption("202");
+  await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+  await expect(dialog).toContainText("ID 202");
+  await otherComparison.getByRole("button", { name: "Clear earlier history" }).click();
+  await otherTab.getByRole("alertdialog").getByRole("button", { name: "Clear earlier history" }).click();
+  await expect.poll(() => clears).toBe(1);
+  await expect(dialog).toContainText("That submission is no longer in your history");
+  await expect(dialog).toContainText("ID 202");
+  await expect(dialog.getByRole("button", { name: "Delete earlier Audit" })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByText(/No earlier Audits remain/)).toBeVisible();
+  expect(deletes).toEqual([101]);
+});
+
+test("a retake refreshes the current Audit and new history in another open tab", async ({ page, context }) => {
+  const previous: Audit = {
+    ...fixture("first"), completedAt: "2026-09-01T12:00:00.000Z",
+    routineScore: 1, valuesScore: 1,
+  };
+  let current = previous;
+  let history: HistoryEntry[] = [];
+  await context.route("**/api/users/me/radiant-audit**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "GET") {
+      return route.fulfill({ json: path.endsWith("/history") ? history : current });
+    }
+    if (route.request().method() === "PUT" && !path.endsWith("/draft")) {
+      history = [{ id: 101, ...current }];
+      const answers = route.request().postDataJSON() as Answers;
+      current = {
+        ...answers, completedAt: "2026-09-02T12:00:00.000Z",
+        routineScore: answers.routineChecks.length, valuesScore: answers.valuesChecks.length,
+      };
+      return route.fulfill({ json: { audit: current, completionKind: "retake" } });
+    }
+    return route.fulfill({ status: 405 });
+  });
+  await signInAs(page, "member-a");
+  const waitingTab = await context.newPage();
+  await waitingTab.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(waitingTab.getByText("first private goal")).toBeVisible();
+  await page.goto("/tests/audit-harness.html");
+  await submit(page, "second");
+
+  const comparison = waitingTab.getByRole("region", { name: "How your answers have changed" });
+  await expect(comparison.getByRole("combobox", { name: "Compare with" }).locator("option")).toHaveCount(1);
+  await expect(comparison.getByRole("heading", { name: /^Earlier ·/ })).toBeVisible();
+  await expect(comparison).toContainText("first private goal");
+  await expect(comparison).toContainText("second private goal");
+  await expect(waitingTab.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+});
+
 test("a committed signed-in save with a lost response retries after reload without creating history", async ({ page }) => {
   const answers = fixture("lost-response");
   const submissionIds: string[] = [];

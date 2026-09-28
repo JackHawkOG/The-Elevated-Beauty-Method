@@ -19,6 +19,7 @@ import {
 } from "@workspace/api-client-react";
 import { RadiantAuditForm, type RadiantAuditSubmission } from "@/components/radiant-audit-form";
 import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
+import { announceHistoryChange, historyChangeKey } from "@/lib/radiant-audit-history-sync";
 import {
   clearAuditVerification, rememberAuditVerification, trackAuditResumptionIfRequested,
   trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
@@ -354,6 +355,7 @@ export default function RadiantAuditPage() {
         trackAuditResumptionIfRequested(user!.id, "form");
         queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
         void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+        announceHistoryChange(user!.id);
         try { clearPendingAudit(); } catch { /* A storage failure must not hide a confirmed save. */ }
         navigate("/radiant-audit/complete");
       } catch {
@@ -478,6 +480,19 @@ export function RadiantAuditCompletePage() {
     query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !isLoading && !isError },
   });
 
+  useEffect(() => {
+    if (!user?.id) return;
+    const key = historyChangeKey(user.id);
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea === localStorage && event.key === key && event.newValue) {
+        void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditQueryKey() });
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [user?.id, queryClient]);
+
   async function confirmCurrentDeletion() {
     setDeleteError(null);
     try {
@@ -486,6 +501,7 @@ export function RadiantAuditCompletePage() {
       setConfirmDeleteCurrent(false);
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditQueryKey() });
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+      if (user?.id) announceHistoryChange(user.id);
     } catch {
       try {
         // The server may have committed the deletion before the response was lost.
@@ -495,6 +511,7 @@ export function RadiantAuditCompletePage() {
         if (current === null) {
           setConfirmDeleteCurrent(false);
           void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+          if (user?.id) announceHistoryChange(user.id);
         } else {
           setDeleteError("We couldn't delete your current Audit. Please try again.");
         }
@@ -526,6 +543,7 @@ export function RadiantAuditCompletePage() {
       trackAuditResumptionIfRequested(user.id, "completion");
       queryClient.setQueryData(getGetRadiantAuditQueryKey(), result.audit);
       void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+      announceHistoryChange(user.id);
       clearPendingAudit();
       try { clearAuditDraft(user.id); } catch { /* The submission is already confirmed. */ }
       setPending(null);
@@ -731,9 +749,9 @@ export function RadiantAuditCompletePage() {
               <p className="mt-8" role="status">Loading earlier Audits…</p>
             ) : historyError ? (
               <p className="mt-8 text-destructive" role="alert">We couldn't load your earlier Audits. Please refresh and try again.</p>
-            ) : history?.length ? (
-              <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={null} history={history} />
-            ) : null}
+            ) : (
+              <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={null} history={history ?? []} />
+            )}
           </>
         )}
         <AlertDialog open={confirmDeleteCurrent} onOpenChange={open => { if (!open && !deleteCurrent.isPending) setConfirmDeleteCurrent(false); }}>
