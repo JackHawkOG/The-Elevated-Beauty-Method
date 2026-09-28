@@ -2,6 +2,7 @@ import { pool } from "@workspace/db";
 import type Stripe from "stripe";
 import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
+import { restorePaidCheckout } from "./membership-reservations";
 
 const SWEEP_INTERVAL_MS = 60_000;
 // Checkout sessions normally expire after 30 minutes; warn while intervention can still help.
@@ -37,6 +38,19 @@ export async function queueCheckoutExpiration(sessionId: string): Promise<void> 
 
 export async function recoverCheckoutExpiration(sessionId: string, stripe: Stripe): Promise<void> {
   const session = await stripe.checkout.sessions.retrieve(sessionId);
+  if (session.status === "complete" && session.payment_status === "paid") {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await restorePaidCheckout(client, stripe, sessionId);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
   // A paid session must never be expired, even if its status is unexpectedly still open.
   if (session.status === "open" && session.payment_status !== "paid") {
     await stripe.checkout.sessions.expire(sessionId);

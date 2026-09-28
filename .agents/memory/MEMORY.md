@@ -24,3 +24,4 @@
 - [Community fixture ownership](community-fixture-ownership.md) — unmarked older test identities are not provably disposable; automated cleanup requires explicit ownership proof.
 - [Audit draft revisions](audit-draft-revisions.md) — treat deletion markers as revisions too; make timestamps monotonic under the account lock so simultaneous writes cannot share a version.
 - [Live test database pool lifetime](live-test-pool-lifetime.md) — don't end a shared module's database pool inside one test in a multi-test Playwright worker.
+- [Paid founding recovery](paid-founding-recovery.md) — honor verified paid checkouts even when newer reservations have filled the founding limit.

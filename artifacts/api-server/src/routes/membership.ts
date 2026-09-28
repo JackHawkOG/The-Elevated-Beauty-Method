@@ -8,8 +8,9 @@ import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
 import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "../lib/membership-reconciliation";
 import { GetMyMembershipResponse } from "@workspace/api-zod";
-import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
 import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations } from "../lib/membership-checkout-expirations";
+import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, restorePaidCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
+import { reconcileUntrackedPaidSessions } from "../lib/membership-paid-recovery";
 
 const router = Router();
 const OPENS = Date.parse("2026-10-01T14:00:00Z"); // 9 AM Central (CDT)
@@ -156,6 +157,7 @@ router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, r
   let checkoutStripe: Stripe | undefined;
   try {
     await reconcileStaleReservations();
+    await reconcileUntrackedPaidSessions(req.userId);
     await client.query("BEGIN");
     // Serializes checkouts across all server instances, including simultaneous last-place requests.
     await lockMembershipCapacity(client);
@@ -304,7 +306,9 @@ export async function handleMembershipWebhook(req: Request, res: Response): Prom
       if (event.type === "checkout.session.completed" && object.object === "checkout.session") {
         const session = object as Stripe.Checkout.Session;
         if (session.payment_status === "paid" && session.subscription && typeof session.subscription === "string") {
-          await confirmCheckout(client, session.id, session.subscription);
+          if (!(await confirmCheckout(client, session.id, session.subscription))) {
+            await restorePaidCheckout(client, await getUncachableStripeClient(), session.id);
+          }
         }
       } else if (event.type === "checkout.session.expired" && object.object === "checkout.session") {
         await expireCheckout(client, object.id);

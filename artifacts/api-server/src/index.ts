@@ -14,6 +14,7 @@ import { startMembershipReconciliation } from "./lib/membership-reconciliation";
 import { runMigrations } from "stripe-replit-sync";
 import { startCheckoutExpirationRecovery } from "./lib/membership-checkout-expirations";
 import { startMembershipOrphanRecovery } from "./lib/membership-orphan-recovery";
+import { startUntrackedPaidCheckoutRecovery } from "./lib/membership-paid-recovery";
 
 const rawPort = process.env["PORT"];
 
@@ -59,4 +60,5 @@ app.listen(port, (err) => {
   startMembershipReconciliation();
   startCheckoutExpirationRecovery();
   startMembershipOrphanRecovery();
+  startUntrackedPaidCheckoutRecovery();
 });
