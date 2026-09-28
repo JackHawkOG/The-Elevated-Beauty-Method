@@ -63,6 +63,7 @@ export default function RadiantAuditPage() {
   const skipRestoredChange = useRef(false);
   const draftBaseline = useRef<{ owner: string; completedAt: string } | null>(null);
   const draftHadAnswers = useRef(false);
+  const saveConfirmed = useRef(false);
   const save = useSaveRadiantAudit();
   const attempt = useRef<{ accountId: string; answers: string; id: string } | null>(null);
   const email = user?.primaryEmailAddress?.emailAddress;
@@ -80,6 +81,7 @@ export default function RadiantAuditPage() {
     draftBaseline.current = null;
     draftVersion.current = null;
     draftHadAnswers.current = false;
+    saveConfirmed.current = false;
     const local = readAuditDraft(accountId);
     void getRadiantAuditDraft({ responseType: "json" }).then(async remote => {
       let localAnswer = local;
@@ -218,7 +220,9 @@ export default function RadiantAuditPage() {
     }, 600);
   }, [showDraftConflict]);
   const persistDraft = useCallback((answers: RadiantAuditSubmission) => {
-    if (!accountId) return;
+    // The form can still emit a change while the confirmed save navigates away.
+    // Never recreate the completed answers as a new unfinished draft.
+    if (!accountId || saveConfirmed.current) return;
     latestAnswers.current = answers;
     if (skipRestoredChange.current) {
       skipRestoredChange.current = false;
@@ -349,6 +353,7 @@ export default function RadiantAuditPage() {
           attempt.current = { accountId: user!.id, answers: signature, id };
         }
         const saved = await save.mutateAsync({ data: { ...answers, submissionId: attempt.current.id } });
+        saveConfirmed.current = true;
         // Clear only after the server confirms the save.
         try { clearAuditDraft(user?.id); } catch { /* A storage failure must not hide a confirmed save. */ }
         trackRadiantAuditSaved(saved.completionKind);

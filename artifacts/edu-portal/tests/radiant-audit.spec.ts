@@ -982,6 +982,10 @@ test("failed signed-in save preserves answers and checks until a successful retr
   await page.goto("/tests/audit-harness.html");
   await expect(page.locator("#mastery-goal")).toHaveValue("");
   await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+  await page.reload();
+  await expect(page.locator("#mastery-goal")).toHaveValue("");
+  await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
   // An intentional new submission uses a fresh ID, even for identical answers.
   await page.getByLabel("Skincare consistency").check();
   await page.getByLabel("Quality over price").check();

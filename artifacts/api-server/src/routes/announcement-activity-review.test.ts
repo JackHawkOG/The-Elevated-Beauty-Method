@@ -35,7 +35,9 @@ async function request(path: string, user?: string, method = "GET", body?: objec
 beforeAll(async () => {
   requireDevelopmentDatabase();
   await ensureAnnouncementSchema();
-  const { default: routes } = await import("./announcement-activity-review");
+  // Exercise the same route order as the running API, including the generic
+  // /announcements/:announcementId handler.
+  const { default: routes } = await import("./index");
   const app = express();
   app.use(pinoHttp({ logger }));
   app.use(express.json(), routes);
