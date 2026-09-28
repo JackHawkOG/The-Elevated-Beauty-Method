@@ -552,6 +552,81 @@ test("an earlier Audit removed in another tab cannot silently switch the deletio
   await expect.poll(() => deletes).toEqual([202]);
 });
 
+test("a committed signed-in save with a lost response retries after reload without creating history", async ({ page }) => {
+  const answers = fixture("lost-response");
+  const submissionIds: string[] = [];
+  let current: Audit | null = null;
+  const history: HistoryEntry[] = [];
+  let firstResponseDropped = false;
+
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    const request = route.request();
+    if (request.headers().authorization !== "Bearer member-a") {
+      return route.fulfill({ status: 401, json: { error: "Sign in required" } });
+    }
+    if (request.method() === "GET") {
+      return route.fulfill({ json: new URL(request.url()).pathname.endsWith("/history") ? history : current });
+    }
+    if (request.method() !== "PUT") return route.fulfill({ status: 405 });
+
+    const { submissionId, ...input } = request.postDataJSON() as Answers & { submissionId: string };
+    submissionIds.push(submissionId);
+    if (!current) {
+      current = {
+        ...input,
+        routineScore: input.routineChecks.length,
+        valuesScore: input.valuesChecks.length,
+        completedAt: "2026-09-02T12:00:00.000Z",
+      };
+    } else if (submissionId !== submissionIds[0]) {
+      history.push({ id: history.length + 1, ...current });
+      current = { ...current, ...input };
+    }
+    // The server committed the write, but the browser never receives its confirmation.
+    if (!firstResponseDropped) {
+      firstResponseDropped = true;
+      return route.abort("failed");
+    }
+    return route.fulfill({ json: { audit: current, completionKind: "first_time" } });
+  });
+
+  await signInAs(page, "member-a");
+  await page.getByLabel("Skincare consistency").check();
+  await page.getByLabel("Quality over price").check();
+  await page.getByLabel("Professional results").check();
+  await page.locator("#beauty-trend").fill(answers.beautyTrend);
+  await page.locator("#mastery-goal").fill(answers.masteryGoal);
+  await page.locator("#research-time").fill(answers.researchTime);
+  await page.getByLabel("Email address").fill("member-a@example.invalid");
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+
+  await expect(page.getByRole("alert")).toContainText("We couldn't save your Audit");
+  expect(firstResponseDropped).toBe(true);
+  expect(submissionIds).toHaveLength(1);
+  expect(submissionIds[0]).toBeTruthy();
+  expect(current).toMatchObject(answers);
+  expect(history).toEqual([]);
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
+  await expect(page.getByLabel("Skincare consistency")).toBeChecked();
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
+  expect(submissionIds).toEqual([submissionIds[0], submissionIds[0]]);
+  expect(history).toEqual([]);
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "How your answers have changed" })).toHaveCount(0);
+  expect(submissionIds).toHaveLength(2);
+  expect(history).toEqual([]);
+});
+
 test("failed signed-in save preserves answers and checks until a successful retry", async ({ page }) => {
   const submitted: Answers[] = [];
   const submissionIds: string[] = [];
