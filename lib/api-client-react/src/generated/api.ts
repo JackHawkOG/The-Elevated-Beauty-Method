@@ -3326,4 +3326,3 @@ export function useGetRecentActivity<TData = Awaited<ReturnType<typeof getRecent
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-

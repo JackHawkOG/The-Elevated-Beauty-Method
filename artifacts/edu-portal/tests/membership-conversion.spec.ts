@@ -3,6 +3,47 @@ import { expect, test } from "@playwright/test";
 type Kind = "founding" | "standard";
 type Event = { name: string; data?: Record<string, string> };
 
+for (const kind of ["founding", "standard"] as const) {
+  test(`${kind} existing membership ignores a stale success link`, async ({ page }) => {
+    const events: Event[] = [];
+    let checkoutRequests = 0;
+    await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
+      events.push(event);
+    });
+    await page.addInitScript(() => {
+      localStorage.setItem("audit-test-account", "membership-test-member");
+      (window as unknown as { umami: { track: (name: string, data?: Record<string, string>) => void } }).umami = {
+        track: (name, data) => {
+          void (window as unknown as { __recordMembershipEvent: (event: Event) => Promise<void> })
+            .__recordMembershipEvent({ name, data });
+        },
+      };
+    });
+    await page.route("**/api/membership/offer", route => route.fulfill({
+      json: { phase: "open", foundingAvailable: true, foundingPrice: 24, standardPrice: 48 },
+    }));
+    await page.route("**/api/membership/me", route => route.fulfill({
+      json: { membership: { kind, status: "confirmed" } },
+    }));
+    await page.route("**/api/membership/checkout", route => {
+      checkoutRequests++;
+      return route.fulfill({ json: { url: `https://checkout.stripe.com/session/${kind}` } });
+    });
+
+    await page.goto("/tests/membership-harness.html?checkout=success");
+    await expect(page.getByText(/membership is active/)).toBeVisible();
+    await expect(page).toHaveURL(/\/tests\/membership-harness\.html$/);
+    expect(checkoutRequests).toBe(0);
+    expect(events).toEqual([]);
+
+    await page.goto("/tests/membership-harness.html?checkout=success");
+    await expect(page.getByText(/membership is active/)).toBeVisible();
+    await expect(page).toHaveURL(/\/tests\/membership-harness\.html$/);
+    expect(events).toEqual([]);
+  });
+
+}
+
 for (const { kind, failure } of [
   { kind: "founding", failure: "server error" },
   { kind: "standard", failure: "missing redirect URL" },
@@ -10,7 +51,6 @@ for (const { kind, failure } of [
   test(`${kind} checkout ${failure} stays on membership without conversion events`, async ({ page }) => {
     const events: Event[] = [];
     let checkoutRequests = 0;
-
     await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
       events.push(event);
     });
@@ -46,17 +86,18 @@ for (const { kind, failure } of [
 }
 
 for (const url of [
+  "",
   "not a URL",
-  "/dashboard",
+  "/membership",
   "javascript:alert('bad')",
-  "http://checkout.stripe.com/pay/test",
-  "https://checkout.stripe.com.evil.example/pay/test",
-  "https://evil.example/pay/test",
-  "https://user@checkout.stripe.com/pay/test",
-  "https://checkout.stripe.com:444/pay/test",
-  "https://checkout.stripe.com/pay/test\njavascript:alert(1)",
+  "http://checkout.stripe.com/session/test_123",
+  "https://checkout.stripe.com.evil.example/session/test_123",
+  "https://evil.example/session/test_123",
+  "https://user@checkout.stripe.com/session/test_123",
+  "https://checkout.stripe.com:444/session/test_123",
+  "https://checkout.stripe.com/session/test_123\njavascript:alert(1)",
 ]) {
-  test(`malformed checkout destination ${JSON.stringify(url)} stays on membership without conversion events`, async ({ page }) => {
+  test(`invalid checkout destination ${JSON.stringify(url)} stays on membership`, async ({ page }) => {
     const events: Event[] = [];
     await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
       events.push(event);
@@ -144,7 +185,7 @@ for (const kind of ["founding", "standard"] as const) {
   test(`${kind} cancelled checkout stays pending without a paid conversion and can be continued`, async ({ page }) => {
     const events: Event[] = [];
     let checkoutRequests = 0;
-    let membership: { kind: Kind; status: "pending" } | null = null;
+    let membership: { kind: Kind; status: "pending" | "confirmed" } | null = null;
     const checkoutUrl = `https://checkout.stripe.com/session/${kind}`;
 
     await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {

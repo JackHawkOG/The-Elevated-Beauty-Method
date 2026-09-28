@@ -11,6 +11,8 @@ When a completion check contradicts an earlier successful focused run, inspect t
 
 Generated files are especially prone to valid-but-duplicated merge output when independent tasks regenerate them. If a clean worktree fails typechecking with duplicate generated declarations after a merge, regenerate from the current source contract before changing the contract or patching generated declarations by hand. **Why:** Each task's generated output can pass alone, but a merge can combine declarations from different generated revisions. **How to apply:** Regenerate, verify the duplicates disappear, then run the configured check against that refreshed worktree.
 
+If regeneration instead exposes a generated forward reference and the same merge also breaks unrelated route boundaries or tests, don't assume regeneration repaired the merged feature. **Why:** A focused feature test can pass while a newly merged, unrelated feature remains malformed in the shared worktree. **How to apply:** Attribute each full-check failure to its current source, fix the assigned feature's own findings, and treat broad repairs to unrelated merged functionality as a separate risk rather than silently folding them into a narrow task.
+
 When concurrent changes touch the same test file, verify the entire suite after the merge, not just the conflict region or your new cases.
 
 **Why:** A merge can preserve both sides' text while displacing statements, duplicating tests, or dropping setup and assertions; a previously passing focused run no longer describes the merged file.

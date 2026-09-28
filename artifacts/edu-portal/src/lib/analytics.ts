@@ -67,7 +67,13 @@ export function trackAuditResumptionIfRequested(accountId: string, location: Aud
   clearAuditVerification();
 }
 
-export function trackMembershipCheckoutStarted(kind: "founding" | "standard"): void {
+const membershipCheckoutReturnKey = "membership_checkout_return";
+export function trackMembershipCheckoutStarted(kind: "founding" | "standard", accountId: string | undefined): void {
+  try {
+    if (accountId) window.sessionStorage.setItem(membershipCheckoutReturnKey, JSON.stringify({ kind, accountId }));
+  } catch {
+    // Storage may be disabled; analytics must not interrupt checkout.
+  }
   trackEvent("membership_checkout_started", { kind });
 }
 
@@ -77,13 +83,34 @@ export function trackMembershipEnrollmentConfirmed(kind: "founding" | "standard"
 
 export function trackConfirmedMembershipReturn(
   membership: { kind: "founding" | "standard"; status: "pending" | "confirmed" | "forfeited" } | null | undefined,
+  accountId: string | undefined,
 ): void {
-  if (typeof window === "undefined" || membership?.status !== "confirmed") return;
+  if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  if (url.searchParams.get("checkout") !== "success") return;
+  const returnType = url.searchParams.get("checkout");
+  if (returnType === "cancel") {
+    try {
+      window.sessionStorage.removeItem(membershipCheckoutReturnKey);
+    } catch {
+      // Storage may be disabled.
+    }
+    return;
+  }
+  if (membership?.status !== "confirmed") return;
+  if (returnType !== "success") return;
 
-  // The Stripe return URL alone is not proof of payment. Avoid a duplicate on refresh.
-  trackMembershipEnrollmentConfirmed(membership.kind);
+  // A confirmed membership may predate a pasted or bookmarked success URL.
+  // Count only a checkout initiated in this tab, then consume that marker.
+  try {
+    const started = window.sessionStorage.getItem(membershipCheckoutReturnKey);
+    window.sessionStorage.removeItem(membershipCheckoutReturnKey);
+    if (accountId && started &&
+        JSON.stringify({ kind: membership.kind, accountId }) === started) {
+      trackMembershipEnrollmentConfirmed(membership.kind);
+    }
+  } catch {
+    // Storage may be disabled; do not count an unverified browser return.
+  }
   url.searchParams.delete("checkout");
   try {
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);

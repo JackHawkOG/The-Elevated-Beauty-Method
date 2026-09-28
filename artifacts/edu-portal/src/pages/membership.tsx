@@ -59,8 +59,8 @@ export default function MembershipPage() {
   const canBuy = offer?.phase !== "upcoming" && Boolean(offer);
 
   useEffect(() => {
-    trackConfirmedMembershipReturn(mine?.membership);
-  }, [mine?.membership?.kind, mine?.membership?.status]);
+    trackConfirmedMembershipReturn(mine?.membership, user?.id);
+  }, [mine?.membership?.kind, mine?.membership?.status, user?.id]);
 
   useEffect(() => {
     const refreshAfterPortal = () => {
@@ -75,7 +75,7 @@ export default function MembershipPage() {
     try {
       const result = await checkout.mutateAsync({ data: { kind } });
       const checkoutUrl = stripeCheckoutUrl(result?.url);
-      trackMembershipCheckoutStarted(kind);
+      trackMembershipCheckoutStarted(kind, user?.id);
       window.location.assign(checkoutUrl);
     } catch (err) {
       queryClient.invalidateQueries({ queryKey: getGetMembershipOfferQueryKey() });

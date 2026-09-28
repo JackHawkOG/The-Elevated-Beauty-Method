@@ -56,7 +56,7 @@ router.get("/member-stories", async (_req, res): Promise<void> => {
 });
 
 router.get("/member-stories/manage", requireAuth, requireOwner, async (_req, res): Promise<void> => {
-  res.set("Cache-Control", "no-store");
+  res.set("Cache-Control", "private, no-store");
   const rows = await db.select().from(memberStoriesTable).orderBy(desc(memberStoriesTable.publishedAt));
   res.json(ListManagedMemberStoriesResponse.parse(rows.map(ownerStory)));
 });
@@ -91,10 +91,9 @@ router.post("/member-stories", requireAuth, requireOwner, async (req, res): Prom
   const now = new Date();
   const [row] = await db.insert(memberStoriesTable).values({
     quote, attribution, permissionRecord,
-    permissionRecordedBy: req.userId!,
-    permissionRecordedAt: now,
-    publishedAt: now,
+    permissionRecordedAt: now, permissionRecordedBy: req.userId!, publishedAt: now,
   }).returning();
+  res.set("Cache-Control", "private, no-store");
   res.status(201).json(PublishMemberStoryResponse.parse(ownerStory(row)));
 });
 
@@ -106,11 +105,11 @@ router.post("/member-stories/:storyId/removal-request", requireAuth, async (req,
     return;
   }
   const parsed = RequestMemberStoryRemovalBody.safeParse(req.body);
-  const note = parsed.success ? parsed.data.note.trim() : "";
-  if (!note || note.length > 500) {
+  if (!parsed.success || !parsed.data.note.trim() || parsed.data.note.trim().length > 500) {
     res.status(400).json({ error: "Tell us how this story is connected to you (up to 500 characters)" });
     return;
   }
+  const note = parsed.data.note.trim();
   let email: string | null;
   try {
     const user = await clerkClient.users.getUser(req.userId!);
@@ -158,7 +157,8 @@ router.post("/member-stories/:storyId/withdraw", requireAuth, requireOwner, asyn
     return;
   }
   const [row] = await db.update(memberStoriesTable).set({
-    withdrawnAt: new Date(), withdrawnBy: req.userId!,
+    withdrawnAt: new Date(),
+    withdrawnBy: req.userId!,
   }).where(and(eq(memberStoriesTable.id, id), isNull(memberStoriesTable.withdrawnAt))).returning();
   if (!row) {
     res.status(404).json({ error: "Published story not found" });
@@ -196,7 +196,7 @@ router.post("/member-stories/:storyId/removal-review", requireAuth, requireOwner
     res.status(404).json({ error: "Hidden, unreviewed removal claim not found" });
     return;
   }
-  res.set("Cache-Control", "no-store");
+  res.set("Cache-Control", "private, no-store");
   res.json(ReviewMemberStoryRemovalResponse.parse(ownerStory(row)));
 });
 

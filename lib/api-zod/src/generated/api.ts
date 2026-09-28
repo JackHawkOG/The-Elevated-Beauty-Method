@@ -1176,4 +1176,3 @@ export const GetRecentActivityResponseItem = zod.object({
   "createdAt": zod.string()
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
-

@@ -79,8 +79,8 @@ test("a confirmed save after the verify-email action counts once without identit
 test("membership analytics sends only the fixed membership kind", () => {
   const track = vi.fn();
   vi.stubGlobal("window", { umami: { track } });
-  trackMembershipCheckoutStarted("founding");
-  trackMembershipCheckoutStarted("standard");
+  trackMembershipCheckoutStarted("founding", "account-one");
+  trackMembershipCheckoutStarted("standard", "account-one");
   trackMembershipEnrollmentConfirmed("founding");
   expect(track.mock.calls).toEqual([
     ["membership_checkout_started", { kind: "founding" }],
@@ -91,7 +91,7 @@ test("membership analytics sends only the fixed membership kind", () => {
 
 test("analytics being missing or throwing cannot interrupt checkout", () => {
   vi.stubGlobal("window", {});
-  expect(() => trackMembershipCheckoutStarted("standard")).not.toThrow();
+  expect(() => trackMembershipCheckoutStarted("standard", "account-one")).not.toThrow();
   vi.stubGlobal("window", { umami: { track: () => { throw new Error("blocked"); } } });
   expect(() => trackMembershipEnrollmentConfirmed("standard")).not.toThrow();
 });
@@ -99,15 +99,24 @@ test("analytics being missing or throwing cannot interrupt checkout", () => {
 test("a success redirect counts only after payment confirmation", () => {
   const track = vi.fn();
   const replaceState = vi.fn();
+  const values = new Map<string, string>();
+  const sessionStorage = {
+    setItem: (key: string, value: string) => values.set(key, value),
+    getItem: (key: string) => values.get(key) ?? null,
+    removeItem: (key: string) => values.delete(key),
+  };
   vi.stubGlobal("window", {
     location: { href: "https://example.com/membership?checkout=success" },
     history: { state: null, replaceState },
     umami: { track },
+    sessionStorage,
   });
 
-  trackConfirmedMembershipReturn({ kind: "founding", status: "pending" });
+  trackMembershipCheckoutStarted("founding", "account-one");
+  track.mockClear();
+  trackConfirmedMembershipReturn({ kind: "founding", status: "pending" }, "account-one");
   expect(track).not.toHaveBeenCalled();
-  trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed" });
+  trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed" }, "account-one");
   expect(track).toHaveBeenCalledWith("membership_enrollment_confirmed", { kind: "founding" });
   expect(replaceState).toHaveBeenCalledWith(null, "", "/membership");
 
@@ -115,7 +124,76 @@ test("a success redirect counts only after payment confirmation", () => {
     location: { href: "https://example.com/membership" },
     history: { state: null, replaceState },
     umami: { track },
+    sessionStorage,
   });
-  trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed" });
+  trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed" }, "account-one");
   expect(track).toHaveBeenCalledTimes(1);
+});
+
+test("a confirmed membership on a stale success link does not count without a checkout in this tab", () => {
+  const track = vi.fn();
+  const replaceState = vi.fn();
+  const values = new Map<string, string>();
+  vi.stubGlobal("window", {
+    location: { href: "https://example.com/membership?checkout=success" },
+    history: { state: null, replaceState },
+    umami: { track },
+    sessionStorage: {
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => values.delete(key),
+    },
+  });
+  trackConfirmedMembershipReturn({ kind: "standard", status: "confirmed" }, "account-one");
+  expect(track).not.toHaveBeenCalled();
+  expect(replaceState).toHaveBeenCalledWith(null, "", "/membership");
+});
+
+test("a checkout started by another account cannot count this account's membership", () => {
+  const track = vi.fn();
+  const values = new Map<string, string>();
+  const sessionStorage = {
+    setItem: (key: string, value: string) => values.set(key, value),
+    getItem: (key: string) => values.get(key) ?? null,
+    removeItem: (key: string) => values.delete(key),
+  };
+  vi.stubGlobal("window", {
+    location: { href: "https://example.com/membership?checkout=success" },
+    history: { state: null, replaceState: vi.fn() },
+    umami: { track },
+    sessionStorage,
+  });
+  trackMembershipCheckoutStarted("standard", "account-one");
+  track.mockClear();
+  trackConfirmedMembershipReturn({ kind: "standard", status: "confirmed" }, "account-two");
+  expect(track).not.toHaveBeenCalled();
+  expect(values.size).toBe(0);
+});
+
+test("a normal membership visit does not consume the checkout marker before a later success return", () => {
+  const track = vi.fn();
+  const values = new Map<string, string>();
+  const sessionStorage = {
+    setItem: (key: string, value: string) => values.set(key, value),
+    getItem: (key: string) => values.get(key) ?? null,
+    removeItem: (key: string) => values.delete(key),
+  };
+  vi.stubGlobal("window", {
+    location: { href: "https://example.com/membership" },
+    history: { state: null, replaceState: vi.fn() },
+    umami: { track },
+    sessionStorage,
+  });
+  trackMembershipCheckoutStarted("standard", "account-one");
+  track.mockClear();
+  trackConfirmedMembershipReturn({ kind: "standard", status: "confirmed" }, "account-one");
+  expect(values.size).toBe(1);
+  vi.stubGlobal("window", {
+    location: { href: "https://example.com/membership?checkout=success" },
+    history: { state: null, replaceState: vi.fn() },
+    umami: { track },
+    sessionStorage,
+  });
+  trackConfirmedMembershipReturn({ kind: "standard", status: "confirmed" }, "account-one");
+  expect(track).toHaveBeenCalledExactlyOnceWith("membership_enrollment_confirmed", { kind: "standard" });
+  expect(values.size).toBe(0);
 });
