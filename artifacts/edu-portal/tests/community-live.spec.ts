@@ -139,3 +139,102 @@ test("a lost response survives refresh for one signed-in post; editing starts a 
     }
   }
 });
+
+test("a pending announcement and its request key cannot cross a same-tab account switch", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireCommunityDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const marker = newCommunityFixtureTag();
+  const accounts = [
+    { email: communityFixtureEmail(marker), title: `Private pending ${marker}` },
+    { email: communityFixtureEmail(newCommunityFixtureTag()), title: `New member post ${marker}` },
+  ];
+  const created: string[] = [];
+  const keys: string[] = [];
+  const storageKey = "tebm:community:pending-announcement";
+  try {
+    for (const account of accounts) {
+      const user = await client.users.createUser({
+        emailAddress: [account.email],
+        firstName: "Community",
+        lastName: "Check",
+        skipPasswordRequirement: true,
+        privateMetadata: communityFixturePrivateMetadata,
+      });
+      created.push(user.id);
+    }
+    await page.goto("/community");
+    await clerk.signIn({ page, emailAddress: accounts[0].email });
+    await page.goto("/community");
+    await expect(page.getByRole("heading", { name: "Community", exact: true })).toBeVisible();
+    await expect(page.locator('[data-sidebar="footer"]')).toContainText(accounts[0].email);
+
+    // Fail the outgoing request without committing a post, leaving a real
+    // pending entry written by the form rather than manufacturing one.
+    await page.route("**/api/announcements", async route => {
+      if (!isPost(route.request().url(), route.request().method())) {
+        await route.continue();
+        return;
+      }
+      keys.push(route.request().headers()["idempotency-key"]);
+      await route.abort("failed");
+    });
+    await page.getByRole("button", { name: "New Post" }).click();
+    const dialog = await fillDraft(page, accounts[0].title, `Only member A ${marker}`);
+    await dialog.getByRole("button", { name: "Post Announcement" }).click();
+    await expect(page.getByText("Failed to post", { exact: true }).last()).toBeVisible();
+    await expect.poll(() => keys).toHaveLength(1);
+    const pendingA = await page.evaluate(key => sessionStorage.getItem(key), storageKey);
+    expect(JSON.parse(pendingA!)).toMatchObject({
+      userId: created[0], title: accounts[0].title, body: `Only member A ${marker}`, requestKey: keys[0],
+    });
+
+    await clerk.signOut({ page });
+    await clerk.signIn({ page, emailAddress: accounts[1].email });
+    await page.goto("/community");
+    await expect(page.locator('[data-sidebar="footer"]')).toContainText(accounts[1].email);
+    await page.getByRole("button", { name: "New Post" }).click();
+    await expect(dialog.getByPlaceholder("What's new?")).toBeEmpty();
+    await expect(dialog.getByPlaceholder("Share the details with the community...")).toBeEmpty();
+
+    // Some sign-out paths clear tab storage. Reintroduce A's actual pending
+    // entry to verify the author check even when an old entry survives.
+    await page.evaluate(({ key, value }) => sessionStorage.setItem(key, value), { key: storageKey, value: pendingA! });
+    await page.reload();
+    await expect(page.locator('[data-sidebar="footer"]')).toContainText(accounts[1].email);
+    await page.getByRole("button", { name: "New Post" }).click();
+    await expect(dialog.getByPlaceholder("What's new?")).toBeEmpty();
+    await expect(dialog.getByPlaceholder("Share the details with the community...")).toBeEmpty();
+    await expect.poll(() => page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+
+    await fillDraft(page, accounts[1].title, `Only member B ${marker}`);
+    await dialog.getByRole("button", { name: "Post Announcement" }).click();
+    await expect.poll(() => keys).toHaveLength(2);
+    expect(keys[1]).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(keys[1]).not.toBe(keys[0]);
+    await expect(page.getByText("Failed to post", { exact: true }).last()).toBeVisible();
+    expect(JSON.parse((await page.evaluate(key => sessionStorage.getItem(key), storageKey))!))
+      .toMatchObject({ userId: created[1], title: accounts[1].title, requestKey: keys[1] });
+  } finally {
+    if (!page.isClosed()) await page.unrouteAll({ behavior: "ignoreErrors" });
+    if (created.length) {
+      const [{ db, announcementsTable, activityTable, usersTable, pool }, { inArray }] =
+        await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+      try {
+        const posts = await db.select({ id: announcementsTable.id }).from(announcementsTable)
+          .where(inArray(announcementsTable.actorId, created));
+        if (posts.length) await db.delete(activityTable)
+          .where(inArray(activityTable.sourceAnnouncementId, posts.map(post => post.id)));
+        await db.delete(announcementsTable).where(inArray(announcementsTable.actorId, created));
+        await db.delete(usersTable).where(inArray(usersTable.clerkId, created));
+      } finally {
+        try {
+          await Promise.all(created.map(id => client.users.deleteUser(id)));
+        } finally {
+          await pool.end();
+        }
+      }
+    }
+  }
+});
