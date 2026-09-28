@@ -9,7 +9,7 @@ import {
 } from "@workspace/db";
 import { ensureEnrollmentSchema } from "../lib/ensure-enrollment-schema";
 import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
-import { approvedTopicLessons } from "../lib/approved-topic-lessons";
+import { approvedTopicLessons, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
 import { requireDevelopmentDatabase } from "./test-development-database";
 
 // Only this isolated test router trusts the test identity header. The real
@@ -560,6 +560,78 @@ test("a draft exact duplicate before the published approved lesson cannot block 
     }
     await db.delete(activityTable).where(and(
       eq(activityTable.entityTitle, approved.title), eq(activityTable.actorName, "Approved Duplicate Test"),
+    ));
+    await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
+  }
+});
+
+test("two published approved copies consistently select the lowest ID for listing, opening, resume, and completion", async () => {
+  const userId = `test-approved-published-tie-${run}`;
+  const actorName = "Approved Published Tie Test";
+  const approved = approvedTopicLessons[0];
+  let reviewedCourseId: number | undefined;
+  try {
+    await db.insert(usersTable).values({
+      clerkId: userId, displayName: actorName,
+      email: `${userId}@example.invalid`, membershipTier: "Elevated",
+    });
+    const [course] = await db.insert(coursesTable).values({
+      title: approved.title, description: "Published tie fixture", categoryId,
+      instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+    }).returning();
+    reviewedCourseId = course.id;
+    const [selected, duplicate] = await db.insert(lessonsTable).values([
+      { courseId: course.id, title: approved.title, content: approved.content, sortOrder: 1, publishedAt: new Date() },
+      { courseId: course.id, title: approved.title, content: approved.content, sortOrder: 1, publishedAt: new Date() },
+    ]).returning();
+    expect(selected.id).toBeLessThan(duplicate.id);
+    // A tied SQL query may return either order; selection must not depend on it.
+    expect(publishedLessonsForCourse(course.title, [duplicate, selected]).map(lesson => lesson.id))
+      .toEqual([selected.id]);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const courseDetail = await request(userId, `/courses/${course.id}`);
+      expect(courseDetail.status).toBe(200);
+      expect((courseDetail.data as { lessons: Array<{ id: number }> }).lessons.map(lesson => lesson.id)).toEqual([selected.id]);
+      const listing = await request(userId, `/courses/${course.id}/lessons`);
+      expect(listing.status).toBe(200);
+      expect((listing.data as Array<{ id: number }>).map(lesson => lesson.id)).toEqual([selected.id]);
+      expect((await request(userId, `/lessons/${selected.id}`)).status).toBe(200);
+      expect((await request(userId, `/lessons/${duplicate.id}`)).status).toBe(404);
+    }
+
+    const initial = await request(userId, "/enrollments", "POST", { courseId: course.id });
+    expect(initial.status).toBe(201);
+    expect(initial.data).toMatchObject({ totalLessons: 1, completedLessons: 0 });
+    await db.update(enrollmentsTable).set({ lastLessonId: duplicate.id })
+      .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id)));
+    const hiddenResume = await request(userId, "/enrollments");
+    expect((hiddenResume.data as Array<{ courseId: number; lastLessonId: number | null }>)
+      .find(row => row.courseId === course.id)?.lastLessonId).toBeNull();
+    expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
+      .toMatchObject({ lastLessonId: null, totalLessons: 1 });
+    expect((await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: duplicate.id })).status).toBe(404);
+
+    const completion = await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: selected.id });
+    expect(completion.status).toBe(200);
+    expect(completion.data).toMatchObject({ lastLessonId: selected.id, totalLessons: 1, completedLessons: 1 });
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const resumed = await request(userId, "/enrollments");
+      expect(resumed.status).toBe(200);
+      expect((resumed.data as Array<{ courseId: number }>).find(row => row.courseId === course.id))
+        .toMatchObject({ lastLessonId: selected.id, totalLessons: 1, completedLessons: 1, completedLessonIds: [selected.id] });
+      expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
+        .toMatchObject({ lastLessonId: selected.id, totalLessons: 1, completedLessons: 1 });
+    }
+  } finally {
+    if (reviewedCourseId) {
+      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, userId));
+      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.courseId, reviewedCourseId));
+      await db.delete(lessonsTable).where(eq(lessonsTable.courseId, reviewedCourseId));
+      await db.delete(coursesTable).where(eq(coursesTable.id, reviewedCourseId));
+    }
+    await db.delete(activityTable).where(and(
+      eq(activityTable.entityTitle, approved.title), eq(activityTable.actorName, actorName),
     ));
     await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
   }

@@ -46,8 +46,9 @@ Try a sample or patch-test as directed when possible, especially if your skin re
 ] as const;
 
 // Filter unexpected rows without deleting data or preventing the API from starting.
-// Only the first exact, approved lesson in each standalone course is publishable.
-export function publishedLessonsForCourse<T extends { title: string; content: string | null; sortOrder: number }>(
+// Only the lowest-ID exact, approved lesson in each standalone course is publishable.
+// Choose here rather than relying on the order in which a query returns tied rows.
+export function publishedLessonsForCourse<T extends { id: number; title: string; content: string | null; sortOrder: number }>(
   courseTitle: string,
   lessons: T[],
 ): T[] {
@@ -57,7 +58,7 @@ export function publishedLessonsForCourse<T extends { title: string; content: st
     lesson.title === approved.title &&
     lesson.content === approved.content &&
     lesson.sortOrder === 1
-  ).slice(0, 1);
+  ).sort((a, b) => a.id - b.id).slice(0, 1);
 }
 
 export function isApprovedStandaloneCourse(courseTitle: string): boolean {
