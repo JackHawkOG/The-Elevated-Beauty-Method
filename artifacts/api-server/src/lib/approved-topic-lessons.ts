@@ -1,3 +1,6 @@
+import { db, lessonsTable } from "@workspace/db";
+import { and, inArray, isNotNull } from "drizzle-orm";
+
 // Owner-approved standalone Tier 2 lessons. Exact teaching copy is recorded in
 // docs/beauty-topic-bank-review.md; changes to this copy require renewed approval.
 export const approvedTopicLessons = [
@@ -59,4 +62,20 @@ export function publishedLessonsForCourse<T extends { title: string; content: st
 
 export function isApprovedStandaloneCourse(courseTitle: string): boolean {
   return approvedTopicLessons.some(topic => topic.title === courseTitle);
+}
+
+// Fetch once for a page of courses, then apply the same exact-copy rule as the
+// learner's lesson listing. Ordinary course counts still use published rows.
+export async function approvedVisibleLessonIds(
+  courses: { id: number; title: string }[],
+): Promise<Map<number, number[]>> {
+  const approvedCourses = courses.filter(course => isApprovedStandaloneCourse(course.title));
+  if (!approvedCourses.length) return new Map();
+  const lessons = await db.select().from(lessonsTable)
+    .where(and(inArray(lessonsTable.courseId, approvedCourses.map(course => course.id)), isNotNull(lessonsTable.publishedAt)))
+    .orderBy(lessonsTable.sortOrder, lessonsTable.id);
+  return new Map(approvedCourses.map(course => [
+    course.id,
+    publishedLessonsForCourse(course.title, lessons.filter(lesson => lesson.courseId === course.id)).map(lesson => lesson.id),
+  ]));
 }

@@ -8,6 +8,7 @@ import {
   GetRecentActivityResponse,
 } from "@workspace/api-zod";
 import { withBrandTrademarks } from "../lib/brand-copy";
+import { approvedVisibleLessonIds } from "../lib/approved-topic-lessons";
 
 const router = Router();
 
@@ -56,8 +57,10 @@ router.get("/dashboard/featured", async (req, res): Promise<void> => {
     .limit(6)
     .orderBy(desc(coursesTable.createdAt));
 
+  const approvedIds = await approvedVisibleLessonIds(rows);
   res.json(GetFeaturedCoursesResponse.parse(rows.map(r => ({
     ...r,
+    lessonCount: approvedIds.get(r.id)?.length ?? r.lessonCount,
     createdAt: r.createdAt?.toISOString(),
   }))));
 });

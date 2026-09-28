@@ -28,7 +28,7 @@ import {
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { usersTable } from "@workspace/db";
 import { canAccessTier } from "../lib/beauty-method";
-import { isApprovedStandaloneCourse, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
+import { approvedVisibleLessonIds, isApprovedStandaloneCourse, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
 
 const router = Router();
 
@@ -102,9 +102,9 @@ async function buildCourseRow(courseId: number) {
     .from(coursesTable)
     .leftJoin(categoriesTable, eq(coursesTable.categoryId, categoriesTable.id))
     .where(eq(coursesTable.id, courseId));
-  return row && isApprovedStandaloneCourse(row.title)
-    ? { ...row, lessonCount: Math.min(1, row.lessonCount) }
-    : row;
+  if (!row) return row;
+  const approvedIds = await approvedVisibleLessonIds([{ id: row.id, title: row.title }]);
+  return { ...row, lessonCount: approvedIds.get(row.id)?.length ?? row.lessonCount };
 }
 
 // GET /courses
@@ -146,9 +146,10 @@ router.get("/courses", async (req, res): Promise<void> => {
     .offset(offset ?? 0)
     .orderBy(coursesTable.createdAt);
 
+  const approvedIds = await approvedVisibleLessonIds(rows);
   res.json(ListCoursesResponse.parse(rows.map(r => ({
     ...r,
-    lessonCount: isApprovedStandaloneCourse(r.title) ? Math.min(1, r.lessonCount) : r.lessonCount,
+    lessonCount: approvedIds.get(r.id)?.length ?? r.lessonCount,
     createdAt: r.createdAt?.toISOString(),
   }))));
 });

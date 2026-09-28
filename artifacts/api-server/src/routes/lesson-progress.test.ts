@@ -62,12 +62,13 @@ beforeAll(async () => {
   await ensureEnrollmentSchema();
   const { default: coursesRouter } = await import("./courses");
   const { default: enrollmentsRouter } = await import("./enrollments");
+  const { default: dashboardRouter } = await import("./dashboard");
   const app = express();
   app.use((req, _res, next) => {
     req.log = { error: requestError } as unknown as typeof req.log;
     next();
   });
-  app.use(express.json(), coursesRouter, enrollmentsRouter);
+  app.use(express.json(), coursesRouter, enrollmentsRouter, dashboardRouter);
   app.use(((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     res.status(500).json({ error: err.message });
   }) as express.ErrorRequestHandler);
@@ -346,7 +347,7 @@ test("standalone course resume hides published lessons that no longer match revi
     });
     const [course] = await db.insert(coursesTable).values({
       title: approved.title, description: "Reviewed resume fixture", categoryId,
-      instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+      instructorName: "Test", accessTier: "Elevated", isFeatured: true, publishedAt: new Date(),
     }).returning();
     reviewedCourseId = course.id;
     const [visible, hidden] = await db.insert(lessonsTable).values([
@@ -357,17 +358,44 @@ test("standalone course resume hides published lessons that no longer match revi
     expect(listing.status).toBe(200);
     expect((listing.data as Array<{ id: number }>).map(lesson => lesson.id)).toEqual([visible.id]);
     expect((await request(userId, `/lessons/${hidden.id}`)).status).toBe(404);
+    const courseDetail = await request(userId, `/courses/${course.id}`);
+    expect(courseDetail.status).toBe(200);
+    expect(courseDetail.data).toMatchObject({ lessonCount: 1 });
+    const courseList = await request(userId, "/courses");
+    expect(courseList.status).toBe(200);
+    expect((courseList.data as Array<{ id: number; lessonCount: number }>)
+      .find(row => row.id === course.id)?.lessonCount).toBe(1);
+    const featured = await request(userId, "/dashboard/featured");
+    expect(featured.status).toBe(200);
+    expect((featured.data as Array<{ id: number; lessonCount: number }>)
+      .find(row => row.id === course.id)?.lessonCount).toBe(1);
 
     const initial = await request(userId, "/enrollments", "POST", { courseId: course.id });
     expect(initial.status).toBe(201);
+    expect(initial.data).toMatchObject({ totalLessons: 1, completedLessons: 0 });
+    // A completion from before editorial review is retained in storage, but
+    // never contributes to visible progress.
+    await db.insert(lessonCompletionsTable).values({ userId, lessonId: hidden.id });
+    await db.update(enrollmentsTable).set({ completedLessons: 1 })
+      .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id)));
     await db.update(enrollmentsTable).set({ lastLessonId: hidden.id })
       .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id)));
     const listed = await request(userId, "/enrollments");
     expect(listed.status).toBe(200);
-    expect((listed.data as Array<{ courseId: number; lastLessonId: number | null }>)
-      .find(row => row.courseId === course.id)?.lastLessonId).toBeNull();
+    expect((listed.data as Array<{ courseId: number }>)
+      .find(row => row.courseId === course.id)).toMatchObject({
+        lastLessonId: null, totalLessons: 1, completedLessons: 0, completedLessonIds: [],
+      });
     expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
-      .toMatchObject({ lastLessonId: null });
+      .toMatchObject({ lastLessonId: null, totalLessons: 1, completedLessons: 0 });
+    expect((await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: hidden.id })).status)
+      .toBe(404);
+    const progress = await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: visible.id });
+    expect(progress.status).toBe(200);
+    expect(progress.data).toMatchObject({ totalLessons: 1, completedLessons: 1 });
+    expect(((await request(userId, "/enrollments")).data as Array<{ courseId: number }>)
+      .find(row => row.courseId === course.id))
+      .toMatchObject({ totalLessons: 1, completedLessons: 1, completedLessonIds: [visible.id] });
 
     await db.update(enrollmentsTable).set({ lastLessonId: visible.id })
       .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id)));
@@ -375,9 +403,24 @@ test("standalone course resume hides published lessons that no longer match revi
     expect((resumed.data as Array<{ courseId: number; lastLessonId: number | null }>)
       .find(row => row.courseId === course.id)?.lastLessonId).toBe(visible.id);
     expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
-      .toMatchObject({ lastLessonId: visible.id });
+      .toMatchObject({ lastLessonId: visible.id, totalLessons: 1, completedLessons: 1 });
+
+    await db.update(lessonsTable).set({ content: "Changed after approval" }).where(eq(lessonsTable.id, visible.id));
+    expect((await request(userId, `/courses/${course.id}`)).data).toMatchObject({ lessonCount: 0 });
+    const emptyList = await request(userId, "/courses");
+    expect((emptyList.data as Array<{ id: number; lessonCount: number }>)
+      .find(row => row.id === course.id)?.lessonCount).toBe(0);
+    const emptyFeatured = await request(userId, "/dashboard/featured");
+    expect((emptyFeatured.data as Array<{ id: number; lessonCount: number }>)
+      .find(row => row.id === course.id)?.lessonCount).toBe(0);
+    expect(((await request(userId, "/enrollments")).data as Array<{ courseId: number }>)
+      .find(row => row.courseId === course.id))
+      .toMatchObject({ totalLessons: 0, completedLessons: 0, completedLessonIds: [], lastLessonId: null });
+    expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
+      .toMatchObject({ totalLessons: 0, completedLessons: 0, lastLessonId: null });
   } finally {
     if (reviewedCourseId) {
+      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, userId));
       await db.delete(enrollmentsTable).where(eq(enrollmentsTable.courseId, reviewedCourseId));
       await db.delete(lessonsTable).where(eq(lessonsTable.courseId, reviewedCourseId));
       await db.delete(coursesTable).where(eq(coursesTable.id, reviewedCourseId));

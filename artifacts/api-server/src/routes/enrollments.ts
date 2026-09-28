@@ -11,24 +11,20 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 import { canAccessTier } from "../lib/beauty-method";
-import { isApprovedStandaloneCourse, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
+import { approvedVisibleLessonIds, isApprovedStandaloneCourse, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
 
 const router = Router();
 
 // Enrollment pointers are stored even if editorial review later hides the lesson.
 // Check them against the same ordered, published set used by the lesson listings.
-async function visibleResumeRows<T extends { courseId: number; courseTitle: string | null; lastLessonId: number | null }>(rows: T[]): Promise<T[]> {
+async function visibleResumeRows<T extends { courseId: number; courseTitle: string | null; lastLessonId: number | null }>(
+  rows: T[], approvedIds?: Map<number, number[]>,
+): Promise<T[]> {
   const approvedRows = rows.filter(row => row.lastLessonId != null && row.courseTitle != null && isApprovedStandaloneCourse(row.courseTitle));
   if (!approvedRows.length) return rows;
 
-  const lessons = await db.select().from(lessonsTable)
-    .where(and(inArray(lessonsTable.courseId, [...new Set(approvedRows.map(row => row.courseId))]), isNotNull(lessonsTable.publishedAt)))
-    .orderBy(lessonsTable.sortOrder);
-  const visibleByCourse = new Map(approvedRows.map(row => [
-    row.courseId,
-    publishedLessonsForCourse(row.courseTitle!, lessons.filter(lesson => lesson.courseId === row.courseId))[0]?.id,
-  ]));
-  return rows.map(row => visibleByCourse.has(row.courseId) && visibleByCourse.get(row.courseId) !== row.lastLessonId
+  const visibleByCourse = approvedIds ?? await approvedVisibleLessonIds(approvedRows.map(row => ({ id: row.courseId, title: row.courseTitle! })));
+  return rows.map(row => visibleByCourse.has(row.courseId) && !visibleByCourse.get(row.courseId)?.includes(row.lastLessonId!)
     ? { ...row, lastLessonId: null }
     : row);
 }
@@ -57,8 +53,20 @@ router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(coursesTable, eq(enrollmentsTable.courseId, coursesTable.id))
     .where(and(eq(enrollmentsTable.userId, userId), isNotNull(coursesTable.publishedAt)));
 
-  const visibleRows = await visibleResumeRows(rows);
-  res.json(ListEnrollmentsResponse.parse(visibleRows.map(r => ({ ...r, enrolledAt: r.enrolledAt?.toISOString() }))));
+  const approvedIds = await approvedVisibleLessonIds(rows.filter((row): row is typeof row & { courseTitle: string } => row.courseTitle != null)
+    .map(row => ({ id: row.courseId, title: row.courseTitle })));
+  const visibleRows = await visibleResumeRows(rows, approvedIds);
+  res.json(ListEnrollmentsResponse.parse(visibleRows.map(r => {
+    const ids = approvedIds.get(r.courseId);
+    const completedLessonIds = ids ? r.completedLessonIds.filter(id => ids.includes(id)) : r.completedLessonIds;
+    return {
+      ...r,
+      completedLessonIds,
+      completedLessons: ids ? completedLessonIds.length : r.completedLessons,
+      totalLessons: ids?.length ?? r.totalLessons,
+      enrolledAt: r.enrolledAt?.toISOString(),
+    };
+  })));
 });
 
 // POST /enrollments
@@ -110,7 +118,8 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     return inserted;
   });
   if (!enrollment) throw new Error("Enrollment missing after conflict");
-  const [totalRow] = await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
+  const approvedIds = await approvedVisibleLessonIds([{ id: courseId, title: course.title }]);
+  const [totalRow] = approvedIds.has(courseId) ? [] : await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
   const [availableLesson] = enrollment.lastLessonId == null ? [] : await db.select({ id: lessonsTable.id })
     .from(lessonsTable)
     .where(and(eq(lessonsTable.id, enrollment.lastLessonId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
@@ -120,10 +129,15 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     ...enrollment,
     lastLessonId: availableLesson?.id ?? null,
     courseTitle: course.title,
-  }]);
+  }], approvedIds);
+  const visibleIds = approvedIds.get(courseId);
+  const completedLessonIds = !visibleIds?.length ? [] : await db.select({ lessonId: lessonCompletionsTable.lessonId })
+    .from(lessonCompletionsTable)
+    .where(and(eq(lessonCompletionsTable.userId, userId), inArray(lessonCompletionsTable.lessonId, visibleIds)));
   res.status(201).json(EnrollInCourseResponse.parse({
     ...visibleEnrollment,
-    totalLessons: totalRow?.count ?? 0,
+    completedLessons: visibleIds === undefined ? enrollment.completedLessons : completedLessonIds.length,
+    totalLessons: approvedIds.get(courseId)?.length ?? totalRow?.count ?? 0,
     enrolledAt: enrollment.enrolledAt?.toISOString(),
   }));
 });
@@ -173,17 +187,35 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
     await tx.insert(lessonCompletionsTable)
       .values({ userId, lessonId })
       .onConflictDoNothing();
-    const [[totalRow], [completedRow]] = await Promise.all([
-      tx.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
-      tx.select({ count: sql<number>`count(*)::int` }).from(lessonCompletionsTable)
-        .innerJoin(lessonsTable, eq(lessonCompletionsTable.lessonId, lessonsTable.id))
-        .where(and(eq(lessonCompletionsTable.userId, userId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
-    ]);
+    let totalLessons: number;
+    let completedCount: number;
+    if (isApprovedStandaloneCourse(course.title)) {
+      const [publishedLessons, completions] = await Promise.all([
+        tx.select().from(lessonsTable)
+          .where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
+          .orderBy(lessonsTable.sortOrder, lessonsTable.id),
+        tx.select({ lessonId: lessonCompletionsTable.lessonId }).from(lessonCompletionsTable)
+          .innerJoin(lessonsTable, eq(lessonCompletionsTable.lessonId, lessonsTable.id))
+          .where(and(eq(lessonCompletionsTable.userId, userId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
+      ]);
+      const visibleIds = new Set(publishedLessonsForCourse(course.title, publishedLessons).map(row => row.id));
+      totalLessons = visibleIds.size;
+      completedCount = completions.filter(row => visibleIds.has(row.lessonId)).length;
+    } else {
+      const [[totalRow], [completedRow]] = await Promise.all([
+        tx.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
+        tx.select({ count: sql<number>`count(*)::int` }).from(lessonCompletionsTable)
+          .innerJoin(lessonsTable, eq(lessonCompletionsTable.lessonId, lessonsTable.id))
+          .where(and(eq(lessonCompletionsTable.userId, userId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
+      ]);
+      totalLessons = totalRow.count;
+      completedCount = completedRow.count;
+    }
     const [updated] = await tx.update(enrollmentsTable)
-      .set({ lastLessonId: lessonId, completedLessons: completedRow.count })
+      .set({ lastLessonId: lessonId, completedLessons: completedCount })
       .where(eq(enrollmentsTable.id, enrollment.id))
       .returning();
-    return { updated, totalLessons: totalRow.count };
+    return { updated, totalLessons };
   });
   if (!result) { res.status(404).json({ error: "Not enrolled" }); return; }
 
