@@ -387,3 +387,137 @@ test("a writer waits for the SQL migration to merge legacy rows and install uniq
     admin.release();
   }
 }, 15000);
+
+test("two startup repairs serialize on the same legacy enrollments", async () => {
+  requireDevelopmentDatabase();
+
+  // A private schema is shared across connections, while both repair sessions
+  // resolve unqualified tables and the index outside the public schema.
+  const schemaName = `enrollment_repair_${randomUUID().replaceAll("-", "")}`;
+  const admin = await pool.connect();
+  let firstClient: PoolClient | undefined;
+  let secondClient: PoolClient | undefined;
+  let firstRun: Promise<void> | undefined;
+  let secondRun: Promise<void> | undefined;
+  let resumeFirst: (() => void) | undefined;
+  let created = false;
+  try {
+    await admin.query(`CREATE SCHEMA "${schemaName}"`);
+    created = true;
+    await admin.query(`
+      CREATE TABLE "${schemaName}".enrollments (
+        id integer PRIMARY KEY,
+        user_id text NOT NULL,
+        course_id integer NOT NULL,
+        completed_lessons integer NOT NULL DEFAULT 0,
+        last_lesson_id integer,
+        enrolled_at timestamp NOT NULL
+      )
+    `);
+    await admin.query(`
+      CREATE TABLE "${schemaName}".lessons (
+        id integer PRIMARY KEY,
+        course_id integer NOT NULL,
+        published_at timestamp
+      )
+    `);
+    await admin.query(`
+      INSERT INTO "${schemaName}".lessons (id, course_id, published_at)
+      VALUES (31, 7, '2022-01-01')
+    `);
+    await admin.query(`
+      INSERT INTO "${schemaName}".enrollments
+        (id, user_id, course_id, completed_lessons, last_lesson_id, enrolled_at)
+      VALUES
+        (1, 'member', 7, 1, NULL, '2022-01-01'),
+        (2, 'member', 7, 4, 31, '2023-01-01')
+    `);
+
+    firstClient = await pool.connect();
+    secondClient = await pool.connect();
+    await firstClient.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+    await secondClient.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+    const { rows: [{ firstPid }] } = await firstClient.query<{ firstPid: number }>(
+      'SELECT pg_backend_pid() AS "firstPid"',
+    );
+    const { rows: [{ secondPid }] } = await secondClient.query<{ secondPid: number }>(
+      'SELECT pg_backend_pid() AS "secondPid"',
+    );
+
+    let signalLock!: () => void;
+    const lockAcquired = new Promise<void>((resolve) => { signalLock = resolve; });
+    const pauseAfterLock = new Promise<void>((resolve) => { resumeFirst = resolve; });
+    const isolatedDb = drizzle(firstClient, { schema });
+    const pausedDb: Pick<typeof db, "transaction"> = {
+      transaction: ((callback: Parameters<typeof db.transaction>[0]) =>
+        isolatedDb.transaction((tx) => callback(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property !== "execute") return Reflect.get(target, property, receiver);
+            return async (statement: Parameters<typeof tx.execute>[0]) => {
+              const result = await target.execute(statement);
+              signalLock();
+              await pauseAfterLock;
+              return result;
+            };
+          },
+        })))) as typeof db.transaction,
+    };
+
+    firstRun = ensureEnrollmentSchema(pausedDb);
+    await Promise.race([
+      lockAcquired,
+      firstRun.then(() => { throw new Error("First repair finished before taking the table lock"); }),
+    ]);
+    // Attach a rejection handler immediately so a premature failure cannot
+    // become unhandled while checking that PostgreSQL is blocking the second.
+    secondRun = ensureEnrollmentSchema(drizzle(secondClient, { schema }));
+    const secondOutcome = secondRun.then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    let blocked = false;
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      const { rows: [{ waiting }] } = await admin.query<{ waiting: boolean }>(`
+        SELECT wait_event_type = 'Lock' AND $2::int = ANY(pg_blocking_pids(pid)) AS waiting
+        FROM pg_stat_activity WHERE pid = $1
+      `, [secondPid, firstPid]);
+      if (waiting) {
+        blocked = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(blocked, "second repair must wait for the first repair's table lock").toBe(true);
+    resumeFirst!();
+    await firstRun;
+    expect(await secondOutcome).toEqual({ status: "fulfilled" });
+
+    expect((await admin.query(`
+      SELECT id, completed_lessons, last_lesson_id
+      FROM "${schemaName}".enrollments WHERE user_id = 'member' AND course_id = 7
+    `)).rows).toEqual([{ id: 1, completed_lessons: 4, last_lesson_id: 31 }]);
+    expect((await admin.query(`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname = $1 AND indexname = 'enrollments_user_id_course_id_unique'
+    `, [schemaName])).rows).toHaveLength(1);
+    await expect(admin.query(`
+      INSERT INTO "${schemaName}".enrollments (id, user_id, course_id, enrolled_at)
+      VALUES (3, 'member', 7, '2024-01-01')
+    `)).rejects.toMatchObject({ code: "23505" });
+  } finally {
+    resumeFirst?.();
+    await Promise.allSettled([firstRun, secondRun].filter((promise) => promise !== undefined));
+    if (firstClient) {
+      await firstClient.query("RESET search_path");
+      firstClient.release();
+    }
+    if (secondClient) {
+      await secondClient.query("RESET search_path");
+      secondClient.release();
+    }
+    if (created) await admin.query(`DROP SCHEMA "${schemaName}" CASCADE`);
+    admin.release();
+  }
+}, 15000);
