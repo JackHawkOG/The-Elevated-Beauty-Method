@@ -15,6 +15,7 @@ vi.mock("../middlewares/requireAuth", () => ({
   jitProvisionUser: (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
 }));
 import { recoverQueuedCheckoutExpirations } from "../lib/membership-checkout-expirations";
+import { expireUntrackedMembershipSessions } from "../lib/membership-orphan-recovery";
 
 type TestSession = {
   id: string; status: string; url: string; created: number;
@@ -302,14 +303,23 @@ test("lost Stripe responses leave recoverable sessions; recovery expires only un
   sessions.set(unrelated.id, unrelated);
 
   clock(opens + 32 * 60 * 1000);
+  const beforeListing = listSessions.mock.calls.length;
+  expect((await request("/membership/offer")).status).toBe(200);
+  expect((await request("/membership/checkout", "POST", trackedBuyer, { kind: "standard" })).status).toBe(200);
+  expect(listSessions.mock.calls).toHaveLength(beforeListing);
+  expect(orphan.status).toBe("open");
+
   // The listing may still include a session that completed during pagination.
   listSessions.mockImplementationOnce(async () => ({
-    data: [orphan, completed, tracked, unrelated], has_more: false,
+    data: [orphan, unrelated], has_more: true,
+  })).mockImplementationOnce(async () => ({
+    data: [completed, tracked], has_more: false,
   }));
-  expect((await request("/membership/offer")).status).toBe(200);
+  await expireUntrackedMembershipSessions();
   expect(listSessions).toHaveBeenCalledWith(expect.objectContaining({
     status: "open", created: { lte: Math.floor(Date.now() / 1000) - 31 * 60 },
   }));
+  expect(listSessions).toHaveBeenCalledWith(expect.objectContaining({ starting_after: unrelated.id }));
   expect(sessions.get(orphan.id)?.status).toBe("expired");
   expect(expireSession).toHaveBeenCalledWith(orphan.id);
   expect(expireSession).not.toHaveBeenCalledWith(completed.id);
@@ -318,6 +328,33 @@ test("lost Stripe responses leave recoverable sessions; recovery expires only un
   expect(unrelated.status).toBe("open");
   expect((await row(trackedBuyer)).status).toBe("pending");
   vi.restoreAllMocks();
+});
+
+test("slow Stripe orphan listing cannot hold up offer or checkout requests", async () => {
+  clock(opens);
+  const buyer = await addUser(213);
+  let release!: (page: { data: TestSession[]; has_more: boolean }) => void;
+  listSessions.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const sweep = expireUntrackedMembershipSessions();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const responses = await Promise.race([
+      Promise.all([
+        request("/membership/offer"),
+        request("/membership/checkout", "POST", buyer, { kind: "standard" }),
+      ]),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("Offer or checkout waited for Stripe listing")), 1500);
+      }),
+    ]);
+    expect(responses.map(response => response.status)).toEqual([200, 200]);
+    expect(listSessions).toHaveBeenCalledTimes(1);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    release({ data: [], has_more: false });
+    await sweep;
+    vi.restoreAllMocks();
+  }
 });
 
 test("concurrent last-place checkouts reserve once; only confirmed Stripe expiration releases a place", async () => {

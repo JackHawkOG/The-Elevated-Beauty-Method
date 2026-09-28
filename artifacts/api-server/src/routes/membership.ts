@@ -50,44 +50,8 @@ async function reconcileStaleReservations(): Promise<void> {
   }
 }
 
-// A failed Stripe response can leave a session in Stripe even though the
-// transaction containing its reservation rolled back. Stripe's idempotency key
-// cannot be replayed after that rollback because the reservation ID is gone;
-// list the still-open sessions by our metadata instead.
-async function expireUntrackedSessions(): Promise<void> {
-  const stripe = await getUncachableStripeClient();
-  const cutoff = Math.floor(Date.now() / 1000) - 31 * 60;
-  let startingAfter: string | undefined;
-  const candidates: Stripe.Checkout.Session[] = [];
-  do {
-    const page = await stripe.checkout.sessions.list({
-      status: "open",
-      created: { lte: cutoff },
-      limit: 100,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    });
-    candidates.push(...page.data);
-    if (!page.has_more) break;
-    if (!page.data.length) throw new Error("Stripe returned an empty checkout page with more results");
-    startingAfter = page.data[page.data.length - 1].id;
-  } while (true);
-  for (const session of candidates) {
-    if (session.metadata?.membershipCheckout !== "true" || !session.metadata.reservationId) continue;
-    const tracked = await pool.query(
-      "SELECT 1 FROM membership_checkouts WHERE stripe_session_id = $1 OR id = $2 LIMIT 1",
-      [session.id, session.metadata.reservationId],
-    );
-    if (tracked.rowCount) continue;
-    // Listing can race with payment completion. Only expire a session which
-    // is still open; Stripe will also reject expiration if it completes now.
-    const current = await stripe.checkout.sessions.retrieve(session.id);
-    if (current.status === "open") await stripe.checkout.sessions.expire(session.id);
-  }
-}
-
 async function availability() {
   await reconcileStaleReservations();
-  await expireUntrackedSessions();
   const client = await pool.connect();
   try {
     return await hasFoundingCapacity(client);
@@ -192,7 +156,6 @@ router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, r
   let checkoutStripe: Stripe | undefined;
   try {
     await reconcileStaleReservations();
-    await expireUntrackedSessions();
     await client.query("BEGIN");
     // Serializes checkouts across all server instances, including simultaneous last-place requests.
     await lockMembershipCapacity(client);
