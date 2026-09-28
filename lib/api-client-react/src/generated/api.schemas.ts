@@ -28,6 +28,24 @@ export const OwnerMemberStoryRemovalReviewOutcome = {
   inconclusive: 'inconclusive',
 } as const;
 
+export type MemberStoryReviewEntryOutcome = typeof MemberStoryReviewEntryOutcome[keyof typeof MemberStoryReviewEntryOutcome];
+
+
+export const MemberStoryReviewEntryOutcome = {
+  withdrawal_confirmed: 'withdrawal_confirmed',
+  claim_unsubstantiated: 'claim_unsubstantiated',
+  inconclusive: 'inconclusive',
+} as const;
+
+export interface MemberStoryReviewEntry {
+  /** Zero for the initial review, positive for corrections */
+  id: number;
+  outcome: MemberStoryReviewEntryOutcome;
+  note: string;
+  reviewedAt: string;
+  reviewedBy: string;
+}
+
 export interface OwnerMemberStory {
   id: number;
   quote: string;
@@ -56,6 +74,29 @@ export interface OwnerMemberStory {
   removalReviewedAt: string | null;
   /** @nullable */
   removalReviewedBy: string | null;
+  /** First review followed by append-only corrections, oldest first */
+  reviewHistory: MemberStoryReviewEntry[];
+}
+
+export type MemberStoryReviewCorrectionInputOutcome = typeof MemberStoryReviewCorrectionInputOutcome[keyof typeof MemberStoryReviewCorrectionInputOutcome];
+
+
+export const MemberStoryReviewCorrectionInputOutcome = {
+  withdrawal_confirmed: 'withdrawal_confirmed',
+  claim_unsubstantiated: 'claim_unsubstantiated',
+  inconclusive: 'inconclusive',
+} as const;
+
+export interface MemberStoryReviewCorrectionInput {
+  outcome: MemberStoryReviewCorrectionInputOutcome;
+  /**
+     * Reason for the correction, visible only to the owner
+     * @minLength 1
+     * @maxLength 2000
+     */
+  note: string;
+  /** ID of the latest review being corrected; zero for the initial review */
+  expectedReviewId: number;
 }
 
 export type MemberStoryRemovalReviewInputOutcome = typeof MemberStoryRemovalReviewInputOutcome[keyof typeof MemberStoryRemovalReviewInputOutcome];

@@ -165,3 +165,48 @@ test("owner can privately review a hidden claim without republishing the story",
     expect(alertsAfterReview.data.some((row: { storyId: number }) => row.storyId === stillPending.data.id)).toBe(true);
   }
 });
+
+test("corrections append private decisions without erasing the first review or revealing the story", async () => {
+  const published = await request("/member-stories", owner, "POST", {
+    quote: `Corrected claim ${run}`, attribution: "Member name",
+    permissionRecord: "Written permission", permissionConfirmed: true,
+  });
+  created.push(published.data.id);
+  const reviewPath = `/member-stories/${published.data.id}/removal-review`;
+  const correctionPath = `${reviewPath}/corrections`;
+  const body = { outcome: "withdrawal_confirmed", note: "Confirmed after further checking", expectedReviewId: 0 };
+  expect((await request(correctionPath, owner, "POST", body)).status).toBe(404);
+  expect((await request(`/member-stories/${published.data.id}/removal-request`, `test-correction-claimant-${run}`, "POST", { note: "This concerns me" })).status).toBe(200);
+  expect((await request(correctionPath, owner, "POST", body)).status).toBe(404);
+  expect((await request(reviewPath, owner, "POST", { outcome: "inconclusive", note: "First assessment" })).status).toBe(200);
+  expect((await request(correctionPath, undefined, "POST", body)).status).toBe(401);
+  expect((await request(correctionPath, member, "POST", body)).status).toBe(403);
+  expect((await request(correctionPath, owner, "POST", { ...body, note: "  " })).status).toBe(400);
+  expect((await request(correctionPath, owner, "POST", { ...body, expectedReviewId: -1 })).status).toBe(400);
+  const [first, stale] = await Promise.all([
+    request(correctionPath, owner, "POST", body),
+    request(correctionPath, owner, "POST", body),
+  ]);
+  expect([first.status, stale.status].sort()).toEqual([200, 409]);
+  const successful = first.status === 200 ? first : stale;
+  expect(successful.cache).toContain("private");
+  expect(successful.data.reviewHistory.map((entry: { note: string }) => entry.note))
+    .toEqual(["First assessment", body.note]);
+  expect(successful.data.reviewHistory[0]).toMatchObject({ id: 0, outcome: "inconclusive", reviewedBy: owner, reviewedAt: expect.any(String) });
+  expect(successful.data.reviewHistory[1]).toMatchObject({ outcome: body.outcome, reviewedBy: owner, reviewedAt: expect.any(String) });
+  expect(successful.data.removalReviewOutcome).toBe("inconclusive");
+  expect((await request(correctionPath, owner, "POST", body)).status).toBe(409);
+  const next = await request(correctionPath, owner, "POST", {
+    outcome: "claim_unsubstantiated", note: "New evidence", expectedReviewId: successful.data.reviewHistory[1].id,
+  });
+  expect(next.status).toBe(200);
+  expect(next.data.reviewHistory.map((entry: { note: string }) => entry.note))
+    .toEqual(["First assessment", body.note, "New evidence"]);
+  const managed = await request("/member-stories/manage", owner);
+  expect(managed.data.find((story: { id: number }) => story.id === published.data.id).reviewHistory).toEqual(next.data.reviewHistory);
+  expect((await request("/member-stories/manage", member)).status).toBe(403);
+  const publicList = await request("/member-stories");
+  expect(publicList.data.some((story: { id: number }) => story.id === published.data.id)).toBe(false);
+  expect(JSON.stringify(publicList.data)).not.toContain("New evidence");
+  expect(JSON.stringify((await request("/member-stories/removal-alerts", owner)).data)).not.toContain("New evidence");
+});

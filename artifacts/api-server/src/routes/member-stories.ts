@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { clerkClient } from "@clerk/express";
-import { and, desc, eq, gt, isNull, sql } from "drizzle-orm";
-import { db, memberStoriesTable } from "@workspace/db";
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { db, memberStoriesTable, memberStoryReviewCorrectionsTable } from "@workspace/db";
 import {
   ListPublishedMemberStoriesResponse,
   ListManagedMemberStoriesResponse,
@@ -13,6 +13,8 @@ import {
   RequestMemberStoryRemovalResponse,
   ReviewMemberStoryRemovalBody,
   ReviewMemberStoryRemovalResponse,
+  CorrectMemberStoryRemovalReviewBody,
+  CorrectMemberStoryRemovalReviewResponse,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 
@@ -32,7 +34,9 @@ async function requireOwner(req: Request, res: Response, next: NextFunction): Pr
   }
 }
 
-function ownerStory(row: typeof memberStoriesTable.$inferSelect) {
+type Correction = typeof memberStoryReviewCorrectionsTable.$inferSelect;
+
+function ownerStory(row: typeof memberStoriesTable.$inferSelect, corrections: Correction[] = []) {
   return {
     ...row,
     permissionRecordedAt: row.permissionRecordedAt.toISOString(),
@@ -40,6 +44,16 @@ function ownerStory(row: typeof memberStoriesTable.$inferSelect) {
     withdrawnAt: row.withdrawnAt?.toISOString() ?? null,
     removalRequestedAt: row.removalRequestedAt?.toISOString() ?? null,
     removalReviewedAt: row.removalReviewedAt?.toISOString() ?? null,
+    reviewHistory: [
+      ...(row.removalReviewOutcome && row.removalReviewNote && row.removalReviewedAt && row.removalReviewedBy
+        ? [{ id: 0, outcome: row.removalReviewOutcome, note: row.removalReviewNote,
+          reviewedAt: row.removalReviewedAt.toISOString(), reviewedBy: row.removalReviewedBy }]
+        : []),
+      ...corrections.map(item => ({
+        id: item.id, outcome: item.outcome, note: item.note,
+        reviewedAt: item.reviewedAt.toISOString(), reviewedBy: item.reviewedBy,
+      })),
+    ],
   };
 }
 
@@ -58,7 +72,16 @@ router.get("/member-stories", async (_req, res): Promise<void> => {
 router.get("/member-stories/manage", requireAuth, requireOwner, async (_req, res): Promise<void> => {
   res.set("Cache-Control", "private, no-store");
   const rows = await db.select().from(memberStoriesTable).orderBy(desc(memberStoriesTable.publishedAt));
-  res.json(ListManagedMemberStoriesResponse.parse(rows.map(ownerStory)));
+  const corrections = rows.length ? await db.select().from(memberStoryReviewCorrectionsTable)
+    .where(inArray(memberStoryReviewCorrectionsTable.storyId, rows.map(row => row.id)))
+    .orderBy(asc(memberStoryReviewCorrectionsTable.id)) : [];
+  const byStory = new Map<number, Correction[]>();
+  for (const item of corrections) {
+    const history = byStory.get(item.storyId) ?? [];
+    history.push(item);
+    byStory.set(item.storyId, history);
+  }
+  res.json(ListManagedMemberStoriesResponse.parse(rows.map(row => ownerStory(row, byStory.get(row.id)))));
 });
 
 router.get("/member-stories/removal-alerts", requireAuth, requireOwner, async (_req, res): Promise<void> => {
@@ -202,6 +225,53 @@ router.post("/member-stories/:storyId/removal-review", requireAuth, requireOwner
   }
   res.set("Cache-Control", "private, no-store");
   res.json(ReviewMemberStoryRemovalResponse.parse(ownerStory(row)));
+});
+
+router.post("/member-stories/:storyId/removal-review/corrections", requireAuth, requireOwner, async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.storyId) ? req.params.storyId[0] : req.params.storyId;
+  const id = Number(raw);
+  if (!raw || !/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(id)) {
+    res.status(400).json({ error: "Invalid story ID" });
+    return;
+  }
+  const parsed = CorrectMemberStoryRemovalReviewBody.safeParse(req.body);
+  if (!parsed.success || !parsed.data.note.trim() || parsed.data.note.trim().length > 2000 ||
+      !Number.isSafeInteger(parsed.data.expectedReviewId) || parsed.data.expectedReviewId < 0) {
+    res.status(400).json({ error: "A correction reason and current review ID are required" });
+    return;
+  }
+  const result = await db.transaction(async tx => {
+    // Lock the story before checking the current revision. A second owner request
+    // cannot append against a stale decision or silently duplicate a retry.
+    const [story] = await tx.select().from(memberStoriesTable)
+      .where(eq(memberStoriesTable.id, id)).for("update");
+    if (!story?.removalRequestedAt || !story.withdrawnAt || !story.removalReviewOutcome ||
+        !story.removalReviewedAt || !story.removalReviewNote || !story.removalReviewedBy) {
+      return { status: 404 as const };
+    }
+    const [latest] = await tx.select({ id: memberStoryReviewCorrectionsTable.id })
+      .from(memberStoryReviewCorrectionsTable)
+      .where(eq(memberStoryReviewCorrectionsTable.storyId, id))
+      .orderBy(desc(memberStoryReviewCorrectionsTable.id)).limit(1);
+    if ((latest?.id ?? 0) !== parsed.data.expectedReviewId) return { status: 409 as const };
+    await tx.insert(memberStoryReviewCorrectionsTable).values({
+      storyId: id, outcome: parsed.data.outcome, note: parsed.data.note.trim(), reviewedBy: req.userId!,
+    });
+    const corrections = await tx.select().from(memberStoryReviewCorrectionsTable)
+      .where(eq(memberStoryReviewCorrectionsTable.storyId, id))
+      .orderBy(asc(memberStoryReviewCorrectionsTable.id));
+    return { status: 200 as const, story, corrections };
+  });
+  if (result.status === 404) {
+    res.status(404).json({ error: "Hidden reviewed removal claim not found" });
+    return;
+  }
+  if (result.status === 409) {
+    res.status(409).json({ error: "Review changed. Refresh the story before correcting it." });
+    return;
+  }
+  res.set("Cache-Control", "private, no-store");
+  res.json(CorrectMemberStoryRemovalReviewResponse.parse(ownerStory(result.story, result.corrections)));
 });
 
 export default router;

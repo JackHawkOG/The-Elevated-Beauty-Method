@@ -5,6 +5,7 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { MemberStoryReviewEntry } from './memberStoryReviewEntry';
 import type { OwnerMemberStoryRemovalReviewOutcome } from './ownerMemberStoryRemovalReviewOutcome';
 
 export interface OwnerMemberStory {
@@ -35,4 +36,6 @@ export interface OwnerMemberStory {
   removalReviewedAt: string | null;
   /** @nullable */
   removalReviewedBy: string | null;
+  /** First review followed by append-only corrections, oldest first */
+  reviewHistory: MemberStoryReviewEntry[];
 }

@@ -54,7 +54,14 @@ export const PublishMemberStoryResponse = zod.object({
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
-  "removalReviewedBy": zod.string().nullable()
+  "removalReviewedBy": zod.string().nullable(),
+  "reviewHistory": zod.array(zod.object({
+  "id": zod.number().describe('Zero for the initial review, positive for corrections'),
+  "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
+  "note": zod.string(),
+  "reviewedAt": zod.string(),
+  "reviewedBy": zod.string()
+})).describe('First review followed by append-only corrections, oldest first')
 })
 
 
@@ -78,7 +85,14 @@ export const ListManagedMemberStoriesResponseItem = zod.object({
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
-  "removalReviewedBy": zod.string().nullable()
+  "removalReviewedBy": zod.string().nullable(),
+  "reviewHistory": zod.array(zod.object({
+  "id": zod.number().describe('Zero for the initial review, positive for corrections'),
+  "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
+  "note": zod.string(),
+  "reviewedAt": zod.string(),
+  "reviewedBy": zod.string()
+})).describe('First review followed by append-only corrections, oldest first')
 })
 export const ListManagedMemberStoriesResponse = zod.array(ListManagedMemberStoriesResponseItem)
 
@@ -137,7 +151,14 @@ export const WithdrawMemberStoryResponse = zod.object({
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
-  "removalReviewedBy": zod.string().nullable()
+  "removalReviewedBy": zod.string().nullable(),
+  "reviewHistory": zod.array(zod.object({
+  "id": zod.number().describe('Zero for the initial review, positive for corrections'),
+  "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
+  "note": zod.string(),
+  "reviewedAt": zod.string(),
+  "reviewedBy": zod.string()
+})).describe('First review followed by append-only corrections, oldest first')
 })
 
 
@@ -174,7 +195,59 @@ export const ReviewMemberStoryRemovalResponse = zod.object({
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
-  "removalReviewedBy": zod.string().nullable()
+  "removalReviewedBy": zod.string().nullable(),
+  "reviewHistory": zod.array(zod.object({
+  "id": zod.number().describe('Zero for the initial review, positive for corrections'),
+  "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
+  "note": zod.string(),
+  "reviewedAt": zod.string(),
+  "reviewedBy": zod.string()
+})).describe('First review followed by append-only corrections, oldest first')
+})
+
+
+/**
+ * @summary Owner appends a private correction to a reviewed hidden claim
+ */
+export const CorrectMemberStoryRemovalReviewParams = zod.object({
+  "storyId": zod.coerce.number()
+})
+
+export const correctMemberStoryRemovalReviewBodyNoteMax = 2000;
+
+
+
+export const CorrectMemberStoryRemovalReviewBody = zod.object({
+  "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
+  "note": zod.string().min(1).max(correctMemberStoryRemovalReviewBodyNoteMax).describe('Reason for the correction, visible only to the owner'),
+  "expectedReviewId": zod.number().describe('ID of the latest review being corrected; zero for the initial review')
+})
+
+export const CorrectMemberStoryRemovalReviewResponse = zod.object({
+  "id": zod.number(),
+  "quote": zod.string(),
+  "attribution": zod.string(),
+  "permissionRecord": zod.string(),
+  "permissionRecordedAt": zod.string(),
+  "permissionRecordedBy": zod.string(),
+  "publishedAt": zod.string(),
+  "withdrawnAt": zod.string().nullable(),
+  "withdrawnBy": zod.string().nullable(),
+  "removalRequestedAt": zod.string().nullable(),
+  "removalRequestedBy": zod.string().nullable(),
+  "removalRequesterEmail": zod.string().nullable(),
+  "removalRequestNote": zod.string().nullable(),
+  "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
+  "removalReviewNote": zod.string().nullable(),
+  "removalReviewedAt": zod.string().nullable(),
+  "removalReviewedBy": zod.string().nullable(),
+  "reviewHistory": zod.array(zod.object({
+  "id": zod.number().describe('Zero for the initial review, positive for corrections'),
+  "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
+  "note": zod.string(),
+  "reviewedAt": zod.string(),
+  "reviewedBy": zod.string()
+})).describe('First review followed by append-only corrections, oldest first')
 })
 
 

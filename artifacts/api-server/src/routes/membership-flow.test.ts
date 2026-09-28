@@ -285,7 +285,7 @@ test("recovery does not expire a checkout that completed while cleanup was unava
   const id = `cs_${randomUUID()}`;
   sessions.set(id, { id, status: "complete", payment_status: "paid", url: "", created: Math.floor(Date.now() / 1000) });
   await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
-  const before = createSession.mock.calls.length;
+  const before = expireSession.mock.calls.length;
   await recoverQueuedCheckoutExpirations();
   expect(expireSession.mock.calls).toHaveLength(before);
   expect(sessions.get(id)?.status).toBe("complete");
@@ -300,7 +300,7 @@ test("recovery clears a paid checkout retry even when Stripe still marks it open
   sessions.set(id, session);
   await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
   try {
-  const expirationsBefore = expireSession.mock.calls.length;
+    const expirationsBefore = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
     await recoverQueuedCheckoutExpirations();
     expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirationsBefore);
     expect(session).toMatchObject({ id, status: "open", payment_status: "paid" });
@@ -321,7 +321,7 @@ test.each(["open", "complete"] as const)(
       created: Math.floor(Date.now() / 1000) };
     sessions.set(id, session);
     await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
-  const originalRetrieve = retrieveSession.getMockImplementation()!;
+    const originalRetrieve = retrieveSession.getMockImplementation()!;
 
     let failLookup = true;
     retrieveSession.mockImplementation(async (sessionId: string) => {
@@ -331,11 +331,11 @@ test.each(["open", "complete"] as const)(
       }
       return originalRetrieve(sessionId);
     });
-  const queued = async () => (await pool.query(
-    "SELECT stripe_session_id FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
-  )).rows;
+    const queued = async () => (await pool.query(
+      "SELECT stripe_session_id FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
+    )).rows;
     const retrievesBefore = retrieveSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
-  const expirationsBefore = expireSession.mock.calls.length;
+    const expirationsBefore = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
 
     try {
       await recoverQueuedCheckoutExpirations();

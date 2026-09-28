@@ -13,6 +13,8 @@ Generated files are especially prone to valid-but-duplicated merge output when i
 
 If regeneration instead exposes a generated forward reference and the same merge also breaks unrelated route boundaries or tests, don't assume regeneration repaired the merged feature. **Why:** A focused feature test can pass while a newly merged, unrelated feature remains malformed in the shared worktree. **How to apply:** Attribute each full-check failure to its current source, fix the assigned feature's own findings, and treat broad repairs to unrelated merged functionality as a separate risk rather than silently folding them into a narrow task.
 
+After resolving a generated-file conflict, inspect source files from both tasks even if they were not flagged as conflicts. **Why:** Semantic reconciliation can interleave repeated route blocks and leave source syntax or behavior broken without reporting that file as conflicted. **How to apply:** Typecheck and rerun the affected route suite against the rebased worktree; reconstruct the affected route from the current main version plus the intended feature if blocks were displaced.
+
 When concurrent changes touch the same test file, verify the entire suite after the merge, not just the conflict region or your new cases.
 
 **Why:** A merge can preserve both sides' text while displacing statements, duplicating tests, or dropping setup and assertions; a previously passing focused run no longer describes the merged file.

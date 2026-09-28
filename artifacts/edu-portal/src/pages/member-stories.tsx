@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListManagedMemberStories, usePublishMemberStory, useWithdrawMemberStory, useReviewMemberStoryRemoval,
+  useCorrectMemberStoryRemovalReview,
   getListManagedMemberStoriesQueryKey, getListPublishedMemberStoriesQueryKey, getListMemberStoryRemovalAlertsQueryKey,
 } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
@@ -57,7 +58,15 @@ export default function MemberStoriesPage() {
       setMessage("Private review saved. The story remains hidden.");
       refresh();
     },
-    onError: () => { setMessage("Could not save the review. Refresh the list and try again."); refresh(); },
+    onError: () => { setReviewId(null); setReviewNote(""); setMessage("Could not save the review. Check the refreshed history before trying again."); refresh(); },
+  } });
+  const correction = useCorrectMemberStoryRemovalReview({ mutation: {
+    onSuccess: () => {
+      setReviewId(null); setReviewNote(""); setReviewOutcome("inconclusive");
+      setMessage("Correction saved privately. Earlier decisions remain available and the story stays hidden.");
+      refresh();
+    },
+    onError: () => { setReviewId(null); setReviewNote(""); setMessage("Could not save the correction. Check the refreshed history before trying again."); refresh(); },
   } });
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -122,17 +131,27 @@ export default function MemberStoriesPage() {
                     <p className="font-semibold">Member removal request · Hidden {story.removalReviewOutcome ? "· Reviewed" : "· Review needed"}</p>
                     <p className="mt-2 break-words">Received {new Date(story.removalRequestedAt).toLocaleString()} from {story.removalRequesterEmail || story.removalRequestedBy} (account {story.removalRequestedBy})</p>
                     <p className="mt-2 whitespace-pre-wrap break-words">Member’s note: {story.removalRequestNote}</p>
-                    {story.removalReviewOutcome
-                      ? <div className="mt-3 border-t border-border pt-3">
-                        <p>Review: {story.removalReviewOutcome.replaceAll("_", " ")} · {story.removalReviewedAt && new Date(story.removalReviewedAt).toLocaleString()}</p>
-                        <p className="mt-1 whitespace-pre-wrap break-words">Owner’s note: {story.removalReviewNote}</p>
-                        <p className="mt-1 text-muted-foreground">Reviewed by {story.removalReviewedBy}. This story stays hidden.</p>
-                      </div>
-                      : reviewId === story.id
+                    {story.reviewHistory.length > 0 && <div className="mt-3 border-t border-border pt-3">
+                      <h3 className="font-semibold">Private review history (oldest first)</h3>
+                      <ol className="mt-2 space-y-3">{story.reviewHistory.map((entry, index) => <li key={entry.id} className="border-l-2 border-border pl-3">
+                        <p>{index === 0 ? "Original review" : `Correction ${index}`} · {entry.outcome.replaceAll("_", " ")} · {new Date(entry.reviewedAt).toLocaleString()}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-words">Reason: {entry.note}</p>
+                        <p className="mt-1 text-muted-foreground">Reviewed by {entry.reviewedBy}</p>
+                      </li>)}</ol>
+                      <p className="mt-2 text-muted-foreground">The latest decision is above. This story stays hidden.</p>
+                    </div>}
+                    {reviewId === story.id
                         ? <form className="mt-4 space-y-3" onSubmit={e => {
                           e.preventDefault();
                           setMessage("");
-                          review.mutate({ storyId: story.id, data: { outcome: reviewOutcome, note: reviewNote.trim() } });
+                          if (story.reviewHistory.length) {
+                            correction.mutate({ storyId: story.id, data: {
+                              outcome: reviewOutcome, note: reviewNote.trim(),
+                              expectedReviewId: story.reviewHistory[story.reviewHistory.length - 1].id,
+                            } });
+                          } else {
+                            review.mutate({ storyId: story.id, data: { outcome: reviewOutcome, note: reviewNote.trim() } });
+                          }
                         }}>
                           <label className="block">Outcome
                             <select className="mt-1 w-full rounded-lg border border-border bg-background p-2" value={reviewOutcome} onChange={e => setReviewOutcome(e.target.value as typeof reviewOutcome)}>
@@ -141,13 +160,13 @@ export default function MemberStoriesPage() {
                               <option value="claim_unsubstantiated">Claim unsubstantiated</option>
                             </select>
                           </label>
-                          <label className="block">Private review notes
+                          <label className="block">{story.reviewHistory.length ? "Reason for correcting the last review (private)" : "Private review notes"}
                             <textarea className="mt-1 w-full rounded-lg border border-border bg-background p-2" value={reviewNote} onChange={e => setReviewNote(e.target.value)} required maxLength={2000} />
                           </label>
-                          <p className="text-muted-foreground">Saving any outcome leaves this story hidden. Do not rely on old permission to republish it.</p>
-                          <div className="flex gap-2"><Button type="button" variant="ghost" onClick={() => setReviewId(null)} disabled={review.isPending}>Cancel</Button><Button type="submit" disabled={review.isPending || !reviewNote.trim()}>Save private review</Button></div>
+                          <p className="text-muted-foreground">Saving any outcome leaves this story hidden. {story.reviewHistory.length ? "Earlier decisions cannot be erased. " : ""}Do not rely on old permission to republish it.</p>
+                          <div className="flex gap-2"><Button type="button" variant="ghost" onClick={() => setReviewId(null)} disabled={review.isPending || correction.isPending}>Cancel</Button><Button type="submit" disabled={review.isPending || correction.isPending || !reviewNote.trim()}>{story.reviewHistory.length ? "Save correction" : "Save private review"}</Button></div>
                         </form>
-                        : <Button className="mt-3" variant="outline" onClick={() => { setMessage(""); setReviewId(story.id); setReviewNote(""); setReviewOutcome("inconclusive"); }}>Record review</Button>}
+                        : <Button className="mt-3" variant="outline" onClick={() => { setMessage(""); setReviewId(story.id); setReviewNote(""); setReviewOutcome(story.reviewHistory.length ? story.reviewHistory[story.reviewHistory.length - 1].outcome : "inconclusive"); }}>{story.reviewHistory.length ? "Correct last review" : "Record review"}</Button>}
                   </div>}
                 </div>
                 {!story.withdrawnAt && (withdrawId === story.id

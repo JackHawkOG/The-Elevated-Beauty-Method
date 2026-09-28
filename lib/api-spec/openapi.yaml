@@ -180,6 +180,38 @@ paths:
           description: Owner access required
         "404":
           description: Hidden removal claim not found or already reviewed
+  /member-stories/{storyId}/removal-review/corrections:
+    post:
+      operationId: correctMemberStoryRemovalReview
+      tags: [member-stories]
+      summary: Owner appends a private correction to a reviewed hidden claim
+      parameters:
+        - in: path
+          name: storyId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberStoryReviewCorrectionInput"
+      responses:
+        "200":
+          description: Correction recorded; story remains hidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerMemberStory"
+        "400":
+          description: Invalid correction
+        "403":
+          description: Owner access required
+        "404":
+          description: Hidden reviewed claim not found
+        "409":
+          description: Another correction was recorded; refresh before retrying
   /membership/offer:
     get:
       operationId: getMembershipOffer
@@ -1043,7 +1075,7 @@ components:
         requestedAt: { type: string }
     OwnerMemberStory:
       type: object
-      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote, removalReviewOutcome, removalReviewNote, removalReviewedAt, removalReviewedBy]
+      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote, removalReviewOutcome, removalReviewNote, removalReviewedAt, removalReviewedBy, reviewHistory]
       properties:
         id: { type: number }
         quote: { type: string }
@@ -1062,6 +1094,27 @@ components:
         removalReviewNote: { type: ["string", "null"] }
         removalReviewedAt: { type: ["string", "null"] }
         removalReviewedBy: { type: ["string", "null"] }
+        reviewHistory:
+          type: array
+          description: First review followed by append-only corrections, oldest first
+          items:
+            $ref: "#/components/schemas/MemberStoryReviewEntry"
+    MemberStoryReviewEntry:
+      type: object
+      required: [id, outcome, note, reviewedAt, reviewedBy]
+      properties:
+        id: { type: number, description: "Zero for the initial review, positive for corrections" }
+        outcome: { type: string, enum: [withdrawal_confirmed, claim_unsubstantiated, inconclusive] }
+        note: { type: string }
+        reviewedAt: { type: string }
+        reviewedBy: { type: string }
+    MemberStoryReviewCorrectionInput:
+      type: object
+      required: [outcome, note, expectedReviewId]
+      properties:
+        outcome: { type: string, enum: [withdrawal_confirmed, claim_unsubstantiated, inconclusive] }
+        note: { type: string, minLength: 1, maxLength: 2000, description: "Reason for the correction, visible only to the owner" }
+        expectedReviewId: { type: number, description: "ID of the latest review being corrected; zero for the initial review" }
     MemberStoryRemovalReviewInput:
       type: object
       required: [outcome, note]
