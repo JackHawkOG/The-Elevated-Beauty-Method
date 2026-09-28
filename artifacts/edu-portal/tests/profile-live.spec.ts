@@ -111,15 +111,128 @@ test("a completed profile save cannot update the next member when its response a
     if (!page.isClosed()) {
       await page.evaluate(() => (window as typeof window & { releaseProfileSave?: () => void }).releaseProfileSave?.()).catch(() => {});
     }
-    const [{ db, usersTable, pool }, { inArray }] =
+    const [{ db, usersTable }, { inArray }] =
       await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
     try {
       if (created.length) await db.delete(usersTable).where(inArray(usersTable.clerkId, created));
     } finally {
+      await Promise.all(created.map(id => client.users.deleteUser(id)));
+    }
+  }
+});
+
+test("an earlier profile response cannot replace a newer save for the same member", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const marker = randomUUID().slice(0, 12);
+  const email = `profile-order-${marker}+clerk_test@example.com`;
+  const first = { name: `Earlier ${marker}`, bio: `Earlier bio ${marker}` };
+  const latest = { name: `Latest ${marker}`, bio: `Latest bio ${marker}` };
+  let userId: string | undefined;
+  try {
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      firstName: `Member ${marker}`,
+      skipPasswordRequirement: true,
+    });
+    userId = user.id;
+    await page.goto("/profile");
+    await clerk.signIn({ page, emailAddress: email });
+    await page.goto("/profile");
+    await expect(page.locator("main")).toContainText(email);
+
+    // Wait until the first response has committed at the API, then hold only
+    // its return to React Query. The second save must not be held.
+    await page.evaluate(() => {
+      const browser = window as typeof window & {
+        firstProfileSaveReceived?: boolean;
+        releaseFirstProfileSave?: () => void;
+      };
+      const originalFetch = window.fetch.bind(window);
+      let saves = 0;
+      window.fetch = async (...args) => {
+        const response = await originalFetch(...args);
+        const request = args[0];
+        const url = typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+        if (new URL(url, location.href).pathname === "/api/users/me" && args[1]?.method === "PATCH" && ++saves === 1) {
+          browser.firstProfileSaveReceived = true;
+          await new Promise<void>(resolve => { browser.releaseFirstProfileSave = resolve; });
+        }
+        return response;
+      };
+    });
+    await page.getByRole("button", { name: "Edit Profile" }).click();
+    await page.locator("form input").fill(first.name);
+    await page.locator("form textarea").fill(first.bio);
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect.poll(() => page.evaluate(() =>
+      (window as typeof window & { firstProfileSaveReceived?: boolean }).firstProfileSaveReceived ?? false,
+    )).toBe(true);
+
+    const [{ db, usersTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const [savedFirst] = await db.select().from(usersTable).where(eq(usersTable.clerkId, userId));
+    expect(savedFirst).toMatchObject({ displayName: first.name, bio: first.bio });
+
+    await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+    await page.getByRole("link", { name: "Profile", exact: true }).click();
+    await expect(page.locator("main")).toContainText(first.name);
+    // A full document navigation would discard the pending callback.
+    expect(await page.evaluate(() =>
+      (window as typeof window & { firstProfileSaveReceived?: boolean }).firstProfileSaveReceived,
+    )).toBe(true);
+    await page.getByRole("button", { name: "Edit Profile" }).click();
+    await page.locator("form input").fill(latest.name);
+    await page.locator("form textarea").fill(latest.bio);
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.locator("main")).toContainText(latest.name);
+    await expect(page.locator("main")).toContainText(latest.bio);
+    const [savedLatest] = await db.select().from(usersTable).where(eq(usersTable.clerkId, userId));
+    expect(savedLatest).toMatchObject({ displayName: latest.name, bio: latest.bio });
+
+    await page.evaluate(({ name, bio }) => {
+      const browser = window as typeof window & {
+        staleProfileDetails?: string[];
+        profileObserver?: MutationObserver;
+        releaseFirstProfileSave?: () => void;
+      };
+      browser.staleProfileDetails = [];
+      const check = () => {
+        for (const value of [name, bio]) {
+          if (document.body.innerText.includes(value) && !browser.staleProfileDetails?.includes(value)) {
+            browser.staleProfileDetails?.push(value);
+          }
+        }
+      };
+      browser.profileObserver = new MutationObserver(check);
+      browser.profileObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+      check();
+      browser.releaseFirstProfileSave?.();
+    }, first);
+    await page.waitForTimeout(250);
+    await expect.poll(() => page.evaluate(() =>
+      (window as typeof window & { staleProfileDetails?: string[] }).staleProfileDetails ?? [],
+    )).toEqual([]);
+    await expect(page.locator("main")).toContainText(latest.name);
+    await expect(page.locator("main")).toContainText(latest.bio);
+    await page.reload();
+    await expect(page.locator("main")).toContainText(latest.name);
+    await expect(page.locator("main")).toContainText(latest.bio);
+  } finally {
+    if (!page.isClosed()) {
+      await page.evaluate(() =>
+        (window as typeof window & { releaseFirstProfileSave?: () => void }).releaseFirstProfileSave?.(),
+      ).catch(() => {});
+    }
+    if (userId) {
+      const [{ db, usersTable }, { eq }] =
+        await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
       try {
-        await Promise.all(created.map(id => client.users.deleteUser(id)));
+        await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
       } finally {
-        await pool.end();
+        await client.users.deleteUser(userId);
       }
     }
   }

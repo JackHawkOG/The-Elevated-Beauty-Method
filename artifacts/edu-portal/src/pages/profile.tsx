@@ -17,7 +17,11 @@ import { Progress } from "@/components/ui/progress";
 import { Loader2, Settings, BookOpen, Clock, Award, PlayCircle, Badge } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
+
+// A form can unmount between saves, but the member's query client survives navigation.
+const latestProfileSave = new WeakMap<QueryClient, number>();
 
 export default function ProfilePage() {
   const { data: profile, isLoading: profileLoading } = useGetMe();
@@ -221,7 +225,13 @@ function ProfileEditForm({ initialName, initialBio, onSuccess }: { initialName: 
 
   const updateMutation = useUpdateMe({
     mutation: {
-      onSuccess: (data) => {
+      onMutate: () => {
+        const sequence = (latestProfileSave.get(queryClient) ?? 0) + 1;
+        latestProfileSave.set(queryClient, sequence);
+        return sequence;
+      },
+      onSuccess: (data, _variables, sequence) => {
+        if (sequence !== latestProfileSave.get(queryClient)) return;
         // Update cache manually instead of invalidate to avoid layout shift
         queryClient.setQueryData(getGetMeQueryKey(), (old: any) => 
           old ? { ...old, displayName: data.displayName, bio: data.bio } : old
@@ -229,7 +239,8 @@ function ProfileEditForm({ initialName, initialBio, onSuccess }: { initialName: 
         toast({ title: "Profile updated", description: "Your changes have been saved." });
         onSuccess();
       },
-      onError: () => {
+      onError: (_error, _variables, sequence) => {
+        if (sequence !== latestProfileSave.get(queryClient)) return;
         toast({ title: "Error", description: "Could not update profile.", variant: "destructive" });
       }
     }
