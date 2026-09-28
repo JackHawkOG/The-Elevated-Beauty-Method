@@ -4,6 +4,7 @@ import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwr
 import { expect, test, type Page } from "@playwright/test";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 import { getTestStripeClient } from "../../../scripts/src/stripeClient";
+import { membershipStatusFixtureMetadata } from "./membership-status-fixtures";
 
 type MembershipResponse = {
   code: number;
@@ -55,7 +56,7 @@ test("real Clerk sessions reveal only their own scheduled membership cancellatio
     for (const account of accounts) {
       const user = await client.users.createUser({
         emailAddress: [account.email], skipPasswordRequirement: true,
-        privateMetadata: { membershipStatusLiveFixture: "v1" },
+        privateMetadata: membershipStatusFixtureMetadata,
       });
       ids.push(user.id);
       const customer = await stripe.customers.create({ email: account.email });
