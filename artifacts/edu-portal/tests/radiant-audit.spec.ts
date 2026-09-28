@@ -1119,6 +1119,7 @@ test("layout logout removes only the browser draft, not the online draft, and ke
   await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
   await page.evaluate(({ key, answers }) => localStorage.setItem(key, JSON.stringify({
     owner: "member-a", expiresAt: Date.now() + 86_400_000,
+    onlineSynced: true,
     answers: { ...answers, email: "member-a@example.invalid" },
   })), { key: signedInDraftKey, answers: fixture("logout") });
   await page.goto("/tests/audit-harness.html?page=/layout");
@@ -1148,6 +1149,10 @@ test("switching accounts on the Audit form clears the signed-in local draft with
   await page.reload();
   await page.locator("#beauty-trend").fill("private switching answer");
   await expect.poll(() => page.evaluate(key => localStorage.getItem(key) !== null, signedInDraftKey)).toBe(true);
+  page.once("dialog", async dialog => {
+    expect(dialog.message()).toContain("not been saved online");
+    await dialog.accept();
+  });
   await page.getByRole("button", { name: "Use another account" }).click();
   expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
   expect(await page.evaluate(() => localStorage.getItem("audit-test-account"))).toBeNull();

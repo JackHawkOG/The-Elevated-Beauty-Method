@@ -7,4 +7,4 @@ Signed-in Audit recovery favors a single short-lived browser draft. Opening the 
 
 **Why:** Refresh and tab-close recovery require persistence beyond a mounted page, but keeping several members' sensitive written reflections on a shared browser increases exposure. The privacy choice is to give up recovery after an account switch.
 
-**How to apply:** If changing draft storage or auth transitions, preserve account ownership checks and bounded retention; treat cross-account recovery as a separate, explicitly private server-side feature rather than expanding local browser retention.
+**How to apply:** If changing draft storage or auth transitions, preserve account ownership checks and bounded retention; treat cross-account recovery as a separate, explicitly private server-side feature rather than expanding local browser retention. An unsynced local-only draft needs an explicit warning and choice before logout removes the last copy.

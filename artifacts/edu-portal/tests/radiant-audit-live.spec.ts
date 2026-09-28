@@ -216,6 +216,166 @@ test("a real member's online Audit draft is private and recovers in a fresh brow
   }
 });
 
+test("switching real members in one browser never exposes or discards the previous member's unfinished Audit", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const ownerEmail = auditFixtureEmail("a", tag);
+  const otherEmail = auditFixtureEmail("b", tag);
+  const answer = `private switched draft ${tag}`;
+  const draftPath = "/api/users/me/radiant-audit/draft";
+  const created: string[] = [];
+
+  try {
+    // Install before navigation so every new document watches the form from
+    // its first paint, including a value that appears only briefly.
+    await page.addInitScript(privateAnswer => {
+      const check = () => {
+        if (sessionStorage.getItem("audit-switch-watch") !== "1") return;
+        if (document.body?.innerText.includes(privateAnswer) ||
+            [...document.querySelectorAll("input, textarea")].some(field =>
+              (field as HTMLInputElement).value.includes(privateAnswer))) {
+          sessionStorage.setItem("audit-switch-leak", "1");
+        }
+      };
+      new MutationObserver(check).observe(document, { childList: true, subtree: true, characterData: true });
+      const watchValues = () => {
+        check();
+        requestAnimationFrame(watchValues);
+      };
+      requestAnimationFrame(watchValues);
+    }, answer);
+    await setupClerkTestingToken({ page });
+    for (const email of [ownerEmail, otherEmail]) {
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
+      });
+      created.push(user.id);
+    }
+    await signIn(page, ownerEmail);
+    await page.locator("#mastery-goal").fill(answer);
+    await expect.poll(async () => page.evaluate(async path => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Owner draft GET failed: ${response.status}`);
+      return (await response.json() as { masteryGoal?: string } | null)?.masteryGoal;
+    }, draftPath)).toBe(answer);
+    const localCopy = await page.evaluate(() => localStorage.getItem("tebm:radiant-audit:signed-in-draft"));
+    expect(localCopy).toContain(answer);
+
+    await clerk.signOut({ page });
+    await expect(page.locator("body")).not.toContainText(answer);
+    // Reintroduce a stale copy after sign-out to model browsers that retain
+    // it through an account switch. The server draft remains A's throughout.
+    await page.evaluate(raw => {
+      localStorage.setItem("tebm:radiant-audit:signed-in-draft", raw);
+      sessionStorage.setItem("audit-switch-watch", "1");
+    }, localCopy!);
+    await signIn(page, otherEmail);
+    await expect(page.locator("#mastery-goal")).toHaveValue("");
+    await expect(page.locator("main")).not.toContainText(answer);
+    expect(await page.evaluate(() => sessionStorage.getItem("audit-switch-leak"))).toBeNull();
+    const otherRead = await page.evaluate(async path => {
+      const response = await fetch(path);
+      return { status: response.status, body: await response.json() };
+    }, draftPath);
+    expect(otherRead).toEqual({ status: 200, body: null });
+    expect(await page.evaluate(() => localStorage.getItem("tebm:radiant-audit:signed-in-draft") ?? "")).not.toContain(answer);
+
+    // Neither a forged owner header nor the visible discard action may touch A.
+    const stolenDiscard = await page.evaluate(async ({ path, owner }) =>
+      (await fetch(path, { method: "DELETE", headers: { "x-audit-draft-owner": owner } })).status,
+    { path: draftPath, owner: created[0] });
+    expect(stolenDiscard).toBe(409);
+    const discarded = page.waitForResponse(response =>
+      response.url().endsWith(draftPath) && response.request().method() === "DELETE",
+    );
+    await page.getByTestId("button-discard-audit-draft").click();
+    expect((await discarded).status()).toBe(204);
+    await expect(page.locator("#mastery-goal")).toHaveValue("");
+    await page.reload();
+    await expect(page.locator("#mastery-goal")).toHaveValue("");
+    expect(await page.evaluate(() => sessionStorage.getItem("audit-switch-leak"))).toBeNull();
+
+    await page.evaluate(() => sessionStorage.removeItem("audit-switch-watch"));
+    await clerk.signOut({ page });
+    await signIn(page, ownerEmail);
+    await expect(page.locator("#mastery-goal")).toHaveValue(answer);
+    const recovered = await page.evaluate(async path => {
+      const response = await fetch(path);
+      return { status: response.status, body: await response.json() };
+    }, draftPath);
+    expect(recovered.status).toBe(200);
+    expect(recovered.body).toMatchObject({ masteryGoal: answer });
+  } finally {
+    try {
+      if (!page.isClosed()) await page.close();
+    } finally {
+      await cleanUpAccounts(client, created);
+    }
+  }
+});
+
+test("an unsynced Audit cannot be silently lost when its member logs out", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const created: string[] = [];
+  const email = auditFixtureEmail("a", randomUUID().slice(0, 12));
+  const answer = `unsynced draft ${randomUUID()}`;
+  const draftPath = "/api/users/me/radiant-audit/draft";
+  let blockWrites = true;
+  try {
+    await setupClerkTestingToken({ page });
+    const user = await client.users.createUser({
+      emailAddress: [email], skipPasswordRequirement: true, privateMetadata: auditFixturePrivateMetadata,
+    });
+    created.push(user.id);
+    await page.route(`**${draftPath}`, route => {
+      if (route.request().method() === "PUT" && blockWrites)
+        return route.fulfill({ status: 503, json: { message: "Temporary outage" } });
+      return route.continue();
+    });
+    await signIn(page, email);
+    await page.locator("#mastery-goal").fill(answer);
+    await expect.poll(() => page.evaluate(() =>
+      localStorage.getItem("tebm:radiant-audit:signed-in-draft")?.includes("unsynced draft") ?? false,
+    )).toBe(true);
+    await page.goto("/dashboard");
+    const remoteBefore = await page.evaluate(async path => (await (await fetch(path)).json()) as unknown, draftPath);
+    expect(remoteBefore).toBeNull();
+    page.once("dialog", async dialog => {
+      expect(dialog.message()).toContain("not been saved online");
+      await dialog.dismiss();
+    });
+    await page.getByRole("button", { name: "Log out" }).click();
+    await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+    await page.goto("/radiant-audit");
+    await expect(page.locator("#mastery-goal")).toHaveValue(answer);
+
+    blockWrites = false;
+    // Trigger a fresh autosave after the simulated outage recovers.
+    await page.locator("#mastery-goal").fill(`${answer} recovered`);
+    await expect.poll(async () => page.evaluate(async path =>
+      ((await (await fetch(path)).json()) as { masteryGoal?: string } | null)?.masteryGoal,
+    draftPath)).toBe(`${answer} recovered`);
+    await page.goto("/dashboard");
+    await page.getByRole("button", { name: "Log out" }).click();
+    await signIn(page, email);
+    await expect(page.locator("#mastery-goal")).toHaveValue(`${answer} recovered`);
+  } finally {
+    try {
+      if (!page.isClosed()) await page.close();
+    } finally {
+      await cleanUpAccounts(client, created);
+    }
+  }
+});
+
 test("a delayed Audit response from the previous member never appears after switching accounts", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();

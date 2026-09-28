@@ -31,13 +31,22 @@ export function clearAuditDraft(accountId?: string): void {
   window.localStorage.removeItem(key);
 }
 
-export function clearAuditDraftOnSignOut(accountId?: string): void {
-  if (!accountId) return;
+export function clearAuditDraftOnSignOut(accountId?: string): boolean {
+  if (!accountId) return true;
   try {
+    const raw = window.localStorage.getItem(key);
+    if (raw) {
+      const record = JSON.parse(raw) as { owner?: string; onlineSynced?: boolean };
+      if (record.owner === accountId && record.onlineSynced !== true &&
+          !window.confirm("Your unfinished Audit has not been saved online yet. Signing out will discard these answers from this browser. Sign out anyway?")) {
+        return false;
+      }
+    }
     clearAuditDraft(accountId);
   } catch {
     // Storage can be disabled; signing out must still proceed.
   }
+  return true;
 }
 
 function parseAuditDraft(raw: string, now: number): { owner: string; answers: RadiantAuditSubmission } {
@@ -97,17 +106,31 @@ export function auditDraftWrittenAt(accountId: string): number | null {
 
 export function writeAuditDraft(accountId: string, answers: RadiantAuditSubmission): void {
   const existing = readAuditDraft(accountId);
-  const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown; submissionStartedAt?: unknown } : null;
-  const submissionId = existing && signature(existing) === signature(answers) &&
+  const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown; submissionStartedAt?: unknown; onlineSynced?: boolean } : null;
+  const unchanged = !!existing && signature(existing) === signature(answers);
+  const submissionId = unchanged &&
     typeof raw?.submissionId === "string" ? raw.submissionId : undefined;
   window.localStorage.setItem(key, JSON.stringify({
     owner: accountId,
     expiresAt: Date.now() + lifetime,
     answers,
+    onlineSynced: unchanged && raw?.onlineSynced === true,
     submissionId,
     // Editing an unconfirmed attempt must not turn its old age into a fresh window.
     submissionStartedAt: raw?.submissionStartedAt ?? (raw?.submissionId ? null : raw?.submissionStartedAt),
   }));
+}
+
+export function markAuditDraftOnline(accountId: string, answers: RadiantAuditSubmission): void {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return;
+    const record = JSON.parse(raw) as { owner?: string; answers?: RadiantAuditSubmission; onlineSynced?: boolean };
+    if (record.owner !== accountId || !record.answers || signature(record.answers) !== signature(answers)) return;
+    window.localStorage.setItem(key, JSON.stringify({ ...record, onlineSynced: true }));
+  } catch {
+    // A storage failure leaves the draft conservatively unconfirmed.
+  }
 }
 
 export function getAuditSubmissionId(accountId: string, answers: RadiantAuditSubmission): { id: string; startedAt: number } | null {

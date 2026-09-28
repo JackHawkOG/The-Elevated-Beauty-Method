@@ -26,7 +26,7 @@ import {
   trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
 } from "@/lib/analytics";
 import { canAutoRetryPendingAudit, clearPendingAudit, isAuditReadyToSave, readPendingAudit, restartPendingAudit, stageAudit, type PendingAudit } from "@/lib/radiant-audit-session";
-import { auditDraftWrittenAt, clearAuditDraft, clearAuditDraftOnSignOut, getAuditSubmissionId, readAuditDraft, startAuditSubmission, writeAuditDraft } from "@/lib/radiant-audit-draft";
+import { auditDraftWrittenAt, clearAuditDraft, clearAuditDraftOnSignOut, getAuditSubmissionId, markAuditDraftOnline, readAuditDraft, startAuditSubmission, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -247,6 +247,7 @@ export default function RadiantAuditPage() {
           "x-audit-draft-revision": draftVersion.current?.owner === owner ? draftVersion.current.revision : "none",
         } });
         if (draftVersion.current?.owner === owner) draftVersion.current.revision = saved.updatedAt;
+        markAuditDraftOnline(owner, answers);
       }).catch((failure: unknown) => {
         if (!handleDraftConflict(owner, failure) && owner === activeAccount.current) {
           setDraftWarning("Your online draft couldn't be saved. Your answers are still in this browser.");
@@ -320,6 +321,7 @@ export default function RadiantAuditPage() {
       } });
       if (activeAccount.current !== accountId) return;
       draftVersion.current = { owner: accountId, revision: saved.updatedAt };
+      markAuditDraftOnline(accountId, answers);
       trackAuditDraftConflictResolved("local");
       conflictDisplayed.current = false;
       setDraftConflict(null);
@@ -615,9 +617,9 @@ export default function RadiantAuditPage() {
       }}
       onSwitchAccount={audit => {
         if (keepAnswers(audit)) {
+          if (!clearAuditDraftOnSignOut(accountId)) return;
           clearAuditVerification();
           trackAuditVerificationAction("switch_account", "form");
-          clearAuditDraftOnSignOut(accountId);
           void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
         }
       }}
@@ -808,9 +810,9 @@ export function RadiantAuditCompletePage() {
             <div className="mt-8 flex flex-wrap gap-4">
               <Button asChild variant="outline"><Link href="/radiant-audit">Edit my answers</Link></Button>
               <Button onClick={() => {
+                if (!clearAuditDraftOnSignOut(user?.id)) return;
                 clearAuditVerification();
                 trackAuditVerificationAction("switch_account", "completion");
-                clearAuditDraftOnSignOut(user?.id);
                 void signOut({ redirectUrl: `${import.meta.env.BASE_URL}sign-in` });
               }}>
                 Use another account

@@ -97,7 +97,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton onClick={() => {
-                  clearAuditDraftOnSignOut(user?.id);
+                   if (!clearAuditDraftOnSignOut(user?.id)) return;
                   void signOut({ redirectUrl: "/" });
                 }} className="text-muted-foreground hover:text-foreground">
                   <LogOut /> <span>Log out</span>
