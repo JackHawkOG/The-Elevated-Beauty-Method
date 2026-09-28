@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 function requireDevelopment() {
   if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT ||
@@ -29,7 +29,7 @@ async function signIn(page: Page, email: string) {
   await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
 }
 
-test("real owner permission, publication and withdrawal stay private from a regular member", async ({ page }) => {
+test("real owner publication and withdrawal update an already-open signed-out landing page", async ({ browser, page }) => {
   test.setTimeout(120_000);
   requireDevelopment();
   await clerkSetup();
@@ -41,6 +41,7 @@ test("real owner permission, publication and withdrawal stay private from a regu
   const attribution = `Story check ${marker}`;
   const permission = `Disposable test approval for exact quote and attribution ${marker}`;
   const created: string[] = [];
+  let visitorContext: BrowserContext | undefined;
   try {
     const owner = await client.users.createUser({
       emailAddress: [ownerEmail], firstName: "Story", lastName: "Owner",
@@ -68,12 +69,16 @@ test("real owner permission, publication and withdrawal stay private from a regu
     await expect(story).toContainText(attribution);
     await expect(story).toContainText("Published");
 
-    await clerk.signOut({ page });
-    await page.goto("/");
-    const publicStory = page.locator("figure").filter({ hasText: quote });
+    // This separate visitor stays on the landing page while the owner uses their own tab.
+    visitorContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    const visitor = await visitorContext.newPage();
+    await visitor.goto("/");
+    await expect(visitor.getByRole("link", { name: "Sign In", exact: true })).toBeVisible();
+    const publicStory = visitor.locator("figure").filter({ hasText: quote });
     await expect(publicStory).toContainText(attribution);
-    await expect(page.locator("body")).not.toContainText(permission);
+    await expect(visitor.locator("body")).not.toContainText(permission);
 
+    await clerk.signOut({ page });
     await signIn(page, memberEmail);
     await expect(page.getByRole("link", { name: "Member stories" })).toHaveCount(0);
     await page.goto("/member-stories");
@@ -95,22 +100,30 @@ test("real owner permission, publication and withdrawal stay private from a regu
     await expect(page.getByRole("status")).toHaveText("Story withdrawn from the public landing page.");
     await expect(managedStory).toContainText("Withdrawn");
 
+    // Do not navigate or reload the visitor: the published-story poll must remove both fields.
+    await expect(publicStory).toHaveCount(0, { timeout: 12_000 });
+    await expect(visitor.locator("body")).not.toContainText(attribution);
+
     await clerk.signOut({ page });
     await page.goto("/");
     await expect(page.locator("figure").filter({ hasText: quote })).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText(attribution);
   } finally {
     // Remove only this run's disposable story and accounts, including on assertion failure.
-    const [{ db, memberStoriesTable, usersTable, pool }, { eq, inArray }] =
-      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
     try {
-      await db.delete(memberStoriesTable).where(eq(memberStoriesTable.quote, quote));
-      if (created.length) await db.delete(usersTable).where(inArray(usersTable.clerkId, created));
+      await visitorContext?.close();
     } finally {
+      const [{ db, memberStoriesTable, usersTable, pool }, { eq, inArray }] =
+        await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
       try {
-        await Promise.all(created.map(id => client.users.deleteUser(id)));
+        await db.delete(memberStoriesTable).where(eq(memberStoriesTable.quote, quote));
+        if (created.length) await db.delete(usersTable).where(inArray(usersTable.clerkId, created));
       } finally {
-        await pool.end();
+        try {
+          await Promise.all(created.map(id => client.users.deleteUser(id)));
+        } finally {
+          await pool.end();
+        }
       }
     }
   }

@@ -10,7 +10,7 @@ const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparen
 
 export default function LandingPage() {
   const { data: offer } = useGetMembershipOffer({ query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 30000, staleTime: 15000 } });
-  const { data: stories } = useListPublishedMemberStories({ query: { queryKey: getListPublishedMemberStoriesQueryKey(), staleTime: 0, refetchOnMount: "always", refetchOnWindowFocus: "always", refetchInterval: 5000 } });
+  const { data: stories } = useListPublishedMemberStories({ query: { queryKey: getListPublishedMemberStoriesQueryKey(), staleTime: 0, refetchOnMount: "always", refetchOnWindowFocus: "always", refetchInterval: 5000, refetchIntervalInBackground: true } });
   const foundingOpen = offer?.phase === "open" && offer.foundingAvailable;
   const standardOpen = offer?.phase === "closed" || offer?.phase === "open";
   const offerMessage = !offer ? "Enrollment availability is being checked"
