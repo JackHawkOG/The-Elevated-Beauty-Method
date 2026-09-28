@@ -39,4 +39,24 @@ WHERE e."id" = r."id" AND r.position > 1;
 
 CREATE UNIQUE INDEX IF NOT EXISTS "enrollments_user_id_course_id_unique"
   ON "enrollments" ("user_id", "course_id");
+-- IF NOT EXISTS only checks the name; reject a legacy index with an
+-- incompatible definition rather than committing a repair without uniqueness.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_index x
+    JOIN pg_class i ON i.oid = x.indexrelid
+    JOIN pg_attribute u ON u.attrelid = x.indrelid AND u.attname = 'user_id'
+    JOIN pg_attribute c ON c.attrelid = x.indrelid AND c.attname = 'course_id'
+    WHERE i.oid = to_regclass('enrollments_user_id_course_id_unique')
+      AND x.indrelid = 'enrollments'::regclass
+      AND x.indisunique AND x.indisvalid AND x.indisready AND x.indimmediate
+      AND x.indnkeyatts = 2 AND x.indpred IS NULL AND x.indexprs IS NULL
+      AND x.indkey[0] = u.attnum AND x.indkey[1] = c.attnum
+  ) THEN
+    RAISE EXCEPTION 'enrollments_user_id_course_id_unique does not enforce enrollment uniqueness';
+  END IF;
+END
+$$;
 COMMIT;

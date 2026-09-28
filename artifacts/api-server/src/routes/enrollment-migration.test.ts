@@ -144,6 +144,71 @@ async function assertRepair(repair: "migration" | "startup repair") {
   }
 }
 
+test.each([
+  ["migration", "nonunique", "CREATE INDEX enrollments_user_id_course_id_unique ON enrollments (user_id, course_id)"],
+  ["startup repair", "nonunique", "CREATE INDEX enrollments_user_id_course_id_unique ON enrollments (user_id, course_id)"],
+  ["migration", "wrong columns", "CREATE UNIQUE INDEX enrollments_user_id_course_id_unique ON enrollments (id)"],
+  ["startup repair", "wrong columns", "CREATE UNIQUE INDEX enrollments_user_id_course_id_unique ON enrollments (id)"],
+] as const)("a %s rejects a same-name %s legacy index", async (repair, _kind, indexStatement) => {
+  requireDevelopmentDatabase();
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TEMP TABLE enrollments (
+        id integer PRIMARY KEY,
+        user_id text NOT NULL,
+        course_id integer NOT NULL,
+        completed_lessons integer NOT NULL DEFAULT 0,
+        last_lesson_id integer,
+        enrolled_at timestamp NOT NULL
+      )
+    `);
+    await client.query("SET search_path TO pg_temp, public");
+    await client.query(`
+      CREATE TEMP TABLE lessons (id integer PRIMARY KEY, course_id integer NOT NULL, published_at timestamp)
+    `);
+    await client.query(`
+      INSERT INTO enrollments (id, user_id, course_id, enrolled_at)
+      VALUES (1, 'member', 7, '2022-01-01'), (2, 'member', 7, '2023-01-01')
+    `);
+    await client.query(indexStatement);
+    const runRepair = async () => {
+      if (repair === "migration") {
+        await client.query(await readFile(migrationUrl, "utf8"));
+      } else {
+        await ensureEnrollmentSchema(drizzle(client, { schema }));
+      }
+    };
+    const failure = {
+      code: "P0001",
+      message: expect.stringContaining("does not enforce enrollment uniqueness"),
+    };
+    await expect(runRepair()).rejects.toMatchObject(
+      repair === "migration" ? failure : { cause: failure },
+    );
+    await client.query("ROLLBACK");
+    expect((await client.query("SELECT id FROM enrollments ORDER BY id")).rows).toEqual([{ id: 1 }, { id: 2 }]);
+    expect((await client.query(`
+      SELECT indisunique FROM pg_index WHERE indexrelid = 'enrollments_user_id_course_id_unique'::regclass
+    `)).rows).toHaveLength(1);
+
+    // Once the misleading index is removed, repair must merge and enforce uniqueness.
+    await client.query("DROP INDEX enrollments_user_id_course_id_unique");
+    await runRepair();
+    expect((await client.query("SELECT id FROM enrollments ORDER BY id")).rows).toEqual([{ id: 1 }]);
+    await expect(client.query(`
+      INSERT INTO enrollments (id, user_id, course_id, enrolled_at)
+      VALUES (3, 'member', 7, '2024-01-01')
+    `)).rejects.toMatchObject({ code: "23505" });
+  } finally {
+    await client.query("ROLLBACK");
+    await client.query("RESET search_path");
+    await client.query("DROP TABLE IF EXISTS pg_temp.enrollments");
+    await client.query("DROP TABLE IF EXISTS pg_temp.lessons");
+    client.release();
+  }
+});
+
 test("a writer waits for startup repair to merge legacy rows and install uniqueness", async () => {
   requireDevelopmentDatabase();
 
