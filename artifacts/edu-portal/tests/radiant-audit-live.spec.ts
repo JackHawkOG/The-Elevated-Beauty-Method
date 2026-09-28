@@ -476,7 +476,7 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   }
 });
 
-test("a visitor's staged Audit saves only after the new account verifies its email", async ({ page }) => {
+test("a wrong signup code keeps staged answers and only a verified retry saves the Audit", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
   await clerkSetup();
@@ -541,6 +541,30 @@ test("a visitor's staged Audit saves only after the new account verifies its ema
       await client.users.updateUserMetadata(unverified[0].id, { privateMetadata: auditFixturePrivateMetadata });
     }
     expect(created.length ? await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0])) : []).toHaveLength(0);
+
+    const rejected = page.waitForResponse(response =>
+      response.url().includes("/attempt_verification") &&
+      response.request().method() === "POST" &&
+      response.status() >= 400,
+    );
+    await page.getByLabel("Enter verification code").fill("111111");
+    await rejected;
+    await expect(page.getByLabel("Enter verification code")).toBeVisible();
+    await expect(page).toHaveURL(/\/sign-up(?:\/|$)/);
+    expect(auditWrites).toHaveLength(0);
+    expect(await db.select().from(usersTable).where(eq(usersTable.email, email))).toHaveLength(0);
+    const afterWrongCode = (await client.users.getUserList({ emailAddress: [email] })).data;
+    expect(afterWrongCode.length).toBeLessThanOrEqual(1);
+    if (afterWrongCode.length) {
+      expect(afterWrongCode[0].primaryEmailAddress?.verification.status).not.toBe("verified");
+      if (!created.length) created.push(afterWrongCode[0].id);
+      expect(afterWrongCode[0].id).toBe(created[0]);
+      await client.users.updateUserMetadata(afterWrongCode[0].id, { privateMetadata: auditFixturePrivateMetadata });
+      expect(await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0]))).toHaveLength(0);
+      expect(await db.select().from(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, created[0]))).toHaveLength(0);
+    }
+    const afterWrongPending = await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"));
+    expect(afterWrongPending).toBe(pending);
 
     await page.getByLabel("Enter verification code").fill("424242");
     await expect.poll(async () => (await client.users.getUserList({ emailAddress: [email] })).data.length).toBe(1);
