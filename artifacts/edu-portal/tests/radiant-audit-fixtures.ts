@@ -1,7 +1,7 @@
 import type { User } from "@clerk/backend";
 
 const fixtureMarker = "radiant-audit-live-v1";
-const fixtureEmail = /^audit-fixture-(?:a|b|late-a|late-b|wrong|staged|signup|delete-failure)-[0-9a-f]{12}\+clerk_test@example\.com$/;
+const fixtureEmail = /^audit-fixture-(?:a|b|late-a|late-b|wrong|staged|signup|signin|delete-failure)-[0-9a-f]{12}\+clerk_test@example\.com$/;
 const minimumAgeMs = 24 * 60 * 60 * 1000;
 
 export function requireAuditDevelopment(env: NodeJS.ProcessEnv = process.env) {
@@ -33,7 +33,7 @@ export function requireAuditDevelopment(env: NodeJS.ProcessEnv = process.env) {
   }
 }
 
-export function auditFixtureEmail(role: "a" | "b" | "late-a" | "late-b" | "wrong" | "staged" | "signup" | "delete-failure", tag: string) {
+export function auditFixtureEmail(role: "a" | "b" | "late-a" | "late-b" | "wrong" | "staged" | "signup" | "signin" | "delete-failure", tag: string) {
   return `audit-fixture-${role}-${tag}+clerk_test@example.com`;
 }
 

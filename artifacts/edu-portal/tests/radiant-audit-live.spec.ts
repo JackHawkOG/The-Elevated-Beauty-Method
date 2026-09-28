@@ -906,6 +906,103 @@ test("an aged post-signup Audit waits for account-specific review and explicit c
   }
 });
 
+test("a wrong sign-in code leaves staged answers untouched until the existing account is verified", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = auditFixtureEmail("signin", tag);
+  const answers = reflections(`signin-${tag}`);
+  const created: string[] = [];
+  const auditWrites: string[] = [];
+  try {
+    await setupClerkTestingToken({ page });
+    expect((await client.users.getUserList({ emailAddress: [email] })).data).toHaveLength(0);
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
+    });
+    created.push(user.id);
+    expect(user.primaryEmailAddress?.verification.status).toBe("verified");
+
+    page.on("request", request => {
+      if (request.method() === "PUT" && new URL(request.url()).pathname === "/api/users/me/radiant-audit") {
+        auditWrites.push(request.postData() ?? "");
+      }
+    });
+    await page.goto("/radiant-audit");
+    await page.locator('label[for="routine-skincare-consistency"]').click();
+    await page.locator('label[for="values-quality-over-price"]').click();
+    await page.locator("#beauty-trend").fill(answers.beautyTrend);
+    await page.locator("#mastery-goal").fill(answers.masteryGoal);
+    await page.locator("#research-time").fill(answers.researchTime);
+    await page.getByLabel("Email address").fill(email);
+    await page.getByRole("button", { name: /continue|save my audit/i }).click();
+    await expect(page).toHaveURL(/\/sign-up(?:\/|$)/);
+    const pending = await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"));
+    expect(pending).not.toBeNull();
+    expect(JSON.parse(pending!)).toMatchObject({
+      email, routineChecks: ["skincare-consistency"], valuesChecks: ["quality-over-price"], ...answers,
+    });
+
+    await page.goto("/sign-in");
+    await page.getByLabel("Email address").fill(email);
+    const prepared = page.waitForResponse(response =>
+      response.url().includes("/prepare_first_factor") && response.status() === 200,
+    );
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await prepared;
+    await expect(page.getByLabel("Enter verification code")).toBeVisible();
+    const rejected = page.waitForResponse(response =>
+      response.url().includes("/attempt_first_factor") &&
+      response.request().method() === "POST" &&
+      response.status() >= 400,
+    );
+    await page.getByLabel("Enter verification code").fill("111111");
+    await rejected;
+    await expect(page.getByLabel("Enter verification code")).toBeVisible();
+    await expect(page).toHaveURL(/\/sign-in(?:\/|$)/);
+    expect(await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"))).toBe(pending);
+    expect(auditWrites).toHaveLength(0);
+
+    const [{ db, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const currentRows = () => db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user.id));
+    const submissions = () => db.select().from(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, user.id));
+    expect(await currentRows()).toHaveLength(0);
+    expect(await submissions()).toHaveLength(0);
+
+    const saved = page.waitForResponse(response =>
+      response.request().method() === "PUT" &&
+      new URL(response.url()).pathname === "/api/users/me/radiant-audit",
+    );
+    await page.getByLabel("Enter verification code").fill("424242");
+    expect((await saved).status()).toBe(200);
+    await expect(page).toHaveURL(/\/radiant-audit\/complete(?:\/|$)/);
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    for (const answer of Object.values(answers)) await expect(page.locator("main")).toContainText(answer);
+    expect(auditWrites).toHaveLength(1);
+    expect(JSON.parse(auditWrites[0])).toMatchObject({
+      routineChecks: ["skincare-consistency"], valuesChecks: ["quality-over-price"], ...answers,
+    });
+    expect((await client.users.getUser(user.id)).primaryEmailAddress?.verification.status).toBe("verified");
+    expect((await currentRows()).map(row => [
+      row.routineChecks, row.valuesChecks, row.beautyTrend, row.masteryGoal, row.researchTime,
+    ])).toEqual([[["skincare-consistency"], ["quality-over-price"], answers.beautyTrend, answers.masteryGoal, answers.researchTime]]);
+    expect(await submissions()).toHaveLength(1);
+    expect(await db.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, user.id))).toHaveLength(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"))).toBeNull();
+    await page.reload();
+    await expect(page.locator("main")).toContainText(answers.masteryGoal);
+    expect(auditWrites).toHaveLength(1);
+  } finally {
+    await page.close();
+    await cleanUpAccounts(client, created);
+  }
+});
+
 test("a wrong signup code keeps staged answers and only a verified retry saves the Audit", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
