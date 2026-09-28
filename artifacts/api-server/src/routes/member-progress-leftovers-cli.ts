@@ -15,6 +15,8 @@ export async function inspectProgressLeftovers(
   identities: Identity[],
   deleteIdentity: (id: string) => Promise<unknown>,
   log: (message: string) => void = console.log,
+  // Test seam for a database change after selection but before the guarded delete.
+  beforeDelete?: () => Promise<void>,
 ) {
   const { and, eq, like, lte } = await import("drizzle-orm");
   const {
@@ -25,7 +27,8 @@ export async function inspectProgressLeftovers(
     const categories = await db.select().from(categoriesTable);
     const members = await db.select().from(usersTable);
     const activities = await db.select().from(activityTable)
-      .where(like(activityTable.actorName, "Progress Elevated %"));
+      .where(like(activityTable.actorName, "Progress Elevated %"))
+      .orderBy(activityTable.id);
     const candidates: Candidate[] = [
       ...categories.flatMap(category => {
         const id = categoryRun(category.slug, category.name);
@@ -121,6 +124,7 @@ export async function inspectProgressLeftovers(
     }
     // Database changes are atomic. A foreign-key conflict means a human must
     // review additional records; never cascade through unrelated data.
+    await beforeDelete?.();
     await db.transaction(async tx => {
       for (const id of ids) {
         await tx.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, id));

@@ -26,3 +26,5 @@ If an unrelated merged fixture has extensive structural corruption rather than a
 **Why:** A malformed fixture may require reconstructing multiple tests and behaviors; a quick syntax patch can create a misleading green check without restoring intended coverage.
 
 **How to apply:** Identify the introducing merge and report the blocking check and the needed reconciliation separately when restoring the fixture exceeds the assigned scope.
+
+When the user authorizes a broader repair of a malformed fixture, compare it with its last known-good revision before replacing scattered invalid values. **Why:** Type errors can be only the visible part of a merge that also changed valid-looking counters or test setup, leaving runtime assertions wrong after typecheck passes. **How to apply:** Restore the intended fixtures and run the affected test file before relying on the full workspace check.

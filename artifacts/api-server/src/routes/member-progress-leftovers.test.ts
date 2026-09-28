@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { activityTable, db } from "@workspace/db";
 import { expect, test } from "vitest";
 import { activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate } from "./member-progress-leftovers";
@@ -116,6 +116,54 @@ test("database dry run and confirmed cleanup isolate stale activity-only progres
       .toEqual(createdIds.slice(1));
     // A second attempt cannot remove the recent exact match.
     await expect(inspectProgressLeftovers(fixtureRun, [], noClerkDelete, () => {})).rejects.toThrow(/fully stale/);
+  } finally {
+    if (createdIds.length) {
+      await db.delete(activityTable).where(inArray(activityTable.id, createdIds));
+    }
+  }
+});
+
+test("database cleanup rolls back every selected feed row if one changes after selection", async () => {
+  requireDevelopmentDatabase();
+  const fixtureRun = randomUUID();
+  const actorName = `Progress Elevated ${fixtureRun}`;
+  const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const description = "enrolled in a course";
+  const changedDescription = "edited after inspection";
+  const createdIds: number[] = [];
+  try {
+    for (let index = 0; index < 2; index++) {
+      const [row] = await db.insert(activityTable).values({
+        actorName, entityTitle: "The Beauty Mindset Accelerator",
+        type: "enrollment", description, createdAt,
+      }).returning({ id: activityTable.id });
+      createdIds.push(row.id);
+    }
+    let changed = false;
+    let clerkDeleteCalled = false;
+    const output: string[] = [];
+    await expect(inspectProgressLeftovers(
+      fixtureRun, [],
+      async () => { clerkDeleteCalled = true; },
+      message => output.push(message),
+      async () => {
+        // The second row stops matching the selected fixture after inspection.
+        // The first delete must be undone when the second guarded delete fails.
+        await db.update(activityTable).set({ description: changedDescription })
+          .where(eq(activityTable.id, createdIds[1]));
+        changed = true;
+      },
+    )).rejects.toThrow(/Activity changed during cleanup; refusing partial deletion/);
+    expect(changed).toBe(true);
+    expect(clerkDeleteCalled).toBe(false);
+    expect(output).toEqual([]);
+    const remaining = await db.select({
+      id: activityTable.id, description: activityTable.description,
+    }).from(activityTable).where(inArray(activityTable.id, createdIds)).orderBy(activityTable.id);
+    expect(remaining).toEqual([
+      { id: createdIds[0], description },
+      { id: createdIds[1], description: changedDescription },
+    ]);
   } finally {
     if (createdIds.length) {
       await db.delete(activityTable).where(inArray(activityTable.id, createdIds));
