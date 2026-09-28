@@ -880,6 +880,78 @@ test("a committed signed-in save with a lost response retries after reload witho
   expect(history).toEqual([]);
 });
 
+for (const scenario of ["expired", "unknown-age"] as const) {
+  test(`a signed-in ${scenario} retry waits for current Audit review and explicit new save`, async ({ page }) => {
+    const answers = fixture(scenario);
+    const oldId = crypto.randomUUID();
+    const writes: string[] = [];
+    let reads = 0;
+    let failReview = false;
+    const current: Audit | null = scenario === "expired" ? {
+      ...fixture("already-saved"), routineScore: 1, valuesScore: 2,
+      completedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    } : null;
+    await page.route("**/api/users/me/radiant-audit", route => {
+      if (route.request().method() === "GET") {
+        reads++;
+        if (failReview) {
+          failReview = false;
+          return route.fulfill({ status: 503, json: { error: "Unavailable" } });
+        }
+        return route.fulfill({ json: current });
+      }
+      const { submissionId, ...input } = route.request().postDataJSON() as Answers & { submissionId: string };
+      writes.push(submissionId);
+      return route.fulfill({ json: {
+        audit: { ...input, routineScore: 1, valuesScore: 2, completedAt: new Date().toISOString() },
+        completionKind: current ? "retake" : "first_time",
+      } });
+    });
+    await signInAs(page, "member-a");
+    // Seed away from the form so its initial empty-draft effect cannot clear the fixture.
+    await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+    const startedAt = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    await page.evaluate(({ key, answers, id, startedAt, scenario }) => {
+      localStorage.setItem(key, JSON.stringify({
+        owner: "member-a", expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        answers: { ...answers, email: "member-a@example.invalid" },
+        submissionId: id,
+        ...(scenario === "expired" ? { submissionStartedAt: startedAt } : {}),
+      }));
+    }, { key: signedInDraftKey, answers, id: oldId, startedAt, scenario });
+    await page.goto("/tests/audit-harness.html");
+    await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
+    // Editing refreshes the draft, but must not refresh the submission's age.
+    await page.locator("#mastery-goal").fill(`${answers.masteryGoal} edited`);
+    await expect.poll(() => page.evaluate(key =>
+      JSON.parse(localStorage.getItem(key)!).answers.masteryGoal, signedInDraftKey,
+    )).toBe(`${answers.masteryGoal} edited`);
+    const record = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), signedInDraftKey);
+    expect(record.submissionStartedAt).toBe(scenario === "expired" ? startedAt : null);
+    const priorReads = reads;
+    failReview = true;
+    await page.getByRole("button", { name: "Save my Audit" }).click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    await expect(page.getByRole("alertdialog").getByRole("alert")).toContainText("couldn't load your current Audit");
+    expect(reads).toBeGreaterThan(priorReads);
+    expect(writes).toEqual([]);
+    await page.getByRole("button", { name: "Try loading again" }).click();
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toContainText(current ? "will create a new retake" : "will create a new Audit");
+    expect(writes).toEqual([]);
+    await dialog.getByRole("button", { name: "Keep editing" }).click();
+    expect(writes).toEqual([]);
+    await page.getByRole("button", { name: "Save my Audit" }).click();
+    await expect(dialog).toContainText(current ? "will create a new retake" : "will create a new Audit");
+    expect(writes).toEqual([]);
+    await dialog.getByRole("button", { name: current ? "Save as a new retake" : "Save as a new Audit" }).click();
+    expect(writes).toHaveLength(1);
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    expect(writes[0]).not.toBe(oldId);
+    expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  });
+}
+
 test("failed signed-in save preserves answers and checks until a successful retry", async ({ page }) => {
   const answers = fixture("retry");
   const submitted: Answers[] = [];

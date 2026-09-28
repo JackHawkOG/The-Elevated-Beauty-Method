@@ -30,3 +30,4 @@
 - [Audit save and autosave](audit-save-autosave.md) — after server confirmation, stop form draft writes until navigation completes; clearing storage alone can be undone by a late effect.
 - [pnpm audit workspace rewrites](pnpm-audit-workspace-rewrites.md) — audit --fix can rewrite workspace configuration and remove its comments; review shared overrides before installing.
 - [Enrollment index repair safety](enrollment-index-repair-safety.md) — fail closed on incompatible same-name indexes instead of dropping an unknown legacy object automatically.
+- [Audit browser fixture seeding](audit-browser-fixture-seeding.md) — seed saved drafts away from the mounted form; its delayed initial empty-state effect can erase fixtures.

@@ -25,7 +25,7 @@ import {
   trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
 } from "@/lib/analytics";
 import { canAutoRetryPendingAudit, clearPendingAudit, isAuditReadyToSave, readPendingAudit, restartPendingAudit, stageAudit, type PendingAudit } from "@/lib/radiant-audit-session";
-import { auditDraftWrittenAt, clearAuditDraft, getAuditSubmissionId, readAuditDraft, writeAuditDraft } from "@/lib/radiant-audit-draft";
+import { auditDraftWrittenAt, clearAuditDraft, getAuditSubmissionId, readAuditDraft, startAuditSubmission, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -49,6 +49,10 @@ export default function RadiantAuditPage() {
   const [, navigate] = useLocation();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [retryReview, setRetryReview] = useState<{
+    owner: string; audit: RadiantAuditSubmission; current?: Awaited<ReturnType<typeof getRadiantAudit>>;
+    loading: boolean; error: boolean;
+  } | null>(null);
   const [draftWarning, setDraftWarning] = useState<string | null>(null);
   const [draftConflict, setDraftConflict] = useState<{ draft: RadiantAuditStoredDraft | null; discarded: boolean } | null>(null);
   const [completedConflict, setCompletedConflict] = useState(false);
@@ -64,8 +68,10 @@ export default function RadiantAuditPage() {
   const draftBaseline = useRef<{ owner: string; completedAt: string } | null>(null);
   const draftHadAnswers = useRef(false);
   const saveConfirmed = useRef(false);
+  const retryReadVersion = useRef(0);
+  const retrySaving = useRef(false);
   const save = useSaveRadiantAudit();
-  const attempt = useRef<{ accountId: string; answers: string; id: string } | null>(null);
+  const attempt = useRef<{ accountId: string; answers: string; id: string; startedAt: number } | null>(null);
   const email = user?.primaryEmailAddress?.emailAddress;
   const accountId = isLoaded && isSignedIn ? user?.id : undefined;
   const activeAccount = useRef(accountId);
@@ -74,6 +80,10 @@ export default function RadiantAuditPage() {
     if (!accountId) return;
     let active = true;
     setLoadedDraft(null);
+    setRetryReview(null);
+    retryReadVersion.current++;
+    retrySaving.current = false;
+    attempt.current = null;
     setDraftConflict(null);
     setCompletedConflict(false);
     draftBlocked.current = false;
@@ -316,6 +326,66 @@ export default function RadiantAuditPage() {
     }
   }
 
+  async function loadCurrentForRetry(owner: string) {
+    const version = ++retryReadVersion.current;
+    setRetryReview(previous => previous?.owner === owner ? { ...previous, loading: true, error: false, current: undefined } : previous);
+    try {
+      // Read the server now, not a possibly stale query cache.
+      const current = await getRadiantAudit({ responseType: "json" });
+      if (activeAccount.current === owner && retryReadVersion.current === version)
+        setRetryReview(previous => previous?.owner === owner ? { ...previous, current, loading: false } : previous);
+    } catch {
+      if (activeAccount.current === owner && retryReadVersion.current === version)
+        setRetryReview(previous => previous?.owner === owner ? { ...previous, loading: false, error: true } : previous);
+    }
+  }
+
+  async function saveSignedInAudit(audit: RadiantAuditSubmission, id: string) {
+    try {
+      const saved = await save.mutateAsync({ data: { ...auditAnswers(audit), submissionId: id } });
+      saveConfirmed.current = true;
+      try { clearAuditDraft(user?.id); } catch { /* A storage failure must not hide a confirmed save. */ }
+      trackRadiantAuditSaved(saved.completionKind);
+      trackAuditResumptionIfRequested(user!.id, "form");
+      queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
+      void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+      announceHistoryChange(user!.id);
+      try { clearPendingAudit(); } catch { /* A storage failure must not hide a confirmed save. */ }
+      setRetryReview(null);
+      navigate("/radiant-audit/complete");
+    } catch {
+      if (!conflictPending.current) {
+        draftBlocked.current = false;
+        if (accountId) queueDraft(accountId, audit);
+      }
+      setRetryReview(null);
+      setError("We couldn't save your Audit. Your answers are still here; please try again.");
+    } finally {
+      retrySaving.current = false;
+    }
+  }
+
+  function cancelRetryReview() {
+    if (retrySaving.current || save.isPending) return;
+    retryReadVersion.current++;
+    setRetryReview(null);
+    draftBlocked.current = false;
+  }
+
+  function confirmSignedInRetry() {
+    if (!retryReview || retryReview.owner !== accountId || retryReview.loading ||
+        retryReview.error || retryReview.current === undefined || retrySaving.current || save.isPending) return;
+    retrySaving.current = true;
+    let id: string;
+    try {
+      id = startAuditSubmission(retryReview.owner, retryReview.audit);
+    } catch {
+      id = crypto.randomUUID();
+    }
+    attempt.current = { accountId: retryReview.owner, answers: JSON.stringify(auditAnswers(retryReview.audit)), id, startedAt: Date.now() };
+    void saveSignedInAudit(retryReview.audit, id);
+  }
+
   async function handleSubmit(audit: RadiantAuditSubmission) {
     if (conflictPending.current || draftBlocked.current) {
       setError(completedConflict ? "Reload and review the Audit saved on your other device before submitting again." : "Choose which unfinished draft to keep before saving your Audit.");
@@ -342,27 +412,41 @@ export default function RadiantAuditPage() {
         }
         const answers = auditAnswers(audit);
         const signature = JSON.stringify(answers);
-        if (attempt.current?.accountId !== user!.id || attempt.current.answers !== signature) {
-          let id: string;
-          try {
-            id = getAuditSubmissionId(user!.id, audit);
-          } catch {
-            // Saving still works when local browser storage is unavailable.
-            id = crypto.randomUUID();
+        let id: string | null;
+        try {
+          // A draft may expire while the form stays open. The in-memory attempt still
+          // remembers its original age even if storage has since removed the draft.
+          const previous = attempt.current;
+          if (previous?.accountId === user!.id &&
+              (previous.startedAt > Date.now() ||
+               Date.now() - previous.startedAt >= 7 * 24 * 60 * 60 * 1000)) {
+            id = null;
+          } else if (previous?.accountId === user!.id && previous.answers === signature) {
+            // A one-day draft expiry must not change the ID of an open retry.
+            id = previous.id;
+          } else {
+            const stored = getAuditSubmissionId(user!.id, audit);
+            id = stored?.id ?? null;
+            if (stored) attempt.current = { accountId: user!.id, answers: signature, ...stored };
           }
-          attempt.current = { accountId: user!.id, answers: signature, id };
+        } catch {
+          // Storage can fail. Keep the in-memory attempt's original age too.
+          const previous = attempt.current;
+          if (previous?.accountId === user!.id) {
+            id = previous.answers === signature && previous.startedAt > 0 &&
+              Date.now() - previous.startedAt < 7 * 24 * 60 * 60 * 1000 &&
+              previous.startedAt <= Date.now() ? previous.id : null;
+          } else {
+            id = crypto.randomUUID();
+            attempt.current = { accountId: user!.id, answers: signature, id, startedAt: Date.now() };
+          }
         }
-        const saved = await save.mutateAsync({ data: { ...answers, submissionId: attempt.current.id } });
-        saveConfirmed.current = true;
-        // Clear only after the server confirms the save.
-        try { clearAuditDraft(user?.id); } catch { /* A storage failure must not hide a confirmed save. */ }
-        trackRadiantAuditSaved(saved.completionKind);
-        trackAuditResumptionIfRequested(user!.id, "form");
-        queryClient.setQueryData(getGetRadiantAuditQueryKey(), saved.audit);
-        void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
-        announceHistoryChange(user!.id);
-        try { clearPendingAudit(); } catch { /* A storage failure must not hide a confirmed save. */ }
-        navigate("/radiant-audit/complete");
+        if (!id) {
+          setRetryReview({ owner: user!.id, audit, loading: true, error: false });
+          void loadCurrentForRetry(user!.id);
+          return;
+        }
+        await saveSignedInAudit(audit, id);
       } catch {
         if (!conflictPending.current) {
           draftBlocked.current = false;
@@ -425,6 +509,32 @@ export default function RadiantAuditPage() {
         </div>
       </section>
     )}
+    <AlertDialog open={!!retryReview && retryReview.owner === accountId} onOpenChange={open => { if (!open) cancelRetryReview(); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Review your Audit before saving again</AlertDialogTitle>
+          <AlertDialogDescription>
+            This attempt is older than the safe retry window, or its age is unknown. It has not been sent again.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {retryReview?.loading ? <p role="status">Loading your current Audit…</p> :
+          retryReview?.error ? <div>
+            <p role="alert">We couldn't load your current Audit. Nothing has been saved again.</p>
+            <Button type="button" variant="outline" className="mt-3" onClick={() => void loadCurrentForRetry(retryReview.owner)}>Try loading again</Button>
+          </div> : retryReview?.current !== undefined ? <p>
+            {retryReview.current
+              ? `Your current Audit was saved on ${new Date(retryReview.current.completedAt).toLocaleDateString()}. Saving these answers will create a new retake.`
+              : "There is no current Audit on this account. Saving these answers will create a new Audit."}
+          </p> : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel onClick={cancelRetryReview} disabled={save.isPending}>Keep editing</AlertDialogCancel>
+          <AlertDialogAction onClick={event => { event.preventDefault(); confirmSignedInRetry(); }}
+            disabled={retryReview?.loading || retryReview?.error || retryReview?.current === undefined || save.isPending}>
+            {retryReview?.current ? "Save as a new retake" : "Save as a new Audit"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <RadiantAuditForm
       key={`${accountId ?? "visitor"}:${draftRevision}`}
       initialEmail={email}

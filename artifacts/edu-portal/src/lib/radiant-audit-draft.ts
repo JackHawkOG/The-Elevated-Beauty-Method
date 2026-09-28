@@ -2,6 +2,12 @@ import type { RadiantAuditSubmission } from "@/components/radiant-audit-form";
 
 const key = "tebm:radiant-audit:signed-in-draft";
 const lifetime = 24 * 60 * 60 * 1000;
+const receiptWindow = 7 * lifetime;
+
+function safeAttempt(startedAt: unknown, now = Date.now()): boolean {
+  return typeof startedAt === "number" && Number.isFinite(startedAt) &&
+    startedAt > 0 && startedAt <= now && now - startedAt < receiptWindow;
+}
 
 function signature(answers: RadiantAuditSubmission): string {
   return JSON.stringify({
@@ -65,7 +71,7 @@ export function auditDraftWrittenAt(accountId: string): number | null {
 
 export function writeAuditDraft(accountId: string, answers: RadiantAuditSubmission): void {
   const existing = readAuditDraft(accountId);
-  const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown } : null;
+  const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown; submissionStartedAt?: unknown } : null;
   const submissionId = existing && signature(existing) === signature(answers) &&
     typeof raw?.submissionId === "string" ? raw.submissionId : undefined;
   window.localStorage.setItem(key, JSON.stringify({
@@ -73,21 +79,32 @@ export function writeAuditDraft(accountId: string, answers: RadiantAuditSubmissi
     expiresAt: Date.now() + lifetime,
     answers,
     submissionId,
+    // Editing an unconfirmed attempt must not turn its old age into a fresh window.
+    submissionStartedAt: raw?.submissionStartedAt ?? (raw?.submissionId ? null : raw?.submissionStartedAt),
   }));
 }
 
-export function getAuditSubmissionId(accountId: string, answers: RadiantAuditSubmission): string {
+export function getAuditSubmissionId(accountId: string, answers: RadiantAuditSubmission): { id: string; startedAt: number } | null {
   const existing = readAuditDraft(accountId);
-  const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown } : null;
+  const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown; submissionStartedAt?: unknown } : null;
+  // Missing timestamps on older attempts are unknown, not new attempts.
+  if (raw && (raw.submissionId || raw.submissionStartedAt !== undefined) &&
+      !safeAttempt(raw.submissionStartedAt)) return null;
   if (existing && signature(existing) === signature(answers) && typeof raw?.submissionId === "string") {
-    return raw.submissionId;
+    return { id: raw.submissionId, startedAt: raw.submissionStartedAt as number };
   }
+  const startedAt = typeof raw?.submissionStartedAt === "number" ? raw.submissionStartedAt : Date.now();
+  return { id: startAuditSubmission(accountId, answers, startedAt), startedAt };
+}
+
+export function startAuditSubmission(accountId: string, answers: RadiantAuditSubmission, startedAt = Date.now()): string {
   const submissionId = crypto.randomUUID();
   window.localStorage.setItem(key, JSON.stringify({
     owner: accountId,
     expiresAt: Date.now() + lifetime,
     answers,
     submissionId,
+    submissionStartedAt: startedAt,
   }));
   return submissionId;
 }
