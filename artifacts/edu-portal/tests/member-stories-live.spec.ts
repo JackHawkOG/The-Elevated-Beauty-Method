@@ -1,26 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-
-function requireDevelopment() {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT ||
-      !process.env.CLERK_SECRET_KEY?.startsWith("sk_test_") ||
-      !process.env.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_") ||
-      !process.env.REPLIT_DEV_DOMAIN?.endsWith(".replit.dev") ||
-      !process.env.DATABASE_URL || !process.env.PGHOST || !process.env.PGPORT ||
-      !process.env.PGDATABASE || !process.env.PGUSER) {
-    throw new Error("The live story check requires development Clerk, preview, and database.");
-  }
-  const target = new URL(process.env.DATABASE_URL);
-  if (target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
-      decodeURIComponent(target.username) !== process.env.PGUSER ||
-      [...target.searchParams.keys()].some(key => /^(host|hostaddr|port|dbname|user|service)$/i.test(key))) {
-    throw new Error("DATABASE_URL does not target the workspace development database.");
-  }
-}
+import { newStoryFixtureTag, requireStoryDevelopment, storyFixtureEmail, storyFixturePrivateMetadata } from "./member-stories-fixtures";
 
 async function signIn(page: Page, email: string) {
   await page.goto("/dashboard");
@@ -31,12 +12,12 @@ async function signIn(page: Page, email: string) {
 
 test("real owner publication and withdrawal update an already-open signed-out landing page", async ({ browser, page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireStoryDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-  const marker = randomUUID().slice(0, 12);
-  const ownerEmail = `story-owner-${marker}+clerk_test@example.com`;
-  const memberEmail = `story-member-${marker}+clerk_test@example.com`;
+  const marker = newStoryFixtureTag();
+  const ownerEmail = storyFixtureEmail("owner", marker);
+  const memberEmail = storyFixtureEmail("member", marker);
   const quote = `Approved browser check ${marker}`;
   const attribution = `Story check ${marker}`;
   const permission = `Disposable test approval for exact quote and attribution ${marker}`;
@@ -45,12 +26,13 @@ test("real owner publication and withdrawal update an already-open signed-out la
   try {
     const owner = await client.users.createUser({
       emailAddress: [ownerEmail], firstName: "Story", lastName: "Owner",
-      publicMetadata: { role: "owner" }, skipPasswordRequirement: true,
+      publicMetadata: { role: "owner" }, privateMetadata: storyFixturePrivateMetadata,
+      skipPasswordRequirement: true,
     });
     created.push(owner.id);
     const member = await client.users.createUser({
       emailAddress: [memberEmail], firstName: "Story", lastName: "Member",
-      skipPasswordRequirement: true,
+      privateMetadata: storyFixturePrivateMetadata, skipPasswordRequirement: true,
     });
     created.push(member.id);
 
@@ -113,10 +95,12 @@ test("real owner publication and withdrawal update an already-open signed-out la
     try {
       await visitorContext?.close();
     } finally {
-      const [{ db, memberStoriesTable, usersTable, pool }, { eq, inArray }] =
+      const [{ db, memberStoriesTable, usersTable, pool }, { eq, inArray, and }] =
         await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
       try {
-        await db.delete(memberStoriesTable).where(eq(memberStoriesTable.quote, quote));
+        if (created[0]) await db.delete(memberStoriesTable).where(and(
+          eq(memberStoriesTable.quote, quote), eq(memberStoriesTable.permissionRecordedBy, created[0]),
+        ));
         if (created.length) await db.delete(usersTable).where(inArray(usersTable.clerkId, created));
       } finally {
         try {
