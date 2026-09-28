@@ -47,10 +47,17 @@ export function staleCandidates(candidates: Candidate[], now: Date, ageMs = MIN_
 
 export function eligibleRun(candidates: Candidate[], now: Date, run: string): Candidate[] {
   const selected = candidates.filter(candidate => candidate.run === run);
-  if (!selected.length || staleCandidates(selected, now).length !== selected.length) {
+  const stale = staleCandidates(selected, now);
+  // An orphaned feed row can be removed independently; leave a newer row from
+  // the same run untouched. Identity/curriculum cleanup still requires the
+  // entire run to be stale.
+  if (selected.length && selected.every(candidate => candidate.kind === "activity") && stale.length) {
+    return stale;
+  }
+  if (!selected.length || stale.length !== selected.length) {
     throw new Error("No fully stale run found; refusing to delete recent or unmatched records");
   }
-  return selected;
+  return stale;
 }
 
 export function confirmedRun(args: string[]): string | undefined {

@@ -1,36 +1,31 @@
 // Run from the workspace root with pnpm run inspect:progress-leftovers.
 // Import the clients only after validating the development environment.
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { progressBrowserEnvironment } from "./member-progress-browser-environment";
 import {
   activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate,
 } from "./member-progress-leftovers";
 
-async function main() {
-  const run = confirmedRun(process.argv.slice(2));
-  progressBrowserEnvironment();
-  const { clerkClient } = await import("@clerk/express");
+type Identity = { id: string; email: string; name: string; createdAt: Date };
+
+// The same SQL path is used by the CLI and the guarded development DB test.
+export async function inspectProgressLeftovers(
+  run: string | undefined,
+  identities: Identity[],
+  deleteIdentity: (id: string) => Promise<unknown>,
+  log: (message: string) => void = console.log,
+) {
   const { and, eq, like, lte } = await import("drizzle-orm");
   const {
-    db, pool, categoriesTable, coursesTable, lessonsTable, usersTable,
+    db, categoriesTable, coursesTable, lessonsTable, usersTable,
     enrollmentsTable, lessonCompletionsTable, activityTable,
   } = await import("@workspace/db");
-  try {
     const now = new Date();
     const categories = await db.select().from(categoriesTable);
     const members = await db.select().from(usersTable);
     const activities = await db.select().from(activityTable)
       .where(like(activityTable.actorName, "Progress Elevated %"));
-    const identities: Array<{ id: string; email: string; name: string; createdAt: Date }> = [];
-    for (let offset = 0; ; offset += 100) {
-      const page = await clerkClient.users.getUserList({ limit: 100, offset });
-      for (const user of page.data) {
-        identities.push({
-          id: user.id, email: user.emailAddresses[0]?.emailAddress || "",
-          name: user.firstName || "", createdAt: new Date(user.createdAt),
-        });
-      }
-      if (offset + page.data.length >= page.totalCount || !page.data.length) break;
-    }
     const candidates: Candidate[] = [
       ...categories.flatMap(category => {
         const id = categoryRun(category.slug, category.name);
@@ -66,12 +61,12 @@ async function main() {
               .where(eq(lessonsTable.courseId, course.id))).map(lesson => lesson.id),
           }))) };
       }));
-      console.log(JSON.stringify({
+      log(JSON.stringify({
         candidates: stale.map(({ kind, id, run, createdAt, marker, type, description }) =>
           ({ kind, id, run, createdAt, marker, ...(kind === "activity" ? { type, description } : {}) })),
         curriculum,
       }, null, 2));
-      console.log(`${stale.length} stale disposable record(s). Dry run only; nothing deleted.`);
+      log(`${stale.length} stale disposable record(s). Dry run only; nothing deleted.`);
       return;
     }
     const selected = eligibleRun(candidates, now, run);
@@ -151,11 +146,33 @@ async function main() {
         if (removed.length !== 1) throw new Error("Activity changed during cleanup; refusing partial deletion");
       }
     });
-    for (const identity of identitiesForRun) await clerkClient.users.deleteUser(identity.id);
-    console.log(`Removed confirmed disposable records for ${run}. Re-run dry run to check for remaining Clerk users.`);
+    for (const identity of identitiesForRun) await deleteIdentity(identity.id);
+    log(`Removed confirmed disposable records for ${run}. Re-run dry run to check for remaining Clerk users.`);
+}
+
+async function main() {
+  const run = confirmedRun(process.argv.slice(2));
+  progressBrowserEnvironment();
+  const { clerkClient } = await import("@clerk/express");
+  const { pool } = await import("@workspace/db");
+  try {
+    const identities: Identity[] = [];
+    for (let offset = 0; ; offset += 100) {
+      const page = await clerkClient.users.getUserList({ limit: 100, offset });
+      for (const user of page.data) {
+        identities.push({
+          id: user.id, email: user.emailAddresses[0]?.emailAddress || "",
+          name: user.firstName || "", createdAt: new Date(user.createdAt),
+        });
+      }
+      if (offset + page.data.length >= page.totalCount || !page.data.length) break;
+    }
+    await inspectProgressLeftovers(run, identities, id => clerkClient.users.deleteUser(id));
   } finally {
     await pool.end();
   }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => { console.error(error); process.exitCode = 1; });
+}

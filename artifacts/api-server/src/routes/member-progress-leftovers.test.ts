@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
+import { inArray } from "drizzle-orm";
+import { activityTable, db } from "@workspace/db";
 import { expect, test } from "vitest";
 import { activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate } from "./member-progress-leftovers";
+import { inspectProgressLeftovers } from "./member-progress-leftovers-cli";
+import { requireDevelopmentDatabase } from "./test-development-database";
 
 const run = "12345678-1234-1234-1234-123456789abc";
 const now = new Date("2026-09-27T12:00:00Z");
@@ -47,10 +52,14 @@ test("dry-run and deletion eligibility exclude fresh and unrelated records", () 
   expect(() => staleCandidates([candidate("clerk")], now, 0)).toThrow(/Minimum age/);
   expect(() => eligibleRun([candidate("clerk"), candidate("category", new Date("2026-09-27T11:30:00Z"))], now, run))
     .toThrow(/fully stale/);
+  expect(() => eligibleRun([candidate("member"), candidate("activity", new Date("2026-09-27T11:30:00Z"))], now, run))
+    .toThrow(/fully stale/);
   expect(() => eligibleRun([], now, run)).toThrow(/fully stale/);
   expect(eligibleRun([candidate("clerk"), candidate("member")], now, run)).toHaveLength(2);
   expect(eligibleRun([candidate("activity")], now, run)).toEqual([candidate("activity")]);
-  expect(() => eligibleRun([candidate("activity"), candidate("activity", new Date("2026-09-27T11:30:00Z"))], now, run))
+  expect(eligibleRun([candidate("activity"), candidate("activity", new Date("2026-09-27T11:30:00Z"))], now, run))
+    .toEqual([candidate("activity")]);
+  expect(() => eligibleRun([candidate("activity", new Date("2026-09-27T11:30:00Z"))], now, run))
     .toThrow(/fully stale/);
 });
 
@@ -59,4 +68,57 @@ test("deletion requires the same exact run ID twice", () => {
   expect(confirmedRun(["--delete", run, run])).toBe(run);
   expect(() => confirmedRun(["--delete", run])).toThrow();
   expect(() => confirmedRun(["--delete", run, "87654321-1234-1234-1234-123456789abc"])).toThrow();
+});
+
+test("database dry run and confirmed cleanup isolate stale activity-only progress entries", async () => {
+  requireDevelopmentDatabase();
+  const fixtureRun = randomUUID();
+  const otherRun = randomUUID();
+  const actor = `Progress Elevated ${fixtureRun}`;
+  const title = "The Beauty Mindset Accelerator";
+  const description = "enrolled in a course";
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const recent = new Date();
+  const createdIds: number[] = [];
+  try {
+    const fixtures = [
+      { actorName: actor, entityTitle: title, type: "enrollment", description, createdAt: old },
+      { actorName: actor, entityTitle: title, type: "enrollment", description, createdAt: recent },
+      { actorName: `${actor} copy`, entityTitle: title, type: "enrollment", description, createdAt: old },
+      { actorName: actor, entityTitle: "Another course", type: "enrollment", description, createdAt: old },
+      { actorName: actor, entityTitle: title, type: "announcement", description, createdAt: old },
+      { actorName: actor, entityTitle: title, type: "enrollment", description: "another action", createdAt: old },
+      { actorName: `Progress Elevated ${otherRun}`, entityTitle: title, type: "enrollment", description, createdAt: old },
+    ];
+    // Track each insert immediately so cleanup still works if a later insert fails.
+    for (const fixture of fixtures) {
+      const [row] = await db.insert(activityTable).values(fixture).returning({ id: activityTable.id });
+      createdIds.push(row.id);
+    }
+    const output: string[] = [];
+    const noClerkDelete = async () => { throw new Error("Activity-only cleanup must not delete a Clerk identity"); };
+    await inspectProgressLeftovers(undefined, [], noClerkDelete, message => output.push(message));
+    const report = JSON.parse(output[0]) as { candidates: Array<{ kind: string; id: string; run: string }> };
+    expect(report.candidates.filter(entry => createdIds.includes(Number(entry.id))))
+      .toEqual([
+        { kind: "activity", id: String(createdIds[0]), run: fixtureRun,
+          createdAt: old.toISOString(), marker: actor, type: "enrollment", description },
+        { kind: "activity", id: String(createdIds[6]), run: otherRun,
+          createdAt: old.toISOString(), marker: `Progress Elevated ${otherRun}`, type: "enrollment", description },
+      ]);
+    expect(output.at(-1)).toMatch(/Dry run only; nothing deleted/);
+    expect((await db.select({ id: activityTable.id }).from(activityTable)
+      .where(inArray(activityTable.id, createdIds))).map(row => row.id)).toEqual(createdIds);
+
+    await inspectProgressLeftovers(confirmedRun(["--delete", fixtureRun, fixtureRun]), [], noClerkDelete, () => {});
+    expect((await db.select({ id: activityTable.id }).from(activityTable)
+      .where(inArray(activityTable.id, createdIds))).map(row => row.id))
+      .toEqual(createdIds.slice(1));
+    // A second attempt cannot remove the recent exact match.
+    await expect(inspectProgressLeftovers(fixtureRun, [], noClerkDelete, () => {})).rejects.toThrow(/fully stale/);
+  } finally {
+    if (createdIds.length) {
+      await db.delete(activityTable).where(inArray(activityTable.id, createdIds));
+    }
+  }
 });
