@@ -163,11 +163,6 @@ export function useListPublishedMemberStories<TData = Awaited<ReturnType<typeof 
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-
-
-
-
 export const getPublishMemberStoryUrl = () => {
 
 
@@ -2563,6 +2558,83 @@ export const useCreateAnnouncement = <TError = ErrorType<void>,
       > => {
       return useMutation(getCreateAnnouncementMutationOptions(options));
     }
+
+export const getGetAnnouncementUrl = (announcementId: number,) => {
+
+
+
+
+  return `/api/announcements/${announcementId}`
+}
+
+/**
+ * @summary Get a community announcement by ID
+ */
+export const getAnnouncement = async (announcementId: number, options?: Parameters<typeof customFetch>[1]): Promise<Announcement> => {
+
+  return customFetch<Announcement>(getGetAnnouncementUrl(announcementId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnnouncementQueryKey = (announcementId: number,) => {
+    return [
+    `/api/announcements/${announcementId}`
+    ] as const;
+    }
+
+
+export const getGetAnnouncementQueryOptions = <TData = Awaited<ReturnType<typeof getAnnouncement>>, TError = ErrorType<void>>(announcementId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnnouncement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnnouncementQueryKey(announcementId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnnouncement>>> = ({ signal }) => getAnnouncement(announcementId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: announcementId !== null && announcementId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnnouncement>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnnouncementQueryResult = NonNullable<Awaited<ReturnType<typeof getAnnouncement>>>
+export type GetAnnouncementQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get a community announcement by ID
+ */
+
+export function useGetAnnouncement<TData = Awaited<ReturnType<typeof getAnnouncement>>, TError = ErrorType<void>>(
+ announcementId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnnouncement>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnnouncementQueryOptions(announcementId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetMeUrl = () => {
 

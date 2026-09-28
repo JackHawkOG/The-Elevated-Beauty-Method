@@ -21,6 +21,7 @@ import { Progress } from "@/components/ui/progress";
 import { formatDistanceToNow } from "date-fns";
 import { BeautyDiagnostic, BeautyDiagnosticSkeleton } from "@/components/beauty-diagnostic";
 import { AcceleratorDashboard } from "@/components/accelerator-dashboard";
+import { ActivityEntityTitle } from "@/components/activity-entity-title";
 
 export default function Dashboard() {
   const { data: member, isLoading: memberLoading } = useGetMe();
@@ -222,7 +223,7 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <p className="text-foreground leading-relaxed">
-                            <span className="font-medium text-primary">{item.actorName || 'A member'}</span> {item.description} <span className="font-medium">{item.entityTitle}</span>
+                            <span className="font-medium text-primary">{item.actorName || 'A member'}</span> {item.description} <ActivityEntityTitle item={item} className="font-medium" />
                           </p>
                           <p className="text-muted-foreground text-xs mt-1.5 font-medium">
                             {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}

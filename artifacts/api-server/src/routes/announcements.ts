@@ -4,6 +4,7 @@ import { eq, desc, and } from "drizzle-orm";
 import {
   ListAnnouncementsQueryParams,
   ListAnnouncementsResponse,
+  GetAnnouncementResponse,
   CreateAnnouncementBody,
   CreateAnnouncementResponse,
 } from "@workspace/api-zod";
@@ -31,6 +32,26 @@ router.get("/announcements", async (req, res): Promise<void> => {
     body: withBrandTrademarks(r.body),
     createdAt: r.createdAt?.toISOString(),
   }))));
+});
+
+router.get("/announcements/:announcementId", async (req, res): Promise<void> => {
+  const id = Number(req.params.announcementId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    res.status(404).json({ error: "Announcement not found" });
+    return;
+  }
+  const [announcement] = await db.select().from(announcementsTable)
+    .where(eq(announcementsTable.id, id)).limit(1);
+  if (!announcement) {
+    res.status(404).json({ error: "Announcement not found" });
+    return;
+  }
+  res.json(GetAnnouncementResponse.parse({
+    ...announcement,
+    title: withBrandTrademarks(announcement.title),
+    body: withBrandTrademarks(announcement.body),
+    createdAt: announcement.createdAt.toISOString(),
+  }));
 });
 
 // POST /announcements

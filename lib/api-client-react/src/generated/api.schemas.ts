@@ -643,6 +643,11 @@ export interface ActivityItem {
   description: string;
   actorName?: string;
   entityTitle?: string;
+  /**
+     * Original announcement ID when this activity is linked to a post; null for historical unlinked entries.
+     * @nullable
+     */
+  sourceAnnouncementId: number | null;
   createdAt: string;
 }
 

@@ -700,6 +700,27 @@ paths:
         "409":
           description: Request key already used for a different announcement
 
+  /announcements/{announcementId}:
+    get:
+      operationId: getAnnouncement
+      tags: [announcements]
+      summary: Get a community announcement by ID
+      parameters:
+        - in: path
+          name: announcementId
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Announcement
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Announcement"
+        "404":
+          description: Announcement not found
+
   /users/me:
     get:
       operationId: getMe
@@ -1568,7 +1589,7 @@ components:
 
     ActivityItem:
       type: object
-      required: [id, type, description, createdAt]
+      required: [id, type, description, createdAt, sourceAnnouncementId]
       properties:
         id:
           type: number
@@ -1580,5 +1601,8 @@ components:
           type: string
         entityTitle:
           type: string
+        sourceAnnouncementId:
+          type: ["number", "null"]
+          description: Original announcement ID when this activity is linked to a post; null for historical unlinked entries.
         createdAt:
           type: string

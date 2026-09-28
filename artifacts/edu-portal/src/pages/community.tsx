@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout";
 import { 
   useListAnnouncements,
+  useGetAnnouncement,
+  getGetAnnouncementQueryKey,
   createAnnouncement,
   useGetRecentActivity,
   getListAnnouncementsQueryKey,
   getGetRecentActivityQueryKey
 } from "@workspace/api-client-react";
+import type { Announcement } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,10 +22,35 @@ import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useUser } from "@clerk/react";
+import { ActivityEntityTitle } from "@/components/activity-entity-title";
+
+function announcementIdFromHash() {
+  const match = /^#announcement-([1-9]\d*)$/.exec(window.location.hash);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) ? id : null;
+}
 
 export default function CommunityPage() {
+  const [targetId, setTargetId] = useState(announcementIdFromHash);
   const { data: announcements, isLoading: announcementsLoading } = useListAnnouncements();
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
+  const targetInList = announcements?.some(post => post.id === targetId);
+  const { data: targetedPost, isLoading: targetLoading, isError: targetError } = useGetAnnouncement(targetId ?? 0, {
+    query: { queryKey: getGetAnnouncementQueryKey(targetId ?? 0), enabled: !!targetId && !!announcements && !targetInList, retry: false },
+  });
+
+  useEffect(() => {
+    const onHashChange = () => setTargetId(announcementIdFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (!announcements || !targetId || (!targetInList && !targetedPost)) return;
+    const target = document.getElementById(`announcement-${targetId}`);
+    target?.scrollIntoView();
+  }, [announcements, targetId, targetInList, targetedPost]);
   
   return (
     <AppLayout>
@@ -39,11 +67,11 @@ export default function CommunityPage() {
           <div className="lg:col-span-2 space-y-6">
             <h2 className="text-2xl font-serif font-bold border-b border-border pb-2">Announcements</h2>
             
-            {announcementsLoading ? (
+            {announcementsLoading || (targetId && !targetInList && targetLoading) ? (
               <div className="space-y-4">
                 {[1, 2, 3].map(i => <Skeleton key={i} className="h-48 w-full rounded-2xl bg-card border border-border" />)}
               </div>
-            ) : announcements?.length === 0 ? (
+            ) : announcements?.length === 0 && !targetedPost && !targetError ? (
               <div className="text-center py-16 border border-dashed border-border rounded-2xl bg-card/30">
                 <MessageSquare className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
                 <h3 className="text-lg font-bold mb-1">No announcements yet</h3>
@@ -51,34 +79,9 @@ export default function CommunityPage() {
               </div>
             ) : (
               <div className="space-y-6">
-                {announcements?.map(announcement => (
-                  <Card key={announcement.id} className={`border-border overflow-hidden ${announcement.pinned ? 'border-primary/30 shadow-[0_4px_20px_-10px_rgba(255,236,194,0.1)]' : ''}`}>
-                    <CardContent className="p-6 md:p-8">
-                      <div className="flex items-start justify-between gap-4 mb-4">
-                        <div className="flex items-center gap-3">
-                          <Avatar className="w-10 h-10 border border-border">
-                            <AvatarFallback className="bg-primary/10 text-primary font-serif">{announcement.authorName.charAt(0)}</AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <div className="font-medium text-foreground">{announcement.authorName}</div>
-                            <div className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Clock className="w-3 h-3" /> {format(new Date(announcement.createdAt), 'MMM d, yyyy h:mm a')}
-                            </div>
-                          </div>
-                        </div>
-                        {announcement.pinned && (
-                          <div className="shrink-0 flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded-md">
-                            <Pin className="w-3 h-3" /> Pinned
-                          </div>
-                        )}
-                      </div>
-                      <h3 className="text-xl font-serif font-bold mb-3">{announcement.title}</h3>
-                      <div className="prose prose-invert max-w-none text-muted-foreground">
-                        {announcement.body.split('\n').map((p, i) => <p key={i} className="mb-2 last:mb-0">{p}</p>)}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                {targetError && !targetInList && <p role="alert" className="text-sm text-muted-foreground">This announcement is no longer available.</p>}
+                {targetedPost && !targetInList && <AnnouncementCard announcement={targetedPost} />}
+                {announcements?.map(announcement => <AnnouncementCard key={announcement.id} announcement={announcement} />)}
               </div>
             )}
           </div>
@@ -105,7 +108,7 @@ export default function CommunityPage() {
                         </div>
                         <div>
                           <p className="text-foreground leading-relaxed">
-                            <span className="font-medium text-primary">{item.actorName || 'Someone'}</span> {item.description} <span className="font-bold">{item.entityTitle}</span>
+                            <span className="font-medium text-primary">{item.actorName || 'Someone'}</span> {item.description} <ActivityEntityTitle item={item} className="font-bold" />
                           </p>
                           <p className="text-muted-foreground text-xs mt-1.5 flex items-center gap-1">
                             <Clock className="w-3 h-3" /> {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
@@ -121,6 +124,37 @@ export default function CommunityPage() {
         </div>
       </div>
     </AppLayout>
+  );
+}
+
+function AnnouncementCard({ announcement }: { announcement: Announcement }) {
+  return (
+    <Card id={`announcement-${announcement.id}`} className={`scroll-mt-6 border-border overflow-hidden target:border-primary ${announcement.pinned ? 'border-primary/30 shadow-[0_4px_20px_-10px_rgba(255,236,194,0.1)]' : ''}`}>
+      <CardContent className="p-6 md:p-8">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div className="flex items-center gap-3">
+            <Avatar className="w-10 h-10 border border-border">
+              <AvatarFallback className="bg-primary/10 text-primary font-serif">{announcement.authorName.charAt(0)}</AvatarFallback>
+            </Avatar>
+            <div>
+              <div className="font-medium text-foreground">{announcement.authorName}</div>
+              <div className="text-xs text-muted-foreground flex items-center gap-1">
+                <Clock className="w-3 h-3" /> {format(new Date(announcement.createdAt), 'MMM d, yyyy h:mm a')}
+              </div>
+            </div>
+          </div>
+          {announcement.pinned && (
+            <div className="shrink-0 flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 px-2 py-1 rounded-md">
+              <Pin className="w-3 h-3" /> Pinned
+            </div>
+          )}
+        </div>
+        <h3 className="text-xl font-serif font-bold mb-3">{announcement.title}</h3>
+        <div className="prose prose-invert max-w-none text-muted-foreground">
+          {announcement.body.split('\n').map((p, i) => <p key={i} className="mb-2 last:mb-0">{p}</p>)}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

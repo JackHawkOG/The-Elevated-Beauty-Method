@@ -16,6 +16,7 @@ const run = randomUUID();
 const user = `test-announcement-${run}`;
 const title = `Announcement test ${run}`;
 const failingTitle = `${title} blocked`;
+const legacyTitle = `${title} historical`;
 let server: Server;
 let baseUrl: string;
 const ids: number[] = [];
@@ -34,14 +35,16 @@ beforeAll(async () => {
   requireDevelopmentDatabase();
   await ensureAnnouncementSchema();
   started = true;
-  const { default: router } = await import("./announcements");
+  const [{ default: router }, { default: dashboardRouter }] = await Promise.all([
+    import("./announcements"), import("./dashboard"),
+  ]);
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     req.log = { error: () => undefined } as unknown as typeof req.log;
     next();
   });
-  app.use(router);
+  app.use(router, dashboardRouter);
   app.use((_err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     res.status(500).json({ error: "Write failed" });
   });
@@ -57,7 +60,7 @@ afterAll(async () => {
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
     if (!started) return;
-    await db.delete(activityTable).where(inArray(activityTable.entityTitle, [title, failingTitle]));
+    await db.delete(activityTable).where(inArray(activityTable.entityTitle, [title, failingTitle, legacyTitle]));
     if (ids.length) await db.delete(announcementsTable).where(inArray(announcementsTable.id, ids));
     await db.delete(usersTable).where(eq(usersTable.clerkId, user));
   } finally {
@@ -83,6 +86,18 @@ test("retries and simultaneous requests keep one post and one feed item", async 
   ));
   expect(linked).toHaveLength(1);
   expect(linked[0].sourceAnnouncementId).toBe(results[0].data.id);
+  await db.insert(activityTable).values({
+    type: "announcement", description: "posted an announcement", actorName: "Earlier author",
+    entityTitle: legacyTitle,
+  });
+  const feedResponse = await fetch(`${baseUrl}/dashboard/recent-activity`);
+  expect(feedResponse.status).toBe(200);
+  const feed = await feedResponse.json() as Array<{ entityTitle: string; sourceAnnouncementId: number | null }>;
+  expect(feed.some(item => item.entityTitle === title && item.sourceAnnouncementId === results[0].data.id)).toBe(true);
+  expect(feed.find(item => item.entityTitle === legacyTitle)?.sourceAnnouncementId).toBeNull();
+  const postResponse = await fetch(`${baseUrl}/announcements/${results[0].data.id}`);
+  expect(postResponse.status).toBe(200);
+  expect((await postResponse.json() as { title: string }).title).toBe(title);
   const other = rows.find(row => row.id !== results[0].data.id)!;
   expect(await db.select().from(activityTable).where(eq(activityTable.sourceAnnouncementId, other.id))).toHaveLength(1);
   // A changed display name or a repeated title cannot affect an explicit source link.

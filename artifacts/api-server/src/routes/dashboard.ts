@@ -71,6 +71,7 @@ router.get("/dashboard/recent-activity", async (req, res): Promise<void> => {
 
   res.json(GetRecentActivityResponse.parse(rows.map(r => ({
     ...r,
+    sourceAnnouncementId: r.sourceAnnouncementId,
     entityTitle: r.entityTitle ? withBrandTrademarks(r.entityTitle) : r.entityTitle,
     createdAt: r.createdAt?.toISOString(),
   }))));
