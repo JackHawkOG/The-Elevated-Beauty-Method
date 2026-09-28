@@ -80,6 +80,7 @@ export * from './radiantAuditDraft';
 export * from './radiantAuditDraftDiscarded';
 export * from './radiantAuditDraftRoutineChecksItem';
 export * from './radiantAuditDraftValuesChecksItem';
+export * from './radiantAuditHistoryClearInput';
 export * from './radiantAuditHistoryEntry';
 export * from './radiantAuditInput';
 export * from './radiantAuditInputRoutineChecksItem';

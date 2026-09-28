@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   getRadiantAuditHistory,
+  getGetRadiantAuditQueryKey,
   getGetRadiantAuditHistoryQueryKey,
   useClearRadiantAuditHistory,
   useDeleteRadiantAuditHistoryEntry,
@@ -83,7 +84,7 @@ export function RadiantAuditComparison({
       return null;
     }
   });
-  const [confirmation, setConfirmation] = useState<{ kind: "selected"; entry: RadiantAuditHistoryEntry } | { kind: "all" } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ kind: "selected"; entry: RadiantAuditHistoryEntry } | { kind: "all"; expectedIds: number[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -102,7 +103,7 @@ export function RadiantAuditComparison({
     const target = confirmation;
     try {
       if (target.kind === "all") {
-        await clearHistory.mutateAsync();
+        await clearHistory.mutateAsync({ data: { expectedIds: target.expectedIds } });
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, []);
       } else {
         const id = target.entry.id;
@@ -110,13 +111,22 @@ export function RadiantAuditComparison({
         queryClient.setQueryData<RadiantAuditHistoryEntry[]>(key, entries => entries?.filter(entry => entry.id !== id));
       }
       void queryClient.invalidateQueries({ queryKey: key });
-    } catch {
+    } catch (cause) {
       setChecking(true);
       try {
         // The server may have committed the deletion before its reply was lost.
         // Bypass the cached list to verify the actual state before suggesting a retry.
         const serverHistory = await getRadiantAuditHistory();
         queryClient.setQueryData(key, serverHistory);
+        if (target.kind === "all" && cause instanceof Error && "status" in cause && cause.status === 409) {
+          void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditQueryKey() });
+          setError("Your earlier Audit history changed. Nothing was deleted. Close this window, review the updated history, then open a new confirmation.");
+          return;
+        }
+        if (target.kind === "all" && target.expectedIds.some(id => !serverHistory.some(entry => entry.id === id)) && serverHistory.length) {
+          setError("We couldn't confirm whether your earlier Audit was deleted. Please refresh to check before trying again.");
+          return;
+        }
         if (target.kind === "all" ? serverHistory.length > 0 : serverHistory.some(entry => entry.id === target.entry.id)) {
           setError("We couldn't delete your earlier Audit. Please try again.");
           return;
@@ -155,7 +165,7 @@ export function RadiantAuditComparison({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            disabled={deleting || historyRefreshFailed || !confirmedEntryAvailable || error?.startsWith("We couldn't confirm")}
+             disabled={deleting || historyRefreshFailed || !confirmedEntryAvailable || !!error && (error.startsWith("We couldn't confirm") || error.startsWith("Your earlier Audit history changed"))}
             onClick={event => { event.preventDefault(); void confirmDeletion(); }}
           >
             {deleting ? "Deleting…" : confirmation?.kind === "all" ? "Clear earlier history" : "Delete earlier Audit"}
@@ -209,7 +219,7 @@ export function RadiantAuditComparison({
         <Button type="button" variant="outline" disabled={!earlier || deleting || historyRefreshFailed} onClick={() => { if (earlier) { setError(null); setConfirmation({ kind: "selected", entry: earlier }); } }}>
           Delete selected earlier Audit
         </Button>
-        <Button type="button" variant="outline" disabled={historyRefreshFailed} onClick={() => { setError(null); setConfirmation({ kind: "all" }); }}>
+        <Button type="button" variant="outline" disabled={historyRefreshFailed} onClick={() => { setError(null); setConfirmation({ kind: "all", expectedIds: history.map(entry => entry.id) }); }}>
           Clear earlier history
         </Button>
       </div>

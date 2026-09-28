@@ -66,6 +66,7 @@ import type {
   RadiantAudit,
   RadiantAuditDraft,
   RadiantAuditDraftDiscarded,
+  RadiantAuditHistoryClearInput,
   RadiantAuditHistoryEntry,
   RadiantAuditInput,
   RadiantAuditSaveResult,
@@ -3916,14 +3917,14 @@ export const getClearRadiantAuditHistoryUrl = () => {
 /**
  * @summary Delete all earlier Audit submissions belonging to the signed-in member, without deleting the current Audit
  */
-export const clearRadiantAuditHistory = async ( options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+export const clearRadiantAuditHistory = async (radiantAuditHistoryClearInput: RadiantAuditHistoryClearInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
   return customFetch<void>(getClearRadiantAuditHistoryUrl(),
   {
     ...options,
-    method: 'DELETE'
-
-
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(radiantAuditHistoryClearInput)
   }
 );}
 
@@ -3932,8 +3933,8 @@ export const clearRadiantAuditHistory = async ( options?: Parameters<typeof cust
 
 
 export const getClearRadiantAuditHistoryMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, TError,void, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, TError,{data: BodyType<RadiantAuditHistoryClearInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, TError,{data: BodyType<RadiantAuditHistoryClearInput>}, TContext> => {
 
 const mutationKey = ['clearRadiantAuditHistory'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -3945,10 +3946,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, {data: BodyType<RadiantAuditHistoryClearInput>}> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  clearRadiantAuditHistory(requestOptions)
+          return  clearRadiantAuditHistory(data,requestOptions)
         }
 
 
@@ -3959,18 +3960,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type ClearRadiantAuditHistoryMutationResult = NonNullable<Awaited<ReturnType<typeof clearRadiantAuditHistory>>>
-
+    export type ClearRadiantAuditHistoryMutationBody = BodyType<RadiantAuditHistoryClearInput>
     export type ClearRadiantAuditHistoryMutationError = ErrorType<void>
 
     /**
  * @summary Delete all earlier Audit submissions belonging to the signed-in member, without deleting the current Audit
  */
 export const useClearRadiantAuditHistory = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearRadiantAuditHistory>>, TError,{data: BodyType<RadiantAuditHistoryClearInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof clearRadiantAuditHistory>>,
         TError,
-        void,
+        {data: BodyType<RadiantAuditHistoryClearInput>},
         TContext
       > => {
       return useMutation(getClearRadiantAuditHistoryMutationOptions(options));

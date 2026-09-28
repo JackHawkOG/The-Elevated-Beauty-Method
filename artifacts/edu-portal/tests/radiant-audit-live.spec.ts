@@ -1361,6 +1361,78 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
   }
 });
 
+test("an old clear-all confirmation cannot erase a retake saved in another signed-in session", async ({ page, browser }) => {
+  test.setTimeout(150_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = auditFixtureEmail("a", tag);
+  const markers = [`first-${tag}`, `second-${tag}`, `third-${tag}`];
+  const created: string[] = [];
+  const contexts: Array<Awaited<ReturnType<typeof browser.newContext>>> = [];
+  try {
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
+    });
+    created.push(user.id);
+    await setupClerkTestingToken({ page });
+    await signIn(page, email);
+    await save(page, email, markers[0]);
+    await page.goto("/radiant-audit");
+    await save(page, email, markers[1]);
+
+    const [{ db, radiantAuditHistoryTable, radiantAuditsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const historyRows = () => db.select().from(radiantAuditHistoryTable)
+      .where(eq(radiantAuditHistoryTable.clerkId, user.id));
+    const currentRows = () => db.select().from(radiantAuditsTable)
+      .where(eq(radiantAuditsTable.clerkId, user.id));
+    const original = await historyRows();
+    expect(original).toHaveLength(1);
+    const comparison = page.locator('section[aria-labelledby="audit-history-heading"]');
+    await comparison.getByRole("button", { name: "Clear earlier history" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Clear all earlier Audits?" });
+    await expect(dialog).toBeVisible();
+
+    const otherContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    contexts.push(otherContext);
+    const otherPage = await otherContext.newPage();
+    await setupClerkTestingToken({ page: otherPage });
+    await signIn(otherPage, email);
+    await save(otherPage, email, markers[2]);
+    const changed = await historyRows();
+    expect(changed).toHaveLength(2);
+    expect(changed.map(row => row.masteryGoal).sort()).toEqual(
+      markers.slice(0, 2).map(marker => reflections(marker).masteryGoal).sort(),
+    );
+    expect((await currentRows()).map(row => row.masteryGoal)).toEqual([reflections(markers[2]).masteryGoal]);
+
+    const rejected = page.waitForResponse(response =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname === "/api/users/me/radiant-audit/history",
+    );
+    await dialog.getByRole("button", { name: "Clear earlier history" }).click();
+    expect((await rejected).status()).toBe(409);
+    await expect(dialog.getByRole("alert")).toContainText("Nothing was deleted");
+    await expect(dialog.getByRole("button", { name: "Clear earlier history" })).toBeDisabled();
+    expect((await historyRows()).map(row => row.id).sort()).toEqual(changed.map(row => row.id).sort());
+    expect((await currentRows()).map(row => row.masteryGoal)).toEqual([reflections(markers[2]).masteryGoal]);
+
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await page.reload();
+    await expect(comparison.locator("#earlier-audit option")).toHaveCount(2);
+    await expect(comparison).toContainText(reflections(markers[1]).masteryGoal);
+    await expect(page.locator("main")).toContainText(reflections(markers[2]).masteryGoal);
+    expect((await historyRows()).map(row => row.id).sort()).toEqual(changed.map(row => row.id).sort());
+  } finally {
+    await Promise.all(contexts.map(context => context.close()));
+    await cleanUpAccounts(client, created);
+  }
+});
+
 test("a real member cannot delete another Audit after a second session removes the selected one", async ({ page, browser }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();

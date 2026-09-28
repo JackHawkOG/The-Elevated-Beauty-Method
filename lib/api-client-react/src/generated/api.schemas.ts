@@ -718,6 +718,14 @@ export type RadiantAuditHistoryEntry = RadiantAudit & {
   id: number;
 };
 
+export interface RadiantAuditHistoryClearInput {
+  /**
+     * @minItems 1
+     * @items.minimum 1
+     */
+  expectedIds: number[];
+}
+
 export type BeautyDiagnosticInputSkinType = typeof BeautyDiagnosticInputSkinType[keyof typeof BeautyDiagnosticInputSkinType];
 
 

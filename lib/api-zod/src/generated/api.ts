@@ -1350,6 +1350,14 @@ export const GetRadiantAuditHistoryResponse = zod.array(GetRadiantAuditHistoryRe
 /**
  * @summary Delete all earlier Audit submissions belonging to the signed-in member, without deleting the current Audit
  */
+
+
+
+
+export const ClearRadiantAuditHistoryBody = zod.object({
+  "expectedIds": zod.array(zod.number().min(1)).min(1)
+})
+
 export const ClearRadiantAuditHistoryResponse = zod.void()
 
 

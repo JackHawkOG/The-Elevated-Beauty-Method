@@ -2,7 +2,7 @@ import { Router } from "express";
 import { isDeepStrictEqual } from "node:util";
 import { db, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable, radiantAuditDraftsTable } from "@workspace/db";
 import { and, desc, eq, gt, lte, sql } from "drizzle-orm";
-import { DeleteRadiantAuditHistoryEntryParams, GetRadiantAuditResponse, GetRadiantAuditHistoryResponse, GetRadiantAuditDraftResponse, SaveRadiantAuditDraftBody, SaveRadiantAuditDraftResponse, SaveRadiantAuditBody, SaveRadiantAuditResponse } from "@workspace/api-zod";
+import { ClearRadiantAuditHistoryBody, DeleteRadiantAuditHistoryEntryParams, GetRadiantAuditResponse, GetRadiantAuditHistoryResponse, GetRadiantAuditDraftResponse, SaveRadiantAuditDraftBody, SaveRadiantAuditDraftResponse, SaveRadiantAuditBody, SaveRadiantAuditResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 
 const router = Router();
@@ -150,12 +150,29 @@ router.get("/users/me/radiant-audit/history", requireAuth, jitProvisionUser, asy
 });
 
 router.delete("/users/me/radiant-audit/history", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
-  await db.transaction(async tx => {
+  const parsed = ClearRadiantAuditHistoryBody.safeParse(req.body);
+  if (!parsed.success || new Set(parsed.data.expectedIds).size !== parsed.data.expectedIds.length ||
+      parsed.data.expectedIds.some(id => !Number.isSafeInteger(id))) {
+    res.status(400).json({ error: "Invalid earlier history snapshot." });
+    return;
+  }
+  const cleared = await db.transaction(async tx => {
+    // Retakes acquire the same lock before moving the current Audit into history.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${req.userId!}))`);
+    const rows = await tx.select({ id: radiantAuditHistoryTable.id }).from(radiantAuditHistoryTable)
+      .where(eq(radiantAuditHistoryTable.clerkId, req.userId!));
+    const expected = new Set(parsed.data.expectedIds);
+    if (rows.length !== expected.size || rows.some(row => !expected.has(row.id))) return false;
     await tx.delete(radiantAuditHistoryTable)
       .where(eq(radiantAuditHistoryTable.clerkId, req.userId!));
     await tx.delete(radiantAuditSubmissionsTable)
       .where(eq(radiantAuditSubmissionsTable.clerkId, req.userId!));
+    return true;
   });
+  if (!cleared) {
+    res.status(409).json({ error: "Earlier Audit history changed. Review it before clearing." });
+    return;
+  }
   res.sendStatus(204);
 });
 
