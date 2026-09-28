@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout";
 import { 
-  useListAnnouncements,
+  listAnnouncements,
   useGetAnnouncement,
   getGetAnnouncementQueryKey,
   createAnnouncement,
@@ -20,7 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { MessageSquare, Clock, Pin, Plus, Loader2 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useUser } from "@clerk/react";
 import { ActivityEntityTitle } from "@/components/activity-entity-title";
 
@@ -33,7 +33,20 @@ function announcementIdFromHash() {
 
 export default function CommunityPage() {
   const [targetId, setTargetId] = useState(announcementIdFromHash);
-  const { data: announcements, isLoading: announcementsLoading } = useListAnnouncements();
+  const pageSize = 20;
+  const {
+    data: announcementPages, isLoading: announcementsLoading, isError: announcementsError,
+    fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError,
+    refetch: refetchAnnouncements,
+  } = useInfiniteQuery({
+    queryKey: [...getListAnnouncementsQueryKey(), "pages"],
+    initialPageParam: undefined as number | undefined,
+    queryFn: ({ pageParam, signal }) => listAnnouncements({ limit: pageSize, ...(pageParam ? { after: pageParam } : {}) }, { signal }),
+    getNextPageParam: lastPage => lastPage.length === pageSize ? lastPage[lastPage.length - 1].id : undefined,
+  });
+  const announcements = announcementPages && Array.from(
+    new Map(announcementPages.pages.flat().map(post => [post.id, post])).values(),
+  );
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
   const targetInList = announcements?.some(post => post.id === targetId);
   const { data: targetedPost, isLoading: targetLoading, isError: targetError } = useGetAnnouncement(targetId ?? 0, {
@@ -71,6 +84,11 @@ export default function CommunityPage() {
               <div className="space-y-4">
                 {[1, 2, 3].map(i => <Skeleton key={i} className="h-48 w-full rounded-2xl bg-card border border-border" />)}
               </div>
+            ) : announcementsError && !announcements ? (
+              <div role="alert" className="space-y-3 text-sm text-muted-foreground">
+                <p>Announcements could not be loaded.</p>
+                <Button variant="outline" onClick={() => refetchAnnouncements()}>Try again</Button>
+              </div>
             ) : announcements?.length === 0 && !targetedPost && !targetError ? (
               <div className="text-center py-16 border border-dashed border-border rounded-2xl bg-card/30">
                 <MessageSquare className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
@@ -80,8 +98,14 @@ export default function CommunityPage() {
             ) : (
               <div className="space-y-6">
                 {targetError && !targetInList && <p role="alert" className="text-sm text-muted-foreground">This announcement is no longer available.</p>}
-                {targetedPost && !targetInList && <AnnouncementCard announcement={targetedPost} />}
+                {targetedPost && !targetInList && <AnnouncementCard key={targetedPost.id} announcement={targetedPost} />}
                 {announcements?.map(announcement => <AnnouncementCard key={announcement.id} announcement={announcement} />)}
+                {isFetchNextPageError && <p role="alert" className="text-sm text-muted-foreground">Older announcements could not be loaded. Try again.</p>}
+                {hasNextPage && (
+                  <Button variant="outline" className="w-full" onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+                    {isFetchingNextPage ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Loading older announcements…</> : "Load older announcements"}
+                  </Button>
+                )}
               </div>
             )}
           </div>

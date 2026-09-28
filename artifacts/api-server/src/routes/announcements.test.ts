@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { activityTable, announcementsTable, db, pool, usersTable } from "@workspace/db";
 import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
 import { requireDevelopmentDatabase } from "./test-development-database";
@@ -133,4 +133,39 @@ test("an activity write failure rolls back the post and permits a clean retry", 
   ));
   expect(linked).toHaveLength(1);
   expect(linked[0].sourceAnnouncementId).toBe(retried.data.id);
+});
+
+test("announcement pages keep pinned-first order and break timestamp ties by ID", async () => {
+  const createdAt = new Date("2099-01-01T00:00:00.000Z");
+  const fixtures = await db.insert(announcementsTable).values([
+    ...Array.from({ length: 3 }, (_, i) => ({
+      title: `${title} page ${i}`, body: "Paging fixture", authorName: "Test",
+      pinned: true, createdAt,
+    })),
+    { title: `${title} unpinned`, body: "Paging fixture", authorName: "Test", pinned: false, createdAt },
+  ]).returning();
+  ids.push(...fixtures.map(row => row.id));
+  const expected = [...fixtures.slice(0, 3)].reverse().map(row => row.id);
+  const first = await fetch(`${baseUrl}/announcements?limit=2`);
+  expect(first.status).toBe(200);
+  const firstPage = await first.json() as Array<{ id: number }>;
+  expect(firstPage.map(row => row.id)).toEqual(expected.slice(0, 2));
+  const second = await fetch(`${baseUrl}/announcements?limit=2&after=${firstPage[1].id}`);
+  expect(second.status).toBe(200);
+  const secondPage = await second.json() as Array<{ id: number }>;
+  expect(secondPage[0].id).toBe(expected[2]);
+  expect(new Set([...firstPage, ...secondPage].map(row => row.id)).size).toBe(4);
+
+  const [oldestPinned] = await db.select().from(announcementsTable)
+    .where(eq(announcementsTable.pinned, true))
+    .orderBy(asc(announcementsTable.createdAt), asc(announcementsTable.id)).limit(1);
+  const [newestUnpinned] = await db.select().from(announcementsTable)
+    .where(eq(announcementsTable.pinned, false))
+    .orderBy(desc(announcementsTable.createdAt), desc(announcementsTable.id)).limit(1);
+  const crossing = await fetch(`${baseUrl}/announcements?limit=1&after=${oldestPinned.id}`);
+  expect(crossing.status).toBe(200);
+  expect((await crossing.json() as Array<{ id: number }>)[0].id).toBe(newestUnpinned.id);
+  for (const query of ["limit=0", "limit=101", "after=-1", "after=2147483648", "after=999999999"]) {
+    expect((await fetch(`${baseUrl}/announcements?${query}`)).status).toBe(400);
+  }
 });

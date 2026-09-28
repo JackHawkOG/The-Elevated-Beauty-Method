@@ -825,10 +825,18 @@ export const UpdateProgressResponse = zod.object({
 
 
 /**
+ * Returns announcements ordered by pinned first, then newest creation time and ID. Pass the last returned announcement ID as after to continue the list.
  * @summary List community announcements
  */
+export const listAnnouncementsQueryLimitMax = 100;
+
+export const listAnnouncementsQueryAfterMax = 2147483647;
+
+
+
 export const ListAnnouncementsQueryParams = zod.object({
-  "limit": zod.coerce.number().optional()
+  "limit": zod.coerce.number().int().min(1).max(listAnnouncementsQueryLimitMax).optional(),
+  "after": zod.coerce.number().int().min(1).max(listAnnouncementsQueryAfterMax).optional().describe('ID of the last announcement from the preceding page.')
 })
 
 export const ListAnnouncementsResponseItem = zod.object({
@@ -1421,3 +1429,5 @@ export const GetRecentActivityResponseItem = zod.object({
   "createdAt": zod.string()
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
+
+

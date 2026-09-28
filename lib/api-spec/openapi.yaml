@@ -712,11 +712,22 @@ paths:
       operationId: listAnnouncements
       tags: [announcements]
       summary: List community announcements
+      description: Returns announcements ordered by pinned first, then newest creation time and ID. Pass the last returned announcement ID as after to continue the list.
       parameters:
         - in: query
           name: limit
           schema:
-            type: number
+            type: integer
+            minimum: 1
+            maximum: 100
+          required: false
+        - in: query
+          name: after
+          description: ID of the last announcement from the preceding page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 2147483647
           required: false
       responses:
         "200":

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, announcementsTable, usersTable, activityTable } from "@workspace/db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, or, lt } from "drizzle-orm";
 import {
   ListAnnouncementsQueryParams,
   ListAnnouncementsResponse,
@@ -21,9 +21,30 @@ router.get("/announcements", async (req, res): Promise<void> => {
     return;
   }
   const limit = parsed.data.limit ?? 20;
+  const after = parsed.data.after;
+  let cursor: typeof announcementsTable.$inferSelect | undefined;
+  if (after !== undefined) {
+    [cursor] = await db.select().from(announcementsTable)
+      .where(eq(announcementsTable.id, after)).limit(1);
+    if (!cursor) {
+      res.status(400).json({ error: "Invalid announcement cursor" });
+      return;
+    }
+  }
 
   const rows = await db.select().from(announcementsTable)
-    .orderBy(desc(announcementsTable.pinned), desc(announcementsTable.createdAt))
+    .where(cursor ? or(
+      // Once past the pinned group, only unpinned posts can follow.
+      ...(cursor.pinned ? [eq(announcementsTable.pinned, false)] : []),
+      and(
+        eq(announcementsTable.pinned, cursor.pinned),
+        or(
+          lt(announcementsTable.createdAt, cursor.createdAt),
+          and(eq(announcementsTable.createdAt, cursor.createdAt), lt(announcementsTable.id, cursor.id)),
+        ),
+      ),
+    ) : undefined)
+    .orderBy(desc(announcementsTable.pinned), desc(announcementsTable.createdAt), desc(announcementsTable.id))
     .limit(limit);
 
   res.json(ListAnnouncementsResponse.parse(rows.map(r => ({

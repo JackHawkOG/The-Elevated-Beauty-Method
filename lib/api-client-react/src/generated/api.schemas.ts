@@ -845,5 +845,16 @@ offset?: number;
 };
 
 export type ListAnnouncementsParams = {
+/**
+ * @minimum 1
+ * @maximum 100
+ */
 limit?: number;
+/**
+ * ID of the last announcement from the preceding page.
+ * @minimum 1
+ * @maximum 2147483647
+ */
+after?: number;
 };
+
