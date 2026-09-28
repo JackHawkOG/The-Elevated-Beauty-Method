@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { pool, type PoolClient } from "@workspace/db";
 import { ensureMembershipSchema } from "../lib/ensure-membership-schema";
 import { FOUNDING_LIMIT } from "../lib/membership-reservations";
+import { logger } from "../lib/logger";
 import { requireDevelopmentDatabase } from "./test-development-database";
 
 vi.mock("../middlewares/requireAuth", () => ({
@@ -467,6 +468,75 @@ test("lost Stripe responses leave recoverable sessions; recovery expires only un
   expect(unrelated.status).toBe("open");
   expect((await row(trackedBuyer)).status).toBe("pending");
   vi.restoreAllMocks();
+});
+
+test("orphan cleanup continues past failed candidates and pages, then retries them safely", async () => {
+  clock(opens);
+  const buyer = await addUser(216);
+  expect((await request("/membership/checkout", "POST", buyer, { kind: "standard" })).status).toBe(200);
+  const tracked = sessions.get((await row(buyer)).stripe_session_id)!;
+  const old = Math.floor(opens / 1000);
+  const candidate = (reservationId: string): TestSession => ({
+    id: `cs_${randomUUID()}`, status: "open", url: "https://checkout.stripe.test/old",
+    created: old, metadata: { membershipCheckout: "true", reservationId },
+  });
+  const malformed = candidate("not-a-reservation-id");
+  const lookupFails = candidate("0");
+  const expiryFails = candidate("0");
+  const laterPage = candidate("0");
+  const paid = { ...candidate("0"), payment_status: "paid" };
+  const added = [malformed, lookupFails, expiryFails, laterPage, paid];
+  for (const session of added) sessions.set(session.id, session);
+  const originalRetrieve = retrieveSession.getMockImplementation()!;
+  const originalExpire = expireSession.getMockImplementation()!;
+  const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
+  try {
+    retrieveSession.mockImplementation(async id => {
+      if (id === lookupFails.id) throw new Error("Temporary Stripe lookup failure");
+      return originalRetrieve(id);
+    });
+    expireSession.mockImplementation(async id => {
+      if (id === expiryFails.id) throw new Error("Temporary Stripe expiration failure");
+      return originalExpire(id);
+    });
+    listSessions.mockImplementationOnce(async () => ({
+      data: [malformed, lookupFails, expiryFails, tracked, paid], has_more: true,
+    })).mockImplementationOnce(async () => ({
+      data: [laterPage], has_more: false,
+    }));
+
+    clock(opens + 32 * 60 * 1000);
+    await expireUntrackedMembershipSessions();
+    expect(listSessions).toHaveBeenCalledWith(expect.objectContaining({ starting_after: paid.id }));
+    expect(laterPage.status).toBe("expired");
+    expect([malformed, lookupFails, expiryFails].map(s => s.status)).toEqual(["open", "open", "open"]);
+    expect(tracked.status).toBe("open");
+    expect(paid.status).toBe("open");
+    expect(expireSession).not.toHaveBeenCalledWith(tracked.id);
+    expect(expireSession).not.toHaveBeenCalledWith(paid.id);
+    for (const session of [malformed, lookupFails, expiryFails]) {
+      expect(logged).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error), stripeSessionId: session.id }),
+        "Membership orphan session cleanup failed",
+      );
+    }
+
+    // No failed candidate is recorded as complete; a later sweep can retry it.
+    malformed.metadata!.reservationId = "0";
+    retrieveSession.mockImplementation(originalRetrieve);
+    expireSession.mockImplementation(originalExpire);
+    await expireUntrackedMembershipSessions();
+    expect([malformed, lookupFails, expiryFails].map(s => s.status)).toEqual(["expired", "expired", "expired"]);
+    expect(tracked.status).toBe("open");
+    expect(paid.status).toBe("open");
+    expect(expireSession).not.toHaveBeenCalledWith(tracked.id);
+    expect(expireSession).not.toHaveBeenCalledWith(paid.id);
+  } finally {
+    retrieveSession.mockImplementation(originalRetrieve);
+    expireSession.mockImplementation(originalExpire);
+    for (const session of added) sessions.delete(session.id);
+    vi.restoreAllMocks();
+  }
 });
 
 test("slow Stripe orphan listing cannot hold up offer or checkout requests", async () => {

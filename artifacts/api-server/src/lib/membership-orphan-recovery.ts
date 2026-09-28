@@ -26,17 +26,21 @@ export async function expireUntrackedMembershipSessions(): Promise<void> {
           ...(startingAfter ? { starting_after: startingAfter } : {}),
         });
         for (const session of page.data) {
-          if (session.metadata?.membershipCheckout !== "true" || !session.metadata.reservationId) continue;
-          const tracked = await client.query(
-            "SELECT 1 FROM membership_checkouts WHERE stripe_session_id = $1 OR id = $2 LIMIT 1",
-            [session.id, session.metadata.reservationId],
-          );
-          if (tracked.rowCount) continue;
-          // Listing can race with payment. Never expire a paid session, even
-          // if Stripe unexpectedly still reports its status as open.
-          const current = await stripe.checkout.sessions.retrieve(session.id);
-          if (current.status === "open" && current.payment_status !== "paid") {
-            await stripe.checkout.sessions.expire(session.id);
+          try {
+            if (session.metadata?.membershipCheckout !== "true" || !session.metadata.reservationId) continue;
+            const tracked = await client.query(
+              "SELECT 1 FROM membership_checkouts WHERE stripe_session_id = $1 OR id = $2 LIMIT 1",
+              [session.id, session.metadata.reservationId],
+            );
+            if (tracked.rowCount) continue;
+            // Listing can race with payment. Never expire a paid session, even
+            // if Stripe unexpectedly still reports its status as open.
+            const current = await stripe.checkout.sessions.retrieve(session.id);
+            if (current.status === "open" && current.payment_status !== "paid") {
+              await stripe.checkout.sessions.expire(session.id);
+            }
+          } catch (err) {
+            logger.error({ err, stripeSessionId: session?.id }, "Membership orphan session cleanup failed");
           }
         }
         if (!page.has_more) break;
