@@ -539,6 +539,69 @@ test("orphan cleanup continues past failed candidates and pages, then retries th
   }
 });
 
+test("simultaneous orphan recovery attempts scan once and a later retry can scan again", async () => {
+  clock(opens + 32 * 60 * 1000);
+  const created = Math.floor(opens / 1000);
+  const first: TestSession = {
+    id: `cs_${randomUUID()}`, status: "open", url: "https://checkout.stripe.test/first",
+    created, metadata: { membershipCheckout: "true", reservationId: "9000000000000000000" },
+  };
+  const later: TestSession = {
+    id: `cs_${randomUUID()}`, status: "open", url: "https://checkout.stripe.test/later",
+    created, metadata: { membershipCheckout: "true", reservationId: "9000000000000000001" },
+  };
+  sessions.set(first.id, first);
+  sessions.set(later.id, later);
+  let signalListing!: () => void;
+  const listingStarted = new Promise<void>(resolve => { signalListing = resolve; });
+  let releaseListing!: () => void;
+  const listingReleased = new Promise<void>(resolve => { releaseListing = resolve; });
+  listSessions.mockImplementationOnce(async () => {
+    signalListing();
+    await listingReleased;
+    return { data: [first], has_more: false };
+  });
+  const listingsBefore = listSessions.mock.calls.length;
+  const expirationsBefore = expireSession.mock.calls.length;
+  const firstAttempt = expireUntrackedMembershipSessions();
+  let secondAttempt: Promise<void> | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    try {
+      await listingStarted; // The first connection holds the advisory lock inside Stripe.list.
+      secondAttempt = expireUntrackedMembershipSessions();
+      await Promise.race([
+        secondAttempt,
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(() => reject(new Error("Second orphan recovery waited for the first scan")), 1500);
+        }),
+      ]);
+      expect(listSessions.mock.calls).toHaveLength(listingsBefore + 1);
+      expect(expireSession.mock.calls).toHaveLength(expirationsBefore);
+      expect(first.status).toBe("open");
+      expect(later.status).toBe("open");
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      releaseListing();
+      await firstAttempt;
+      if (secondAttempt) await secondAttempt;
+    }
+
+    expect(first.status).toBe("expired");
+    expect(later.status).toBe("open");
+    listSessions.mockImplementationOnce(async () => ({ data: [later], has_more: false }));
+    await expireUntrackedMembershipSessions();
+    expect(listSessions.mock.calls).toHaveLength(listingsBefore + 2);
+    expect(expireSession.mock.calls.filter(([id]) => id === first.id)).toHaveLength(1);
+    expect(expireSession.mock.calls.filter(([id]) => id === later.id)).toHaveLength(1);
+    expect(later.status).toBe("expired");
+  } finally {
+    sessions.delete(first.id);
+    sessions.delete(later.id);
+    vi.restoreAllMocks();
+  }
+});
+
 test("slow Stripe orphan listing cannot hold up offer or checkout requests", async () => {
   clock(opens);
   const buyer = await addUser(217);
