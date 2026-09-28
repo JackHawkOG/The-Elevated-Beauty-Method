@@ -1,4 +1,4 @@
-import { activityTable, announcementsTable, db } from "@workspace/db";
+import { activityTable, announcementsTable, announcementActivityCorrectionsTable, db } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 
 type AnnouncementRow = {
@@ -30,6 +30,7 @@ function titleKey(title: string): string {
 export function planAnnouncementActivityRepair(
   announcements: AnnouncementRow[],
   activities: ActivityRow[],
+  correctedAnnouncementIds: Set<number> = new Set(),
 ): { missing: AnnouncementRow[]; review: Review[] } {
   const byTitle = new Map<string, AnnouncementRow[]>();
   const activityByTitle = new Map<string, ActivityRow[]>();
@@ -52,7 +53,9 @@ export function planAnnouncementActivityRepair(
     const key = titleKey(announcement.title);
     const matches = activityByTitle.get(key) ?? [];
     let reason: string | undefined;
-    if ((byTitle.get(key)?.length ?? 0) !== 1) {
+    if (correctedAnnouncementIds.has(announcement.id)) {
+      reason = "previous feed assignment was corrected";
+    } else if ((byTitle.get(key)?.length ?? 0) !== 1) {
       reason = "repeated announcement title";
     } else if (matches.length > 1) {
       reason = "multiple feed entries with this title";
@@ -77,7 +80,9 @@ export async function reconcileAnnouncementActivity(): Promise<AnnouncementActiv
     await tx.execute(sql`select pg_advisory_xact_lock(750075)`);
     const announcements = await tx.select().from(announcementsTable);
     const activities = await tx.select().from(activityTable).where(eq(activityTable.type, "announcement"));
-    const plan = planAnnouncementActivityRepair(announcements, activities);
+    const corrections = await tx.select({ from: announcementActivityCorrectionsTable.fromAnnouncementId, to: announcementActivityCorrectionsTable.toAnnouncementId }).from(announcementActivityCorrectionsTable);
+    const corrected = new Set(corrections.flatMap(row => [row.from, row.to].filter((id): id is number => id !== null)));
+    const plan = planAnnouncementActivityRepair(announcements, activities, corrected);
     for (const announcement of plan.missing) {
       await tx.insert(activityTable).values({
         type: "announcement",

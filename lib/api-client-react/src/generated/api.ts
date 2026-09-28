@@ -22,6 +22,9 @@ import type {
 import type {
   ActivityItem,
   Announcement,
+  AnnouncementActivityCorrectionInput,
+  AnnouncementActivityCorrectionList,
+  AnnouncementActivityCorrectionRecord,
   AnnouncementActivityEvidence,
   AnnouncementActivityLink,
   AnnouncementActivityReview,
@@ -2938,6 +2941,155 @@ export const useAttachAnnouncementActivity = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getAttachAnnouncementActivityMutationOptions(options));
+    }
+
+export const getListAnnouncementActivityCorrectionsUrl = () => {
+
+
+
+
+  return `/api/announcements/activity-review/corrections`
+}
+
+/**
+ * @summary Owner-only reviewed feed links, correction history, and eligible posts
+ */
+export const listAnnouncementActivityCorrections = async ( options?: Parameters<typeof customFetch>[1]): Promise<AnnouncementActivityCorrectionList> => {
+
+  return customFetch<AnnouncementActivityCorrectionList>(getListAnnouncementActivityCorrectionsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAnnouncementActivityCorrectionsQueryKey = () => {
+    return [
+    `/api/announcements/activity-review/corrections`
+    ] as const;
+    }
+
+
+export const getListAnnouncementActivityCorrectionsQueryOptions = <TData = Awaited<ReturnType<typeof listAnnouncementActivityCorrections>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementActivityCorrections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAnnouncementActivityCorrectionsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAnnouncementActivityCorrections>>> = ({ signal }) => listAnnouncementActivityCorrections({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementActivityCorrections>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAnnouncementActivityCorrectionsQueryResult = NonNullable<Awaited<ReturnType<typeof listAnnouncementActivityCorrections>>>
+export type ListAnnouncementActivityCorrectionsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Owner-only reviewed feed links, correction history, and eligible posts
+ */
+
+export function useListAnnouncementActivityCorrections<TData = Awaited<ReturnType<typeof listAnnouncementActivityCorrections>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementActivityCorrections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAnnouncementActivityCorrectionsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCorrectAnnouncementActivityUrl = (activityId: number,) => {
+
+
+
+
+  return `/api/announcements/activity-review/corrections/${activityId}`
+}
+
+/**
+ * @summary Owner-only unlink or reassignment of a manually reviewed feed entry
+ */
+export const correctAnnouncementActivity = async (activityId: number,
+    announcementActivityCorrectionInput: AnnouncementActivityCorrectionInput, options?: Parameters<typeof customFetch>[1]): Promise<AnnouncementActivityCorrectionRecord> => {
+
+  return customFetch<AnnouncementActivityCorrectionRecord>(getCorrectAnnouncementActivityUrl(activityId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(announcementActivityCorrectionInput)
+  }
+);}
+
+
+
+
+
+export const getCorrectAnnouncementActivityMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctAnnouncementActivity>>, TError,{activityId: number;data: BodyType<AnnouncementActivityCorrectionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof correctAnnouncementActivity>>, TError,{activityId: number;data: BodyType<AnnouncementActivityCorrectionInput>}, TContext> => {
+
+const mutationKey = ['correctAnnouncementActivity'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof correctAnnouncementActivity>>, {activityId: number;data: BodyType<AnnouncementActivityCorrectionInput>}> = (props) => {
+          const {activityId,data} = props ?? {};
+
+          return  correctAnnouncementActivity(activityId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CorrectAnnouncementActivityMutationResult = NonNullable<Awaited<ReturnType<typeof correctAnnouncementActivity>>>
+    export type CorrectAnnouncementActivityMutationBody = BodyType<AnnouncementActivityCorrectionInput>
+    export type CorrectAnnouncementActivityMutationError = ErrorType<void>
+
+    /**
+ * @summary Owner-only unlink or reassignment of a manually reviewed feed entry
+ */
+export const useCorrectAnnouncementActivity = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctAnnouncementActivity>>, TError,{activityId: number;data: BodyType<AnnouncementActivityCorrectionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof correctAnnouncementActivity>>,
+        TError,
+        {activityId: number;data: BodyType<AnnouncementActivityCorrectionInput>},
+        TContext
+      > => {
+      return useMutation(getCorrectAnnouncementActivityMutationOptions(options));
     }
 
 export const getGetMeUrl = () => {

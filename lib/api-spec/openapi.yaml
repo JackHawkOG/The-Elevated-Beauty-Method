@@ -829,6 +829,51 @@ paths:
         "409":
           description: Review is stale or activity already assigned
 
+  /announcements/activity-review/corrections:
+    get:
+      operationId: listAnnouncementActivityCorrections
+      tags: [announcements]
+      summary: Owner-only reviewed feed links, correction history, and eligible posts
+      responses:
+        "200":
+          description: Reviewed links and legacy announcement targets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnouncementActivityCorrectionList"
+        "403":
+          description: Owner access required
+
+  /announcements/activity-review/corrections/{activityId}:
+    post:
+      operationId: correctAnnouncementActivity
+      tags: [announcements]
+      summary: Owner-only unlink or reassignment of a manually reviewed feed entry
+      parameters:
+        - in: path
+          name: activityId
+          required: true
+          schema: { type: number }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnnouncementActivityCorrectionInput"
+      responses:
+        "200":
+          description: Correction recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnnouncementActivityCorrectionRecord"
+        "400":
+          description: Invalid correction
+        "403":
+          description: Owner access required
+        "409":
+          description: Review changed or target already assigned
+
   /users/me:
     get:
       operationId: getMe
@@ -1547,6 +1592,69 @@ components:
         announcementId: { type: number }
         activityId: { type: number }
         reviewedAt: { type: string }
+    AnnouncementActivityCorrection:
+      type: object
+      required: [id, fromAnnouncementId, toAnnouncementId, previousEvidence, previousReviewedBy, previousReviewedAt, evidence, rationale, correctedBy, correctedAt]
+      properties:
+        id: { type: number }
+        fromAnnouncementId: { type: ["number", "null"] }
+        toAnnouncementId: { type: ["number", "null"] }
+        previousEvidence: { type: ["string", "null"] }
+        previousReviewedBy: { type: ["string", "null"] }
+        previousReviewedAt: { type: ["string", "null"] }
+        evidence: { type: ["string", "null"] }
+        rationale: { type: string }
+        correctedBy: { type: string }
+        correctedAt: { type: string }
+    AnnouncementActivityCorrectionRecord:
+      type: object
+      required: [activityId, actorName, entityTitle, description, createdAt, sourceAnnouncementId, sourceEvidence, sourceReviewedBy, sourceReviewedAt, revision, history]
+      properties:
+        activityId: { type: number }
+        actorName: { type: string }
+        entityTitle: { type: string }
+        description: { type: string }
+        createdAt: { type: string }
+        sourceAnnouncementId: { type: ["number", "null"] }
+        sourceEvidence: { type: ["string", "null"] }
+        sourceReviewedBy: { type: ["string", "null"] }
+        sourceReviewedAt: { type: ["string", "null"] }
+        revision: { type: string }
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnouncementActivityCorrection"
+    AnnouncementActivityCorrectionTarget:
+      type: object
+      required: [id, title, body, authorName, createdAt, assignedActivityId]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        body: { type: string }
+        authorName: { type: string }
+        createdAt: { type: string }
+        assignedActivityId: { type: ["number", "null"] }
+    AnnouncementActivityCorrectionList:
+      type: object
+      required: [records, targets]
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnouncementActivityCorrectionRecord"
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnouncementActivityCorrectionTarget"
+    AnnouncementActivityCorrectionInput:
+      type: object
+      required: [revision, announcementId, rationale]
+      properties:
+        revision: { type: string }
+        announcementId: { type: ["number", "null"] }
+        rationale: { type: string, minLength: 20, maxLength: 2000 }
+        evidence: { type: string, minLength: 20, maxLength: 2000 }
+        independentlyVerified: { type: boolean }
 
     UserProfile:
       type: object

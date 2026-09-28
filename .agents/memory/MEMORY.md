@@ -38,3 +38,4 @@
 - [Headless focus events](headless-focus-events.md) — bringing a tab forward may not fire focus in headless Chromium; dispatch the event explicitly when testing focus handlers.
 - [Checkout retry connection budget](checkout-retry-connection-budget.md) — concurrent Stripe retries must not hold one pooled client while waiting for a second client.
 - [Isolated live story publication](isolated-live-story-publication.md) — public browser checks use keyed visibility at persistence, not post-test cleanup, so interrupted runs cannot expose quotes.
+- [Corrected announcement links](corrected-announcement-links.md) — intentional unlink must remain a review decision; startup repair must not silently restore a disputed match.

@@ -938,6 +938,94 @@ export const AttachAnnouncementActivityResponse = zod.object({
 
 
 /**
+ * @summary Owner-only reviewed feed links, correction history, and eligible posts
+ */
+export const ListAnnouncementActivityCorrectionsResponse = zod.object({
+  "records": zod.array(zod.object({
+  "activityId": zod.number(),
+  "actorName": zod.string(),
+  "entityTitle": zod.string(),
+  "description": zod.string(),
+  "createdAt": zod.string(),
+  "sourceAnnouncementId": zod.number().nullable(),
+  "sourceEvidence": zod.string().nullable(),
+  "sourceReviewedBy": zod.string().nullable(),
+  "sourceReviewedAt": zod.string().nullable(),
+  "revision": zod.string(),
+  "history": zod.array(zod.object({
+  "id": zod.number(),
+  "fromAnnouncementId": zod.number().nullable(),
+  "toAnnouncementId": zod.number().nullable(),
+  "previousEvidence": zod.string().nullable(),
+  "previousReviewedBy": zod.string().nullable(),
+  "previousReviewedAt": zod.string().nullable(),
+  "evidence": zod.string().nullable(),
+  "rationale": zod.string(),
+  "correctedBy": zod.string(),
+  "correctedAt": zod.string()
+}))
+})),
+  "targets": zod.array(zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "body": zod.string(),
+  "authorName": zod.string(),
+  "createdAt": zod.string(),
+  "assignedActivityId": zod.number().nullable()
+}))
+})
+
+
+/**
+ * @summary Owner-only unlink or reassignment of a manually reviewed feed entry
+ */
+export const CorrectAnnouncementActivityParams = zod.object({
+  "activityId": zod.coerce.number()
+})
+
+export const correctAnnouncementActivityBodyRationaleMin = 20;
+export const correctAnnouncementActivityBodyRationaleMax = 2000;
+
+export const correctAnnouncementActivityBodyEvidenceMin = 20;
+export const correctAnnouncementActivityBodyEvidenceMax = 2000;
+
+
+
+export const CorrectAnnouncementActivityBody = zod.object({
+  "revision": zod.string(),
+  "announcementId": zod.number().nullable(),
+  "rationale": zod.string().min(correctAnnouncementActivityBodyRationaleMin).max(correctAnnouncementActivityBodyRationaleMax),
+  "evidence": zod.string().min(correctAnnouncementActivityBodyEvidenceMin).max(correctAnnouncementActivityBodyEvidenceMax).optional(),
+  "independentlyVerified": zod.boolean().optional()
+})
+
+export const CorrectAnnouncementActivityResponse = zod.object({
+  "activityId": zod.number(),
+  "actorName": zod.string(),
+  "entityTitle": zod.string(),
+  "description": zod.string(),
+  "createdAt": zod.string(),
+  "sourceAnnouncementId": zod.number().nullable(),
+  "sourceEvidence": zod.string().nullable(),
+  "sourceReviewedBy": zod.string().nullable(),
+  "sourceReviewedAt": zod.string().nullable(),
+  "revision": zod.string(),
+  "history": zod.array(zod.object({
+  "id": zod.number(),
+  "fromAnnouncementId": zod.number().nullable(),
+  "toAnnouncementId": zod.number().nullable(),
+  "previousEvidence": zod.string().nullable(),
+  "previousReviewedBy": zod.string().nullable(),
+  "previousReviewedAt": zod.string().nullable(),
+  "evidence": zod.string().nullable(),
+  "rationale": zod.string(),
+  "correctedBy": zod.string(),
+  "correctedAt": zod.string()
+}))
+})
+
+
+/**
  * @summary Get the current user's profile
  */
 export const GetMeResponse = zod.object({

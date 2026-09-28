@@ -505,6 +505,75 @@ export interface AnnouncementActivityLink {
   reviewedAt: string;
 }
 
+export interface AnnouncementActivityCorrection {
+  id: number;
+  /** @nullable */
+  fromAnnouncementId: number | null;
+  /** @nullable */
+  toAnnouncementId: number | null;
+  /** @nullable */
+  previousEvidence: string | null;
+  /** @nullable */
+  previousReviewedBy: string | null;
+  /** @nullable */
+  previousReviewedAt: string | null;
+  /** @nullable */
+  evidence: string | null;
+  rationale: string;
+  correctedBy: string;
+  correctedAt: string;
+}
+
+export interface AnnouncementActivityCorrectionRecord {
+  activityId: number;
+  actorName: string;
+  entityTitle: string;
+  description: string;
+  createdAt: string;
+  /** @nullable */
+  sourceAnnouncementId: number | null;
+  /** @nullable */
+  sourceEvidence: string | null;
+  /** @nullable */
+  sourceReviewedBy: string | null;
+  /** @nullable */
+  sourceReviewedAt: string | null;
+  revision: string;
+  history: AnnouncementActivityCorrection[];
+}
+
+export interface AnnouncementActivityCorrectionTarget {
+  id: number;
+  title: string;
+  body: string;
+  authorName: string;
+  createdAt: string;
+  /** @nullable */
+  assignedActivityId: number | null;
+}
+
+export interface AnnouncementActivityCorrectionList {
+  records: AnnouncementActivityCorrectionRecord[];
+  targets: AnnouncementActivityCorrectionTarget[];
+}
+
+export interface AnnouncementActivityCorrectionInput {
+  revision: string;
+  /** @nullable */
+  announcementId: number | null;
+  /**
+     * @minLength 20
+     * @maxLength 2000
+     */
+  rationale: string;
+  /**
+     * @minLength 20
+     * @maxLength 2000
+     */
+  evidence?: string;
+  independentlyVerified?: boolean;
+}
+
 export type UserProfileMembershipTier = typeof UserProfileMembershipTier[keyof typeof UserProfileMembershipTier];
 
 

@@ -8,6 +8,7 @@ import { inArray } from "drizzle-orm";
 import { db, pool, activityTable, announcementsTable } from "@workspace/db";
 import { requireDevelopmentDatabase } from "./test-development-database";
 import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
+import { reconcileAnnouncementActivity } from "../lib/reconcile-announcement-activity";
 
 vi.mock("@clerk/express", () => ({
   getAuth: (req: express.Request) => ({ userId: req.header("x-test-user") ?? null }),
@@ -99,4 +100,73 @@ test("staff sees ambiguous full records; only independently evidenced, current u
   const fresh = await request("/announcements/activity-review", "review-admin");
   expect(fresh.data.find((entry: { announcementId: number }) => entry.announcementId === posts[0])).toBeUndefined();
   expect(fresh.data.find((entry: { announcementId: number }) => entry.announcementId === posts[1]).candidates[0].sourceAnnouncementId).toBe(posts[0]);
+});
+
+test("only an owner can correct a manual link; correction preserves evidence and resists stale or duplicate assignments", async () => {
+  const listPath = "/announcements/activity-review/corrections";
+  const path = `${listPath}/${feeds[0]}`;
+  const before = await request(listPath, "review-owner");
+  expect(before.status).toBe(200);
+  expect(before.cache).toContain("no-store");
+  expect((await request(listPath, "review-admin")).status).toBe(403);
+  const original = before.data.records.find((entry: { activityId: number }) => entry.activityId === feeds[0]);
+  expect(original.sourceAnnouncementId).toBe(posts[0]);
+  const unlink = { revision: original.revision, announcementId: null, rationale: "The publication ledger now disproves the initial pairing." };
+  expect((await request(path, undefined, "POST", unlink)).status).toBe(401);
+  expect((await request(path, "review-admin", "POST", unlink)).status).toBe(403);
+  expect((await request(path, "review-owner", "POST", { ...unlink, rationale: "mistake" })).status).toBe(400);
+  expect((await request(path, "review-owner", "POST", { ...unlink, revision: "f".repeat(64) })).status).toBe(409);
+  const unlinked = await request(path, "review-owner", "POST", unlink);
+  expect(unlinked.status).toBe(200);
+  expect(unlinked.data).toMatchObject({ sourceAnnouncementId: null, sourceReviewedBy: null });
+  expect(unlinked.data.history[0]).toMatchObject({
+    fromAnnouncementId: posts[0], toAnnouncementId: null,
+    previousReviewedBy: "review-owner", previousEvidence: "Independent publication ledger entry identifies post one and feed row",
+    correctedBy: "review-owner", rationale: unlink.rationale,
+  });
+  expect((await request(path, "review-owner", "POST", unlink)).status).toBe(409);
+  await reconcileAnnouncementActivity();
+  const [stillUnlinked] = await db.select().from(activityTable).where(inArray(activityTable.id, feeds));
+  expect(stillUnlinked.sourceAnnouncementId).toBeNull();
+  const queue = await request("/announcements/activity-review", "review-owner");
+  const correctedItem = queue.data.find((entry: { announcementId: number }) => entry.announcementId === posts[0]);
+  expect(correctedItem.reason).toBe("previous feed assignment was corrected");
+  expect(correctedItem.candidates).toEqual([]);
+  expect((await request(`/announcements/${posts[0]}/activity-review`, "review-admin", "POST", {
+    activityId: feeds[0], revision: correctedItem.revision,
+    evidence: "A misleading ledger extract incorrectly claims the original pairing",
+    independentlyVerified: true,
+  })).status).toBe(409);
+  const [notReattached] = await db.select().from(activityTable).where(inArray(activityTable.id, feeds));
+  expect(notReattached.sourceAnnouncementId).toBeNull();
+  const unlinkedHistory = await request(listPath, "review-owner");
+  expect(unlinkedHistory.data.records.find((entry: { activityId: number }) => entry.activityId === feeds[0]).history).toHaveLength(1);
+
+  const reassign = { revision: unlinked.data.revision, announcementId: posts[1],
+    rationale: "A second dated ledger page identifies the other announcement.",
+    evidence: "Publication ledger page two identifies the second post and this feed row",
+    independentlyVerified: true };
+  expect((await request(path, "review-owner", "POST", { ...reassign, independentlyVerified: false })).status).toBe(400);
+  const reassigned = await request(path, "review-owner", "POST", reassign);
+  expect(reassigned.status).toBe(200);
+  expect(reassigned.data.sourceAnnouncementId).toBe(posts[1]);
+  expect(reassigned.data.history).toHaveLength(2);
+  expect(reassigned.data.history[0].previousReviewedBy).toBe("review-owner");
+  expect(reassigned.data.history[1]).toMatchObject({ fromAnnouncementId: null, toAnnouncementId: posts[1], evidence: reassign.evidence });
+  expect((await request(path, "review-owner", "POST", reassign)).status).toBe(409);
+
+  const [extra] = await db.insert(activityTable).values({
+    type: "announcement", description: "posted an announcement", actorName: "Legacy", entityTitle: title,
+  }).returning();
+  feeds.push(extra.id);
+  const competing = await request("/announcements/activity-review", "review-admin");
+  const item = competing.data.find((entry: { announcementId: number }) => entry.announcementId === posts[0]);
+  expect((await request(`/announcements/${posts[0]}/activity-review`, "review-admin", "POST", {
+    activityId: extra.id, revision: item.revision, evidence: "Independent ledger identifies the first post and this second feed row", independentlyVerified: true,
+  })).status).toBe(200);
+  expect((await request(path, "review-owner", "POST", {
+    ...reassign, revision: reassigned.data.revision, announcementId: posts[0],
+  })).status).toBe(409);
+  const after = await request(listPath, "review-owner");
+  expect(after.data.records.find((entry: { activityId: number }) => entry.activityId === feeds[0]).history).toHaveLength(2);
 });
