@@ -171,6 +171,7 @@ function CreateAnnouncementDialog() {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [recoveredPending, setRecoveredPending] = useState(false);
   const requestKey = useRef<string | null>(null);
   const loadedUserId = useRef<string | null>(null);
   const { user, isLoaded } = useUser();
@@ -182,6 +183,7 @@ function CreateAnnouncementDialog() {
     loadedUserId.current = user?.id ?? null;
     setTitle("");
     setBody("");
+    setRecoveredPending(false);
     requestKey.current = null;
     try {
       const raw = sessionStorage.getItem(pendingAnnouncementKey);
@@ -196,6 +198,7 @@ function CreateAnnouncementDialog() {
       setTitle(pending.title);
       setBody(pending.body);
       requestKey.current = pending.requestKey;
+      setRecoveredPending(true);
     } catch {
       // A damaged or inaccessible entry cannot safely be reused.
       try { sessionStorage.removeItem(pendingAnnouncementKey); } catch { /* unavailable storage */ }
@@ -204,6 +207,7 @@ function CreateAnnouncementDialog() {
 
   const editDraft = () => {
     requestKey.current = null;
+    setRecoveredPending(false);
     try { sessionStorage.removeItem(pendingAnnouncementKey); } catch { /* submit will report unavailable storage */ }
   };
 
@@ -225,6 +229,7 @@ function CreateAnnouncementDialog() {
       },
       onSuccess: () => {
         requestKey.current = null;
+        setRecoveredPending(false);
         try { sessionStorage.removeItem(pendingAnnouncementKey); } catch { /* retry key remains safe */ }
         queryClient.invalidateQueries({ queryKey: getListAnnouncementsQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetRecentActivityQueryKey() });
@@ -248,19 +253,26 @@ function CreateAnnouncementDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-6 shadow-[0_0_20px_-5px_rgba(255,236,194,0.3)]">
-          <Plus className="w-4 h-4 mr-2" /> New Post
+        <Button data-testid="button-announcement-draft" className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-full px-6 shadow-[0_0_20px_-5px_rgba(255,236,194,0.3)]">
+          <Plus className="w-4 h-4 mr-2" /> {recoveredPending ? "Review pending post" : "New Post"}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px] bg-card border-border">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle className="font-serif text-2xl">Create Announcement</DialogTitle>
+            <DialogTitle className="font-serif text-2xl">{recoveredPending ? "Review pending announcement" : "Create Announcement"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-6">
+            {recoveredPending && (
+              <div role="status" data-testid="status-recovered-announcement" className="rounded-lg border border-primary/40 bg-primary/10 p-4 text-sm text-foreground space-y-2">
+                <p className="font-semibold">This announcement may already be live.</p>
+                <p>The reply to your last post was interrupted. Retry without changing the text to confirm that same post without creating a duplicate. To start a separate post, edit the title or message first.</p>
+              </div>
+            )}
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Title</label>
-              <Input 
+              <Input
+                data-testid="input-announcement-title"
                 value={title}
                 onChange={(e) => { editDraft(); setTitle(e.target.value); }}
                 disabled={createMutation.isPending}
@@ -271,7 +283,8 @@ function CreateAnnouncementDialog() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-muted-foreground">Message</label>
-              <Textarea 
+              <Textarea
+                data-testid="input-announcement-body"
                 value={body}
                 onChange={(e) => { editDraft(); setBody(e.target.value); }}
                 disabled={createMutation.isPending}
@@ -282,10 +295,10 @@ function CreateAnnouncementDialog() {
             </div>
           </div>
           <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={createMutation.isPending} className="hover:bg-muted text-muted-foreground">Cancel</Button>
-            <Button type="submit" className="bg-primary text-primary-foreground hover:bg-primary/90" disabled={createMutation.isPending || !isLoaded || !user?.id || !title.trim() || !body.trim()}>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={createMutation.isPending} className="hover:bg-muted text-muted-foreground">Cancel</Button>
+            <Button type="submit" data-testid="button-post-announcement" className="bg-primary text-primary-foreground hover:bg-primary/90" disabled={createMutation.isPending || !isLoaded || !user?.id || !title.trim() || !body.trim()}>
               {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Post Announcement
+              {recoveredPending ? "Confirm or retry post" : "Post Announcement"}
             </Button>
           </DialogFooter>
         </form>

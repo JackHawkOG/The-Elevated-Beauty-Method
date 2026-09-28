@@ -7,7 +7,7 @@ const isPost = (url: string, method: string) =>
   method === "POST" && new URL(url).pathname === "/api/announcements";
 
 async function fillDraft(page: Page, title: string, body: string) {
-  const dialog = page.getByRole("dialog", { name: "Create Announcement" });
+  const dialog = page.getByRole("dialog");
   await dialog.getByPlaceholder("What's new?").fill(title);
   await dialog.getByPlaceholder("Share the details with the community...").fill(body);
   return dialog;
@@ -75,11 +75,14 @@ test("a lost response survives refresh for one signed-in post; editing starts a 
     await expect(dialog.getByPlaceholder("What's new?")).toHaveValue(titles[0]);
     await page.reload();
     await expect(page.getByRole("heading", { name: "Community", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "New Post" }).click();
+    await page.getByRole("button", { name: "Review pending post" }).click();
+    await expect(dialog.getByRole("heading", { name: "Review pending announcement" })).toBeVisible();
+    await expect(dialog.getByRole("status")).toContainText("may already be live");
+    await expect(dialog.getByRole("status")).toContainText("without creating a duplicate");
     await expect(dialog.getByPlaceholder("What's new?")).toHaveValue(titles[0]);
     await expect(dialog.getByPlaceholder("Share the details with the community...")).toHaveValue(`Message ${marker}`);
     const retried = page.waitForResponse(response => isPost(response.url(), response.request().method()));
-    await dialog.getByRole("button", { name: "Post Announcement" }).click();
+    await dialog.getByRole("button", { name: "Confirm or retry post" }).click();
     const retryResponse = await retried;
     expect(retryResponse.status()).toBe(200);
     expect(retryResponse.request().headers()["idempotency-key"]).toBe(lostKeys[0]);
@@ -97,9 +100,12 @@ test("a lost response survives refresh for one signed-in post; editing starts a 
     await expect.poll(() => lostKeys).toHaveLength(2);
     await expect(dialog.getByRole("button", { name: "Post Announcement" })).toBeEnabled();
     await page.reload();
-    await page.getByRole("button", { name: "New Post" }).click();
+    await page.getByRole("button", { name: "Review pending post" }).click();
+    await expect(dialog.getByRole("status")).toContainText("edit the title or message first");
     await expect(dialog.getByPlaceholder("What's new?")).toHaveValue(titles[1]);
     await dialog.getByPlaceholder("What's new?").fill(titles[2]);
+    await expect(dialog.getByRole("status")).toHaveCount(0);
+    await expect(dialog.getByRole("heading", { name: "Create Announcement" })).toBeVisible();
     const edited = page.waitForResponse(response => isPost(response.url(), response.request().method()));
     await dialog.getByRole("button", { name: "Post Announcement" }).click();
     const editedResponse = await edited;
