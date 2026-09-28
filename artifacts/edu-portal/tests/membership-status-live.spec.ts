@@ -3,8 +3,8 @@ import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
-import { getTestStripeClient } from "../../../scripts/src/stripeClient";
 import { membershipStatusFixtureMetadata } from "./membership-status-fixtures";
+import { membershipStatusTestCatalog } from "./membership-status-test-price";
 
 type MembershipResponse = {
   code: number;
@@ -28,7 +28,7 @@ test("real Clerk sessions reveal only their own scheduled membership cancellatio
   test.setTimeout(120_000);
   requireAuditDevelopment();
   await clerkSetup();
-  const stripe = await getTestStripeClient();
+  const { stripe, price } = await membershipStatusTestCatalog();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const tag = randomBytes(6).toString("hex");
   const accounts = [
@@ -38,18 +38,9 @@ test("real Clerk sessions reveal only their own scheduled membership cancellatio
   const ids: string[] = [];
   const subscriptionIds: string[] = [];
   const customerIds: string[] = [];
-  let productId: string | undefined;
-  let priceId: string | undefined;
 
   try {
     await setupClerkTestingToken({ page });
-    // This free, test-mode price cannot charge a card or affect real billing.
-    const product = await stripe.products.create({ name: `Disposable membership privacy check ${tag}` });
-    productId = product.id;
-    const price = await stripe.prices.create({
-      product: product.id, currency: "usd", unit_amount: 0, recurring: { interval: "month" },
-    });
-    priceId = price.id;
 
     const { pool } = await import("../../../lib/db/src/index");
     const expected: string[] = [];
@@ -107,22 +98,22 @@ test("real Clerk sessions reveal only their own scheduled membership cancellatio
     // Delete this run's rows before removing its identities. If DB cleanup
     // fails, keep the marked identities so the records remain attributable.
     const { pool } = await import("../../../lib/db/src/index");
+    let databaseFailure: Error | undefined;
     if (ids.length) {
       try {
         await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [ids]);
         await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [ids]);
       } catch (error) {
-        throw new Error("Membership fixture database cleanup failed; marked identities retained.", { cause: error });
+        databaseFailure = new Error("Membership fixture database cleanup failed; marked identities retained.", { cause: error });
       }
     }
-    // Try every remote cleanup even if one Stripe call fails.
-    const results = await Promise.allSettled(subscriptionIds.map(id => stripe.subscriptions.cancel(id)));
+    // Try every remote cleanup even if database or one Stripe call fails.
+    const results: PromiseSettledResult<unknown>[] = await Promise.allSettled(subscriptionIds.map(id => stripe.subscriptions.cancel(id)));
     results.push(...await Promise.allSettled(customerIds.map(id => stripe.customers.del(id))));
-    if (priceId) results.push((await Promise.allSettled([stripe.prices.update(priceId, { active: false })]))[0]);
-    // Stripe retains prices for billing history and will not delete their product.
-    if (productId) results.push((await Promise.allSettled([stripe.products.update(productId, { active: false })]))[0]);
-    results.push(...await Promise.allSettled(ids.map(id => client.users.deleteUser(id))));
+    // The guarded, zero-cost test catalog is shared with later runs.
+    if (!databaseFailure) results.push(...await Promise.allSettled(ids.map(id => client.users.deleteUser(id))));
     const failures = results.filter(result => result.status === "rejected");
+    if (databaseFailure) failures.push({ status: "rejected", reason: databaseFailure });
     if (failures.length) throw new AggregateError(failures.map(result => result.reason), "Membership fixture cleanup failed.");
   }
 });

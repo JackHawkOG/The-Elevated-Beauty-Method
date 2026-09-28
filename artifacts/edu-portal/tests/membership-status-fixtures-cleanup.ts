@@ -7,6 +7,7 @@ import { getTestStripeClient } from "../../../scripts/src/stripeClient";
 import {
   fixtureRows, staleMembershipStatusFixture,
 } from "./membership-status-fixtures";
+import { isMembershipStatusTestCatalog } from "./membership-status-test-price";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 type Fixture = NonNullable<ReturnType<typeof staleMembershipStatusFixture>>;
@@ -36,8 +37,7 @@ async function billingFor(stripe: Stripe, fixture: Fixture, createdAt: number) {
   if (customers.has_more || customers.data.length > 1) throw new Error(`Ambiguous test customers for ${fixture.email}`);
   const customer = customers.data[0];
   if (!customer) return { customer: undefined, subscription: undefined, product, price };
-  if (!product || !price ||
-      customer.deleted || customer.email !== fixture.email || customer.address || customer.shipping ||
+  if (customer.email !== fixture.email || customer.address || customer.shipping ||
       Object.keys(customer.metadata).length || customer.name || customer.description ||
       customer.balance !== 0 || customer.invoice_settings.default_payment_method ||
       customer.created * 1000 < createdAt - 60_000) {
@@ -54,13 +54,17 @@ async function billingFor(stripe: Stripe, fixture: Fixture, createdAt: number) {
     const price = item?.price;
     const product = price?.product;
     const expectedCancel = subscription.created + (fixture.role === "a" ? 4 : 5) * 86400;
+    const sharedCatalog = !products[0] && typeof product === "string"
+      ? await stripe.products.retrieve(product)
+      : undefined;
     if (subscription.customer !== customer.id || subscription.items.data.length !== 1 ||
         item.quantity !== 1 || Object.keys(subscription.metadata).length ||
         !["active", "canceled"].includes(subscription.status) ||
         price?.unit_amount !== 0 || price.currency !== "usd" ||
         price.recurring?.interval !== "month" || price.recurring.interval_count !== 1 ||
-        typeof product !== "string" || product !== products[0].id ||
-        price.id !== prices[0].id ||
+        typeof product !== "string" ||
+        !(products[0] && prices[0] && product === products[0].id && price.id === prices[0].id ||
+          sharedCatalog && isMembershipStatusTestCatalog(sharedCatalog, price)) ||
         // Stripe may clear cancel_at after executing a scheduled cancellation.
         (subscription.cancel_at !== null && Math.abs(subscription.cancel_at - expectedCancel) > 60) ||
         (subscription.cancel_at === null && subscription.status !== "canceled")) {
@@ -192,8 +196,8 @@ async function main() {
       if (args.length) {
         if (subscription && subscription.status !== "canceled") await stripe.subscriptions.cancel(subscription.id);
         if (customer) await stripe.customers.del(customer.id);
-        // Archiving is idempotent, including when a previous run stopped between
-        // the database commit and removal of the marked Clerk identity.
+        // Legacy per-run catalog can be archived; the owned free catalog is
+        // intentionally shared with subsequent privacy checks.
         if (price?.active) await stripe.prices.update(price.id, { active: false });
         if (product?.active) await stripe.products.update(product.id, { active: false });
         await clerk.users.deleteUser(candidate.id);
