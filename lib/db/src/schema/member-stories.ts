@@ -16,6 +16,10 @@ export const memberStoriesTable = pgTable("member_stories", {
   removalRequestedBy: text("removal_requested_by"),
   removalRequesterEmail: text("removal_requester_email"),
   removalRequestNote: text("removal_request_note"),
+  removalReviewOutcome: text("removal_review_outcome"),
+  removalReviewNote: text("removal_review_note"),
+  removalReviewedAt: timestamp("removal_reviewed_at", { withTimezone: true }),
+  removalReviewedBy: text("removal_reviewed_by"),
 });
 
 export const insertMemberStorySchema = createInsertSchema(memberStoriesTable).omit({ id: true });

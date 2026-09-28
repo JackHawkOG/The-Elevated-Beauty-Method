@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  useListManagedMemberStories, usePublishMemberStory, useWithdrawMemberStory,
+  useListManagedMemberStories, usePublishMemberStory, useWithdrawMemberStory, useReviewMemberStoryRemoval,
   getListManagedMemberStoriesQueryKey, getListPublishedMemberStoriesQueryKey,
 } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
@@ -16,6 +16,9 @@ export default function MemberStoriesPage() {
   const [confirmed, setConfirmed] = useState(false);
   const [message, setMessage] = useState("");
   const [withdrawId, setWithdrawId] = useState<number | null>(null);
+  const [reviewId, setReviewId] = useState<number | null>(null);
+  const [reviewOutcome, setReviewOutcome] = useState<"withdrawal_confirmed" | "claim_unsubstantiated" | "inconclusive">("inconclusive");
+  const [reviewNote, setReviewNote] = useState("");
   const requests = list.data?.filter(story => story.removalRequestedAt)
     .sort((a, b) => new Date(b.removalRequestedAt!).getTime() - new Date(a.removalRequestedAt!).getTime()) ?? [];
   useEffect(() => {
@@ -45,6 +48,14 @@ export default function MemberStoriesPage() {
     },
     onError: () => setMessage("Could not withdraw this story. Please try again."),
   } });
+  const review = useReviewMemberStoryRemoval({ mutation: {
+    onSuccess: () => {
+      setReviewId(null); setReviewNote(""); setReviewOutcome("inconclusive");
+      setMessage("Private review saved. The story remains hidden.");
+      refresh();
+    },
+    onError: () => { setMessage("Could not save the review. Refresh the list and try again."); refresh(); },
+  } });
   function submit(event: FormEvent) {
     event.preventDefault();
     setMessage("");
@@ -54,7 +65,7 @@ export default function MemberStoriesPage() {
     <main className="mx-auto w-full max-w-4xl space-y-10 px-6 py-12">
       <div>
         <h1 className="font-serif text-4xl">Member stories</h1>
-        <p className="mt-2 text-muted-foreground">Publish only a quote and attribution the member explicitly approved. Keep the permission record here so you can find and withdraw a story later. A member’s removal request hides their story immediately; review the private claim and permission record below promptly.</p>
+        <p className="mt-2 text-muted-foreground">Publish only a quote and attribution the member explicitly approved. Keep the permission record here so you can find and withdraw a story later. A member’s removal request hides their story immediately. Review the claim privately; even an unsubstantiated claim does not restore the story. Only publish a new story after obtaining fresh, explicit permission for its exact quote and attribution.</p>
       </div>
       <form onSubmit={submit} className="space-y-5 rounded-2xl border border-border bg-card p-6">
         <h2 className="font-serif text-2xl">Publish an approved story</h2>
@@ -95,9 +106,35 @@ export default function MemberStoriesPage() {
                   <p className="mt-2 break-words text-primary">— {story.attribution}</p>
                   <p className="mt-4 break-words text-xs text-muted-foreground">Permission recorded {new Date(story.permissionRecordedAt).toLocaleString()}: {story.permissionRecord}</p>
                   {story.removalRequestedAt && <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm">
-                    <p className="font-semibold">Member removal request · Hidden immediately · Review needed</p>
+                    <p className="font-semibold">Member removal request · Hidden {story.removalReviewOutcome ? "· Reviewed" : "· Review needed"}</p>
                     <p className="mt-2 break-words">Received {new Date(story.removalRequestedAt).toLocaleString()} from {story.removalRequesterEmail || story.removalRequestedBy} (account {story.removalRequestedBy})</p>
                     <p className="mt-2 whitespace-pre-wrap break-words">Member’s note: {story.removalRequestNote}</p>
+                    {story.removalReviewOutcome
+                      ? <div className="mt-3 border-t border-border pt-3">
+                        <p>Review: {story.removalReviewOutcome.replaceAll("_", " ")} · {story.removalReviewedAt && new Date(story.removalReviewedAt).toLocaleString()}</p>
+                        <p className="mt-1 whitespace-pre-wrap break-words">Owner’s note: {story.removalReviewNote}</p>
+                        <p className="mt-1 text-muted-foreground">Reviewed by {story.removalReviewedBy}. This story stays hidden.</p>
+                      </div>
+                      : reviewId === story.id
+                        ? <form className="mt-4 space-y-3" onSubmit={e => {
+                          e.preventDefault();
+                          setMessage("");
+                          review.mutate({ storyId: story.id, data: { outcome: reviewOutcome, note: reviewNote.trim() } });
+                        }}>
+                          <label className="block">Outcome
+                            <select className="mt-1 w-full rounded-lg border border-border bg-background p-2" value={reviewOutcome} onChange={e => setReviewOutcome(e.target.value as typeof reviewOutcome)}>
+                              <option value="inconclusive">Inconclusive</option>
+                              <option value="withdrawal_confirmed">Withdrawal confirmed</option>
+                              <option value="claim_unsubstantiated">Claim unsubstantiated</option>
+                            </select>
+                          </label>
+                          <label className="block">Private review notes
+                            <textarea className="mt-1 w-full rounded-lg border border-border bg-background p-2" value={reviewNote} onChange={e => setReviewNote(e.target.value)} required maxLength={2000} />
+                          </label>
+                          <p className="text-muted-foreground">Saving any outcome leaves this story hidden. Do not rely on old permission to republish it.</p>
+                          <div className="flex gap-2"><Button type="button" variant="ghost" onClick={() => setReviewId(null)} disabled={review.isPending}>Cancel</Button><Button type="submit" disabled={review.isPending || !reviewNote.trim()}>Save private review</Button></div>
+                        </form>
+                        : <Button className="mt-3" variant="outline" onClick={() => { setMessage(""); setReviewId(story.id); setReviewNote(""); setReviewOutcome("inconclusive"); }}>Record review</Button>}
                   </div>}
                 </div>
                 {!story.withdrawnAt && (withdrawId === story.id

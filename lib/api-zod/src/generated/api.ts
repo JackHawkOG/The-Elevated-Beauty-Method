@@ -49,7 +49,11 @@ export const PublishMemberStoryResponse = zod.object({
   "removalRequestedAt": zod.string().nullable(),
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
-  "removalRequestNote": zod.string().nullable()
+  "removalRequestNote": zod.string().nullable(),
+  "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
+  "removalReviewNote": zod.string().nullable(),
+  "removalReviewedAt": zod.string().nullable(),
+  "removalReviewedBy": zod.string().nullable()
 })
 
 
@@ -69,7 +73,11 @@ export const ListManagedMemberStoriesResponseItem = zod.object({
   "removalRequestedAt": zod.string().nullable(),
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
-  "removalRequestNote": zod.string().nullable()
+  "removalRequestNote": zod.string().nullable(),
+  "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
+  "removalReviewNote": zod.string().nullable(),
+  "removalReviewedAt": zod.string().nullable(),
+  "removalReviewedBy": zod.string().nullable()
 })
 export const ListManagedMemberStoriesResponse = zod.array(ListManagedMemberStoriesResponseItem)
 
@@ -118,10 +126,19 @@ export const WithdrawMemberStoryResponse = zod.object({
   "removalRequestedAt": zod.string().nullable(),
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
-  "removalRequestNote": zod.string().nullable()
+  "removalRequestNote": zod.string().nullable(),
+  "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
+  "removalReviewNote": zod.string().nullable(),
+  "removalReviewedAt": zod.string().nullable(),
+  "removalReviewedBy": zod.string().nullable()
 })
 
-
+/**
+ * @summary Owner records a private review of a hidden removal claim; never republishes the story
+ */
+export const ReviewMemberStoryRemovalParams = zod.object({
+  "storyId": zod.coerce.number()
+})
 /**
  * @summary Current founding offer availability
  */
@@ -1059,5 +1076,32 @@ export const GetRecentActivityResponseItem = zod.object({
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
 
+export const ReviewMemberStoryRemovalBody = zod.object({
+  "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
+  "note": zod.string().min(1).max(reviewMemberStoryRemovalBodyNoteMax).describe('Owner-only rationale and checks made during private review')
+})
+
 
 export const ListMemberStoryRemovalAlertsResponse = zod.array(ListMemberStoryRemovalAlertsResponseItem)
+
+export const reviewMemberStoryRemovalBodyNoteMax = 2000;
+
+export const ReviewMemberStoryRemovalResponse = zod.object({
+  "id": zod.number(),
+  "quote": zod.string(),
+  "attribution": zod.string(),
+  "permissionRecord": zod.string(),
+  "permissionRecordedAt": zod.string(),
+  "permissionRecordedBy": zod.string(),
+  "publishedAt": zod.string(),
+  "withdrawnAt": zod.string().nullable(),
+  "withdrawnBy": zod.string().nullable(),
+  "removalRequestedAt": zod.string().nullable(),
+  "removalRequestedBy": zod.string().nullable(),
+  "removalRequesterEmail": zod.string().nullable(),
+  "removalRequestNote": zod.string().nullable(),
+  "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
+  "removalReviewNote": zod.string().nullable(),
+  "removalReviewedAt": zod.string().nullable(),
+  "removalReviewedBy": zod.string().nullable()
+})

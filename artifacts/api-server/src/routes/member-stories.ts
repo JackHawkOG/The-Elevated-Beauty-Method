@@ -11,6 +11,8 @@ import {
   WithdrawMemberStoryResponse,
   RequestMemberStoryRemovalBody,
   RequestMemberStoryRemovalResponse,
+  ReviewMemberStoryRemovalBody,
+  ReviewMemberStoryRemovalResponse,
 } from "@workspace/api-zod";
 import { requireAuth } from "../middlewares/requireAuth";
 
@@ -37,24 +39,29 @@ function ownerStory(row: typeof memberStoriesTable.$inferSelect) {
     publishedAt: row.publishedAt.toISOString(),
     withdrawnAt: row.withdrawnAt?.toISOString() ?? null,
     removalRequestedAt: row.removalRequestedAt?.toISOString() ?? null,
+    removalReviewedAt: row.removalReviewedAt?.toISOString() ?? null,
   };
 }
 
 router.get("/member-stories", async (_req, res): Promise<void> => {
   res.set("Cache-Control", "no-store");
   const rows = await db.select({
-    id: memberStoriesTable.id,
-    quote: memberStoriesTable.quote,
-    attribution: memberStoriesTable.attribution,
+    storyId: memberStoriesTable.id,
+    requestedAt: memberStoriesTable.removalRequestedAt,
   }).from(memberStoriesTable)
-    .where(isNull(memberStoriesTable.withdrawnAt))
-    .orderBy(desc(memberStoriesTable.publishedAt));
-  res.json(ListPublishedMemberStoriesResponse.parse(rows));
+    .where(sql`${memberStoriesTable.removalRequestedAt} IS NOT NULL`)
+    .orderBy(desc(memberStoriesTable.removalRequestedAt));
+  res.json(ListManagedMemberStoriesResponse.parse(rows.map(ownerStory)));
 });
 
-router.get("/member-stories/manage", requireAuth, requireOwner, async (_req, res): Promise<void> => {
-  res.set("Cache-Control", "no-store");
-  const rows = await db.select().from(memberStoriesTable).orderBy(desc(memberStoriesTable.publishedAt));
+router.get("/member-stories/removal-alerts", requireAuth, requireOwner, async (_req, res): Promise<void> => {
+  res.set("Cache-Control", "private, no-store");
+  const rows = await db.select({
+    storyId: memberStoriesTable.id,
+    requestedAt: memberStoriesTable.removalRequestedAt,
+  }).from(memberStoriesTable)
+    .where(sql`${memberStoriesTable.removalRequestedAt} IS NOT NULL`)
+    .orderBy(desc(memberStoriesTable.removalRequestedAt));
   res.json(ListManagedMemberStoriesResponse.parse(rows.map(ownerStory)));
 });
 
@@ -73,7 +80,7 @@ router.get("/member-stories/removal-alerts", requireAuth, requireOwner, async (_
 });
 
 router.post("/member-stories", requireAuth, requireOwner, async (req, res): Promise<void> => {
-  const parsed = PublishMemberStoryBody.safeParse(req.body);
+  const parsed = ReviewMemberStoryRemovalBody.safeParse(req.body);
   if (!parsed.success || parsed.data.permissionConfirmed !== true) {
     res.status(400).json({ error: "Explicit permission for the quote and attribution must be confirmed" });
     return;
@@ -86,23 +93,33 @@ router.post("/member-stories", requireAuth, requireOwner, async (req, res): Prom
     return;
   }
   const now = new Date();
-  const [row] = await db.insert(memberStoriesTable).values({
-    quote, attribution, permissionRecord,
-    permissionRecordedBy: req.userId!,
-    permissionRecordedAt: now,
-    publishedAt: now,
-  }).returning();
-  res.status(201).json(PublishMemberStoryResponse.parse(ownerStory(row)));
+  const [row] = await db.update(memberStoriesTable).set({
+    removalReviewOutcome: parsed.data.outcome,
+    removalReviewNote: note,
+    removalReviewedAt: new Date(),
+    removalReviewedBy: req.userId!,
+  }).where(and(
+    eq(memberStoriesTable.id, id),
+    isNull(memberStoriesTable.removalReviewOutcome),
+    isNull(memberStoriesTable.removalReviewedAt),
+    sql`${memberStoriesTable.removalRequestedAt} IS NOT NULL`,
+    sql`${memberStoriesTable.withdrawnAt} IS NOT NULL`,
+  )).returning();
+  if (!row) {
+    res.status(404).json({ error: "Published story not found" });
+    return;
+  }
+  res.json(WithdrawMemberStoryResponse.parse(ownerStory(row)));
 });
 
-router.post("/member-stories/:storyId/removal-request", requireAuth, async (req, res): Promise<void> => {
+router.post("/member-stories/:storyId/removal-review", requireAuth, requireOwner, async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.storyId) ? req.params.storyId[0] : req.params.storyId;
   const id = Number(raw);
   if (!raw || !/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(id)) {
     res.status(400).json({ error: "Invalid story ID" });
     return;
   }
-  const parsed = RequestMemberStoryRemovalBody.safeParse(req.body);
+  const parsed = ReviewMemberStoryRemovalBody.safeParse(req.body);
   const note = parsed.success ? parsed.data.note.trim() : "";
   if (!note || note.length > 500) {
     res.status(400).json({ error: "Tell us how this story is connected to you (up to 500 characters)" });
@@ -155,13 +172,23 @@ router.post("/member-stories/:storyId/withdraw", requireAuth, requireOwner, asyn
     return;
   }
   const [row] = await db.update(memberStoriesTable).set({
-    withdrawnAt: new Date(), withdrawnBy: req.userId!,
-  }).where(and(eq(memberStoriesTable.id, id), isNull(memberStoriesTable.withdrawnAt))).returning();
+    removalReviewOutcome: parsed.data.outcome,
+    removalReviewNote: note,
+    removalReviewedAt: new Date(),
+    removalReviewedBy: req.userId!,
+  }).where(and(
+    eq(memberStoriesTable.id, id),
+    isNull(memberStoriesTable.removalReviewOutcome),
+    isNull(memberStoriesTable.removalReviewedAt),
+    sql`${memberStoriesTable.removalRequestedAt} IS NOT NULL`,
+    sql`${memberStoriesTable.withdrawnAt} IS NOT NULL`,
+  )).returning();
   if (!row) {
-    res.status(404).json({ error: "Published story not found" });
+    res.status(404).json({ error: "Hidden, unreviewed removal claim not found" });
     return;
   }
-  res.json(WithdrawMemberStoryResponse.parse(ownerStory(row)));
+  res.set("Cache-Control", "no-store");
+  res.json(ReviewMemberStoryRemovalResponse.parse(ownerStory(row)));
 });
 
 export default router;

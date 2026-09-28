@@ -150,6 +150,36 @@ paths:
           description: Story not found
         "403":
           description: Owner access required
+  /member-stories/{storyId}/removal-review:
+    post:
+      operationId: reviewMemberStoryRemoval
+      tags: [member-stories]
+      summary: Owner records a private review of a hidden removal claim; never republishes the story
+      parameters:
+        - in: path
+          name: storyId
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberStoryRemovalReviewInput"
+      responses:
+        "200":
+          description: Private review recorded; story remains hidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerMemberStory"
+        "400":
+          description: Invalid review
+        "403":
+          description: Owner access required
+        "404":
+          description: Hidden removal claim not found or already reviewed
   /membership/offer:
     get:
       operationId: getMembershipOffer
@@ -945,7 +975,7 @@ components:
         requestedAt: { type: string }
     OwnerMemberStory:
       type: object
-      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote]
+      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote, removalReviewOutcome, removalReviewNote, removalReviewedAt, removalReviewedBy]
       properties:
         id: { type: number }
         quote: { type: string }
@@ -960,6 +990,16 @@ components:
         removalRequestedBy: { type: ["string", "null"] }
         removalRequesterEmail: { type: ["string", "null"] }
         removalRequestNote: { type: ["string", "null"] }
+        removalReviewOutcome: { type: ["string", "null"], enum: [withdrawal_confirmed, claim_unsubstantiated, inconclusive, null] }
+        removalReviewNote: { type: ["string", "null"] }
+        removalReviewedAt: { type: ["string", "null"] }
+        removalReviewedBy: { type: ["string", "null"] }
+    MemberStoryRemovalReviewInput:
+      type: object
+      required: [outcome, note]
+      properties:
+        outcome: { type: string, enum: [withdrawal_confirmed, claim_unsubstantiated, inconclusive] }
+        note: { type: string, minLength: 1, maxLength: 2000, description: "Owner-only rationale and checks made during private review" }
     MemberStoryRemovalInput:
       type: object
       required: [note]

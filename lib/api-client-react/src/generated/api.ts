@@ -46,6 +46,7 @@ import type {
   MemberStoryRemovalAlert,
   MemberStoryRemovalInput,
   MemberStoryRemovalReceipt,
+  MemberStoryRemovalReviewInput,
   MembershipCheckoutCleanupAlerts,
   MembershipCheckoutInput,
   MembershipOffer,
@@ -402,6 +403,11 @@ export const useWithdrawMemberStory = <TError = ErrorType<void>,
       return useMutation(getWithdrawMemberStoryMutationOptions(options));
     }
 
+export const getReviewMemberStoryRemovalUrl = (storyId: number,) => {
+
+
+  return `/api/member-stories/${storyId}/removal-review`
+}
 export const getGetMembershipOfferUrl = () => {
 
 
@@ -3069,4 +3075,60 @@ export const getListMemberStoryRemovalAlertsQueryKey = () => {
     return [
     `/api/member-stories/removal-alerts`
     ] as const;
+    }
+
+export const getReviewMemberStoryRemovalMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewMemberStoryRemoval>>, TError,{storyId: number;data: BodyType<MemberStoryRemovalReviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reviewMemberStoryRemoval>>, TError,{storyId: number;data: BodyType<MemberStoryRemovalReviewInput>}, TContext> => {
+
+const mutationKey = ['reviewMemberStoryRemoval'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reviewMemberStoryRemoval>>, {storyId: number;data: BodyType<MemberStoryRemovalReviewInput>}> = (props) => {
+          const {storyId,data} = props ?? {};
+
+          return  reviewMemberStoryRemoval(storyId,data,requestOptions)
+        }
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReviewMemberStoryRemovalMutationResult = NonNullable<Awaited<ReturnType<typeof reviewMemberStoryRemoval>>>
+
+    export type ReviewMemberStoryRemovalMutationBody = BodyType<MemberStoryRemovalReviewInput>
+
+/**
+ * @summary Owner records a private review of a hidden removal claim; never republishes the story
+ */
+export const reviewMemberStoryRemoval = async (storyId: number,
+    memberStoryRemovalReviewInput: MemberStoryRemovalReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<OwnerMemberStory> => {
+
+  return customFetch<OwnerMemberStory>(getReviewMemberStoryRemovalUrl(storyId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(memberStoryRemovalReviewInput)
+  }
+);}
+
+    export type ReviewMemberStoryRemovalMutationError = ErrorType<void>
+
+    /**
+ * @summary Owner records a private review of a hidden removal claim; never republishes the story
+ */
+export const useReviewMemberStoryRemoval = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reviewMemberStoryRemoval>>, TError,{storyId: number;data: BodyType<MemberStoryRemovalReviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reviewMemberStoryRemoval>>,
+        TError,
+        {storyId: number;data: BodyType<MemberStoryRemovalReviewInput>},
+        TContext
+      > => {
+      return useMutation(getReviewMemberStoryRemovalMutationOptions(options));
     }

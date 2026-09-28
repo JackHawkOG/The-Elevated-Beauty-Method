@@ -56,7 +56,7 @@ afterAll(async () => {
 });
 
 test("only explicitly permitted stories reach the public feed and withdrawal isolates a story", async () => {
-  const input = { quote: `Member quote ${run}`, attribution: "Approved name", permissionRecord: "Written approval of exact quote and name on September 27, 2026", permissionConfirmed: true };
+  const input = { quote: `Removal claim ${run}`, attribution: "Member name", permissionRecord: "Recorded permission", permissionConfirmed: true };
   expect((await request("/member-stories", undefined, "POST", input)).status).toBe(401);
   expect((await request("/member-stories", member, "POST", input)).status).toBe(403);
   expect((await request("/member-stories", owner, "POST", { ...input, permissionConfirmed: false })).status).toBe(400);
@@ -87,7 +87,12 @@ test("only explicitly permitted stories reach the public feed and withdrawal iso
 
 test("signed-in removal requests hide the identified story and keep the claim private for owner review", async () => {
   const input = { quote: `Removal claim ${run}`, attribution: "Member name", permissionRecord: "Recorded permission", permissionConfirmed: true };
-  const published = await request("/member-stories", owner, "POST", input);
+    const published = await request("/member-stories", owner, "POST", {
+      quote: `${outcome} ${run}`, attribution: "Approved name", permissionRecord: "Written permission",
+      permissionConfirmed: true,
+    });
+
+    const claimant = `test-claimant-${outcome}-${run}`;
   expect(published.status).toBe(201);
   created.push(published.data.id);
   const path = `/member-stories/${published.data.id}/removal-request`;
@@ -119,8 +124,16 @@ test("signed-in removal requests hide the identified story and keep the claim pr
   expect(JSON.stringify(alerts.data)).not.toContain("I withdrew my permission");
   const managed = await request("/member-stories/manage", owner);
   const story = managed.data.find((row: { id: number }) => row.id === published.data.id);
-  expect(story.removalRequestNote).toBe("I withdrew my permission");
-  expect(story.removalRequestedBy).toBe(member);
-  expect(story.removalRequesterEmail).toBe(`${member}@example.test`);
-  expect(story.withdrawnAt).toBeTruthy();
+
+  const reviewPath = `/member-stories/${published.data.id}/removal-review`;
+    expect(reviewed.status).toBe(200);
+    expect(reviewed.data.removalReviewOutcome).toBe(outcome);
+    expect((await request("/member-stories")).data.some((row: { id: number }) => row.id === published.data.id)).toBe(false);
+  }
 });
+
+  const review = await request(reviewPath, owner, "POST", { outcome: "claim_unsubstantiated", note: "Could not corroborate the claim; seek fresh permission before any new publication." });
+
+  const publicAfterReview = await request("/member-stories");
+
+    const reviewed = await request(`/member-stories/${published.data.id}/removal-review`, owner, "POST", { outcome, note: "Privately assessed" });

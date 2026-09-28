@@ -5,6 +5,7 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { OwnerMemberStoryRemovalReviewOutcome } from './ownerMemberStoryRemovalReviewOutcome';
 
 export interface OwnerMemberStory {
   id: number;
@@ -26,4 +27,12 @@ export interface OwnerMemberStory {
   removalRequesterEmail: string | null;
   /** @nullable */
   removalRequestNote: string | null;
+  /** @nullable */
+  removalReviewOutcome: OwnerMemberStoryRemovalReviewOutcome;
+  /** @nullable */
+  removalReviewNote: string | null;
+  /** @nullable */
+  removalReviewedAt: string | null;
+  /** @nullable */
+  removalReviewedBy: string | null;
 }
