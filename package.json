@@ -24,6 +24,7 @@
     "test:community-live": "playwright test --config playwright.community-live.config.ts",
     "test:member-stories-live": "playwright test --config playwright.member-stories-live.config.ts",
     "cleanup:story-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/member-stories-fixtures-cleanup.ts",
+    "cleanup:profile-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/profile-fixtures-cleanup.ts",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },

@@ -3,6 +3,7 @@ import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test } from "@playwright/test";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
+import { profileFixturePrivateMetadata } from "./profile-fixtures";
 
 test("a completed profile save cannot update the next member when its response arrives late", async ({ page }) => {
   test.setTimeout(120_000);
@@ -18,6 +19,7 @@ test("a completed profile save cannot update the next member when its response a
       const user = await client.users.createUser({
         emailAddress: [account.email],
         firstName: account === a ? "Member A" : b.name,
+        privateMetadata: profileFixturePrivateMetadata,
         skipPasswordRequirement: true,
       });
       created.push(user.id);
@@ -31,10 +33,7 @@ test("a completed profile save cannot update the next member when its response a
     // Hold the resolved browser fetch, not the request to the API: the server
     // must commit A's change before we change Clerk's active member.
     await page.evaluate(() => {
-      const browser = window as typeof window & {
-        profileSaveReceived?: boolean;
-        releaseProfileSave?: () => void;
-      };
+      const browser = window as typeof window & { leakedProfileDetails?: string[]; profileObserver?: MutationObserver };
       const originalFetch = window.fetch.bind(window);
       window.fetch = async (...args) => {
         const response = await originalFetch(...args);
