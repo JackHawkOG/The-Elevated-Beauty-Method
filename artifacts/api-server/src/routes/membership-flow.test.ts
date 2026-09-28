@@ -274,6 +274,47 @@ test("recovery does not expire a checkout that completed while cleanup was unava
   sessions.delete(id);
 });
 
+test("recovery keeps a checkout paid between lookup and expiration, then clears its retry", async () => {
+  const id = `cs_${randomUUID()}`;
+  const session: TestSession = {
+    id, status: "open", url: `https://checkout.stripe.test/${id}`, created: Math.floor(Date.now() / 1000),
+  };
+  sessions.set(id, session);
+  await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
+  const queued = async () => (await pool.query(
+    "SELECT stripe_session_id FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
+  )).rows;
+  const retrievedBefore = retrieveSession.mock.calls.length;
+  let retrievedBeforeExpiration = false;
+  let statusAtExpiration: string | undefined;
+  expireSession.mockImplementationOnce(async (sessionId: string) => {
+    retrievedBeforeExpiration = retrieveSession.mock.calls.slice(retrievedBefore).some(([retrievedId]) => retrievedId === sessionId);
+    statusAtExpiration = session.status;
+    session.status = "complete";
+    session.payment_status = "paid";
+    session.subscription = `sub_${randomUUID()}`;
+    throw new Error("Stripe cannot expire a completed checkout session");
+  });
+
+  try {
+    await recoverQueuedCheckoutExpirations();
+    expect(session).toMatchObject({ id, status: "complete", payment_status: "paid" });
+    expect(await queued()).toHaveLength(1);
+    const expirations = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
+    expect(expirations).toBe(1);
+    expect(retrievedBeforeExpiration).toBe(true);
+    expect(statusAtExpiration).toBe("open");
+
+    await recoverQueuedCheckoutExpirations();
+    expect(await queued()).toHaveLength(0);
+    expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirations);
+    expect(session).toMatchObject({ id, status: "complete", payment_status: "paid", subscription: expect.any(String) });
+  } finally {
+    await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id]);
+    sessions.delete(id);
+  }
+});
+
 test("lost Stripe responses leave recoverable sessions; recovery expires only untracked open checkouts", async () => {
   clock(opens);
   const [openBuyer, paidBuyer, trackedBuyer] = await Promise.all([addUser(210), addUser(211), addUser(212)]);
