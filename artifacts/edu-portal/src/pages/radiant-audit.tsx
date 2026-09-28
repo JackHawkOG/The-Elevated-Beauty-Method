@@ -654,7 +654,7 @@ export function RadiantAuditCompletePage() {
     request: { responseType: "json" },
   });
   const { data: history, isLoading: historyLoading, isError: historyError } = useGetRadiantAuditHistory({
-    query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !isLoading && !isError },
+    query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !isLoading && !isError, refetchOnWindowFocus: "always" },
   });
 
   useEffect(() => {
@@ -669,6 +669,16 @@ export function RadiantAuditCompletePage() {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [user?.id, queryClient]);
+
+  useEffect(() => {
+    if (!user?.id || pending) return;
+    const onFocus = () => {
+      if (document.visibilityState !== "visible") return;
+      void queryClient.invalidateQueries({ queryKey: getGetRadiantAuditHistoryQueryKey() });
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [user?.id, pending, queryClient]);
 
   async function confirmCurrentDeletion() {
     setDeleteError(null);
@@ -896,12 +906,15 @@ export function RadiantAuditCompletePage() {
                 </div>
               ))}
             </dl>
-            {historyLoading ? (
+            {historyLoading && !history ? (
               <p className="mt-8" role="status">Loading earlier Audits…</p>
-            ) : historyError ? (
+            ) : historyError && !history ? (
               <p className="mt-8 text-destructive" role="alert">We couldn't load your earlier Audits. Please refresh and try again.</p>
             ) : (
-              <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={saved} history={history ?? []} />
+              <>
+                {historyError && <p className="mt-8 text-destructive" role="alert">We couldn't refresh your earlier Audits. They may have changed on another device. Please refresh and try again before deleting.</p>}
+                <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={saved} history={history ?? []} historyRefreshFailed={historyError} />
+              </>
             )}
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild><Link href="/dashboard">Explore your free dashboard</Link></Button>
@@ -923,12 +936,15 @@ export function RadiantAuditCompletePage() {
             <h1 className="font-serif text-4xl">Start your Radiant Audit</h1>
             <p className="mt-4 text-muted-foreground">There isn't an Audit saved for this account yet.</p>
             <Button asChild className="mt-6"><Link href="/radiant-audit">Complete the Audit</Link></Button>
-            {historyLoading ? (
+            {historyLoading && !history ? (
               <p className="mt-8" role="status">Loading earlier Audits…</p>
-            ) : historyError ? (
+            ) : historyError && !history ? (
               <p className="mt-8 text-destructive" role="alert">We couldn't load your earlier Audits. Please refresh and try again.</p>
             ) : (
-              <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={null} history={history ?? []} />
+              <>
+                {historyError && <p className="mt-8 text-destructive" role="alert">We couldn't refresh your earlier Audits. They may have changed on another device. Please refresh and try again before deleting.</p>}
+                <RadiantAuditComparison key={user?.id} accountId={user?.id ?? ""} latest={null} history={history ?? []} historyRefreshFailed={historyError} />
+              </>
             )}
           </>
         )}

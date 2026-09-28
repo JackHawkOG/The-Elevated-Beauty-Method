@@ -35,5 +35,6 @@
 - [Parallel Vite preview cache](parallel-vite-preview-cache.md) — after the Audit test server runs, a stale dev dependency chunk can blank the preview; restart the managed web workflow.
 - [Published startup log visibility](published-startup-log-visibility.md) — deployment log queries showed health requests but not API pre-listen Pino lines; log committed startup outcomes after readiness.
 - [Live Audit fixture cleanup races](live-audit-fixture-cleanup-races.md) — close the active browser page before removing test rows; pending form effects can recreate a draft during cleanup.
+- [Headless focus events](headless-focus-events.md) — bringing a tab forward may not fire focus in headless Chromium; dispatch the event explicitly when testing focus handlers.
 - [Checkout retry connection budget](checkout-retry-connection-budget.md) — concurrent Stripe retries must not hold one pooled client while waiting for a second client.
 - [Isolated live story publication](isolated-live-story-publication.md) — public browser checks use keyed visibility at persistence, not post-test cleanup, so interrupted runs cannot expose quotes.

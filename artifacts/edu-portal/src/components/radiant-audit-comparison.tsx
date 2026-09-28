@@ -67,10 +67,12 @@ export function RadiantAuditComparison({
   latest,
   history,
   accountId,
+  historyRefreshFailed = false,
 }: {
   latest: RadiantAudit | null;
   history: RadiantAuditHistoryEntry[];
   accountId: string;
+  historyRefreshFailed?: boolean;
 }) {
   const storageKey = `radiant-audit:comparison:${accountId}`;
   const [selectedId, setSelectedId] = useState<number | null>(() => {
@@ -94,7 +96,7 @@ export function RadiantAuditComparison({
   const confirmedEntryAvailable = confirmation?.kind !== "selected" || history.some(entry => entry.id === confirmation.entry.id);
 
   async function confirmDeletion() {
-    if (!confirmation || !confirmedEntryAvailable) return;
+    if (!confirmation || !confirmedEntryAvailable || historyRefreshFailed) return;
     setError(null);
     const key = getGetRadiantAuditHistoryQueryKey();
     const target = confirmation;
@@ -153,7 +155,7 @@ export function RadiantAuditComparison({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            disabled={deleting || !confirmedEntryAvailable || error?.startsWith("We couldn't confirm")}
+            disabled={deleting || historyRefreshFailed || !confirmedEntryAvailable || error?.startsWith("We couldn't confirm")}
             onClick={event => { event.preventDefault(); void confirmDeletion(); }}
           >
             {deleting ? "Deleting…" : confirmation?.kind === "all" ? "Clear earlier history" : "Delete earlier Audit"}
@@ -204,10 +206,10 @@ export function RadiantAuditComparison({
       </select>
       {staleSelection && <p className="mt-2 text-sm text-muted-foreground" role="status">That earlier Audit is no longer in your history. Choose another submission to continue.</p>}
       <div className="mt-4 flex flex-wrap gap-3">
-        <Button type="button" variant="outline" disabled={!earlier || deleting} onClick={() => { if (earlier) { setError(null); setConfirmation({ kind: "selected", entry: earlier }); } }}>
+        <Button type="button" variant="outline" disabled={!earlier || deleting || historyRefreshFailed} onClick={() => { if (earlier) { setError(null); setConfirmation({ kind: "selected", entry: earlier }); } }}>
           Delete selected earlier Audit
         </Button>
-        <Button type="button" variant="outline" onClick={() => { setError(null); setConfirmation({ kind: "all" }); }}>
+        <Button type="button" variant="outline" disabled={historyRefreshFailed} onClick={() => { setError(null); setConfirmation({ kind: "all" }); }}>
           Clear earlier history
         </Button>
       </div>

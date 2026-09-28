@@ -701,7 +701,7 @@ test("signed-in member compares both earlier Audits after saving and reload, wit
   ]);
 });
 
-test("an earlier Audit removed in another tab cannot silently switch the deletion target", async ({ page }) => {
+test("returning to a long-open Audit refreshes another device's change without switching the deletion target", async ({ page }) => {
   const makeEntry = (id: number, tag: string, completedAt: string): HistoryEntry => ({
     id, ...fixture(tag), completedAt, routineScore: 1, valuesScore: 2,
   });
@@ -736,7 +736,8 @@ test("an earlier Audit removed in another tab cannot silently switch the deletio
   await expect(dialog).toContainText("ID 101");
   history = [remaining];
   const readsBeforeRefresh = historyReads;
-  await page.evaluate(() => (window as unknown as { __refreshAuditHistory: () => Promise<void> }).__refreshAuditHistory());
+  // Headless Chromium does not consistently dispatch focus when bringing a tab forward.
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(() => historyReads).toBeGreaterThan(readsBeforeRefresh);
   await expect(dialog.getByRole("button", { name: "Delete earlier Audit" })).toBeDisabled();
   await expect(dialog).toContainText("ID 101");
