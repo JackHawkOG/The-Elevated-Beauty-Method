@@ -616,6 +616,136 @@ test("staged answers survive real sign-out and sign-in without saving to the wro
   }
 });
 
+test("an aged post-signup Audit waits for account-specific review and explicit consent with real sign-ins", async ({ page }) => {
+  test.setTimeout(180_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const rightEmail = auditFixtureEmail("a", tag);
+  const wrongEmail = auditFixtureEmail("b", tag);
+  const pendingAnswers = reflections(`aged-${tag}`);
+  const rightCurrent = reflections(`right-current-${tag}`);
+  const wrongCurrent = reflections(`wrong-current-${tag}`);
+  const created: string[] = [];
+  const writes: Array<{ body: string; status?: number }> = [];
+  const pendingKey = "tebm:radiant-audit:pending";
+
+  try {
+    await setupClerkTestingToken({ page });
+    for (const email of [rightEmail, wrongEmail]) {
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
+      });
+      created.push(user.id);
+      expect(user.primaryEmailAddress?.verification.status).toBe("verified");
+    }
+    await signIn(page, rightEmail);
+    await save(page, rightEmail, `right-current-${tag}`);
+    await clerk.signOut({ page });
+    await signIn(page, wrongEmail);
+    await save(page, wrongEmail, `wrong-current-${tag}`);
+    await clerk.signOut({ page });
+
+    // Start where a visitor returns after sign-up, but age the staged attempt
+    // past the safe retry window before either member authenticates.
+    await page.goto("/radiant-audit");
+    await page.locator('label[for="routine-skincare-consistency"]').click();
+    await page.locator('label[for="values-quality-over-price"]').click();
+    await page.locator("#beauty-trend").fill(pendingAnswers.beautyTrend);
+    await page.locator("#mastery-goal").fill(pendingAnswers.masteryGoal);
+    await page.locator("#research-time").fill(pendingAnswers.researchTime);
+    await page.getByLabel("Email address").fill(rightEmail);
+    await page.getByRole("button", { name: /continue|save my audit/i }).click();
+    await expect(page).toHaveURL(/\/sign-up(?:\/|$)/);
+    const oldId = randomUUID();
+    const oldTime = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    await page.evaluate(({ key, oldId, oldTime }) => {
+      const pending = JSON.parse(sessionStorage.getItem(key)!);
+      sessionStorage.setItem(key, JSON.stringify({ ...pending, submissionId: oldId, stagedAt: oldTime }));
+    }, { key: pendingKey, oldId, oldTime });
+    page.on("request", request => {
+      if (request.method() !== "PUT" || new URL(request.url()).pathname !== "/api/users/me/radiant-audit") return;
+      const write = { body: request.postData() ?? "", status: undefined as number | undefined };
+      writes.push(write);
+      void request.response().then(response => { write.status = response?.status(); });
+    });
+
+    await page.goto("/sign-in");
+    await signInThroughClerk(page, wrongEmail);
+    await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+    await expect(page.locator("main")).toContainText(rightEmail);
+    await expect(page.locator("main")).toContainText(wrongEmail);
+    expect(writes).toHaveLength(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+    expect(writes).toHaveLength(0);
+
+    // Correcting the email is consent to change the target, not consent to
+    // create a retake. The wrong member must still review their own current Audit.
+    await page.getByRole("checkbox", { name: /I confirm that these are my Audit answers/ }).check();
+    await page.getByRole("button", { name: "Correct email and save my Audit" }).click();
+    await expect(page.getByRole("heading", { name: "Review your pending Audit" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save as a new retake" })).toBeVisible();
+    const wrongRead = await page.evaluate(async () => {
+      const response = await fetch("/api/users/me/radiant-audit");
+      return { status: response.status, audit: await response.json() };
+    });
+    expect(wrongRead.status).toBe(200);
+    expect(wrongRead.audit.masteryGoal).toBe(wrongCurrent.masteryGoal);
+    expect(writes).toHaveLength(0);
+
+    await clerk.signOut({ page });
+    // Restore the original staged email as if the visitor chose "Use another
+    // account" rather than accepting the corrected target.
+    await page.evaluate(({ key, email }) => {
+      const pending = JSON.parse(sessionStorage.getItem(key)!);
+      sessionStorage.setItem(key, JSON.stringify({ ...pending, email }));
+    }, { key: pendingKey, email: rightEmail });
+    await page.goto("/sign-in");
+    await signInThroughClerk(page, rightEmail);
+    await expect(page.getByRole("heading", { name: "Review your pending Audit" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save as a new retake" })).toBeVisible();
+    const rightRead = await page.evaluate(async () => {
+      const response = await fetch("/api/users/me/radiant-audit");
+      return { status: response.status, audit: await response.json() };
+    });
+    expect(rightRead.status).toBe(200);
+    expect(rightRead.audit.masteryGoal).toBe(rightCurrent.masteryGoal);
+    expect(rightRead.audit.masteryGoal).not.toBe(wrongRead.audit.masteryGoal);
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Save as a new retake" })).toBeVisible();
+    expect(writes).toHaveLength(0);
+    expect(await page.evaluate(key => {
+      const { submissionId, stagedAt } = JSON.parse(sessionStorage.getItem(key)!);
+      return { submissionId, stagedAt };
+    }, pendingKey)).toEqual({ submissionId: oldId, stagedAt: oldTime });
+
+    await page.getByRole("button", { name: "Save as a new retake" }).click();
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    await expect(page.locator("main")).toContainText(pendingAnswers.masteryGoal);
+    await expect.poll(() => writes[0]?.status).toBe(200);
+    expect(writes).toHaveLength(1);
+    expect(JSON.parse(writes[0].body)).toMatchObject({
+      routineChecks: ["skincare-consistency"], valuesChecks: ["quality-over-price"], ...pendingAnswers,
+    });
+    expect(JSON.parse(writes[0].body).submissionId).not.toBe(oldId);
+    const [{ db, radiantAuditsTable, radiantAuditHistoryTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    expect((await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0])))[0].masteryGoal)
+      .toBe(pendingAnswers.masteryGoal);
+    expect((await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[1])))[0].masteryGoal)
+      .toBe(wrongCurrent.masteryGoal);
+    expect((await db.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, created[0])))[0].masteryGoal)
+      .toBe(rightCurrent.masteryGoal);
+    expect(await page.evaluate(key => sessionStorage.getItem(key), pendingKey)).toBeNull();
+  } finally {
+    await cleanUpAccounts(client, created);
+  }
+});
+
 test("a wrong signup code keeps staged answers and only a verified retry saves the Audit", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
