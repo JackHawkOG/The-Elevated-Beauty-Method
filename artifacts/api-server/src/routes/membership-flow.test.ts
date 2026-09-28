@@ -292,6 +292,28 @@ test("recovery does not expire a checkout that completed while cleanup was unava
   sessions.delete(id);
 });
 
+test("recovery clears a paid checkout retry even when Stripe still marks it open", async () => {
+  const id = `cs_${randomUUID()}`;
+  const session: TestSession = {
+    id, status: "open", payment_status: "paid",
+    url: `https://checkout.stripe.test/${id}`, created: Math.floor(Date.now() / 1000),
+  };
+  sessions.set(id, session);
+  await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
+  try {
+    const expirationsBefore = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
+    await recoverQueuedCheckoutExpirations();
+    expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirationsBefore);
+    expect(session).toMatchObject({ id, status: "open", payment_status: "paid" });
+    expect((await pool.query(
+      "SELECT 1 FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
+    )).rows).toHaveLength(0);
+  } finally {
+    await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id]);
+    sessions.delete(id);
+  }
+});
+
 test.each(["open", "complete"] as const)(
   "recovery retries a failed Stripe lookup and uses the live %s session status",
   async (status) => {
