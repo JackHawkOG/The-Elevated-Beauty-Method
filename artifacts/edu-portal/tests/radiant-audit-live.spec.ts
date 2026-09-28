@@ -400,6 +400,146 @@ test("a delayed dashboard membership response cannot show the former member's de
   }
 });
 
+test("a delayed enrollment response cannot show the former member's learning progress after switching accounts", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const aEmail = auditFixtureEmail("dashboard-late-a", tag);
+  const bEmail = auditFixtureEmail("dashboard-late-b", tag);
+  const title = `Private learning ${tag}`;
+  const created: string[] = [];
+  let categoryId: number | undefined;
+  let courseId: number | undefined;
+  let lessonIds: number[] = [];
+  let release!: () => void;
+  let captured!: () => void;
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const requested = new Promise<void>(resolve => { captured = resolve; });
+  let held = false;
+  let delayed: Promise<void> | undefined;
+
+  const [{ db, categoriesTable, coursesTable, lessonsTable, lessonCompletionsTable, enrollmentsTable }, { and, eq, inArray }] =
+    await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+  try {
+    for (const email of [aEmail, bEmail]) {
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
+      });
+      created.push(user.id);
+    }
+    await setupClerkTestingToken({ page });
+    await signIn(page, aEmail);
+    // Create a published, test-owned course rather than depending on shared
+    // editorial content. The completion makes the leaked progress observable.
+    const [category] = await db.insert(categoriesTable).values({ name: title, slug: `learning-${tag}` }).returning();
+    categoryId = category.id;
+    const [course] = await db.insert(coursesTable).values({
+      title, description: title, categoryId, instructorName: "Test learner",
+      accessTier: "Free", publishedAt: new Date(),
+    }).returning();
+    courseId = course.id;
+    const lessons = await db.insert(lessonsTable).values([0, 1].map(sortOrder => ({
+      courseId: course.id, title: `${title} lesson ${sortOrder + 1}`, sortOrder, publishedAt: new Date(),
+    }))).returning();
+    lessonIds = lessons.map(lesson => lesson.id);
+    await db.insert(enrollmentsTable).values({
+      userId: created[0], courseId: course.id, completedLessons: 1, lastLessonId: lessons[0].id,
+    });
+    await db.insert(lessonCompletionsTable).values({ userId: created[0], lessonId: lessons[0].id });
+
+    // Capture an authenticated response first; route.fetch can lose Clerk
+    // session authentication when its result is replayed after sign-out.
+    const aResponse = await page.evaluate(async () => {
+      const response = await fetch("/api/enrollments");
+      return { status: response.status, body: await response.text() };
+    });
+    expect(aResponse.status).toBe(200);
+    expect(JSON.parse(aResponse.body)).toContainEqual(expect.objectContaining({
+      courseId: course.id, courseTitle: title, completedLessons: 1, totalLessons: 2,
+    }));
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    await expect(page.locator("a", { has: page.getByRole("heading", { name: title }) })).toContainText("1 / 2 Lessons");
+    await page.goto("/radiant-audit");
+
+    await page.route("**/api/enrollments", async route => {
+      if (route.request().method() !== "GET" ||
+          new URL(route.request().url()).pathname !== "/api/enrollments" || held) {
+        return route.continue();
+      }
+      held = true;
+      delayed = (async () => {
+        captured();
+        await released;
+        // An aborted former-member request is also a safe outcome.
+        await route.fulfill({ status: 200, contentType: "application/json", body: aResponse.body }).catch(error => {
+          if (!/aborted|closed|cancelled|canceled|intercept/i.test(String(error))) throw error;
+        });
+      })();
+      await delayed;
+    });
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await requested;
+    expect(held).toBe(true);
+    await clerk.signOut({ page });
+    await expect(page.locator("body")).not.toContainText(title);
+
+    // Retain evidence across Clerk redirects and catch even a one-frame render.
+    const watchLearning = (privateTitle: string) => {
+      const check = () => {
+        if (document.body?.innerText.includes(privateTitle)) {
+          sessionStorage.setItem("learning-switch-leak", privateTitle);
+        }
+      };
+      new MutationObserver(check).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      check();
+    };
+    await page.addInitScript(watchLearning, title);
+    await page.evaluate(watchLearning, title);
+    await clerk.signIn({ page, emailAddress: bEmail });
+    await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No courses yet" })).toBeVisible();
+    const bResponse = await page.evaluate(async () => {
+      const response = await fetch("/api/enrollments");
+      return { status: response.status, body: await response.json() };
+    });
+    expect(bResponse).toEqual({ status: 200, body: [] });
+    release();
+    await delayed;
+    await expect(page.locator("body")).not.toContainText(title);
+    expect(await page.evaluate(() => sessionStorage.getItem("learning-switch-leak"))).toBeNull();
+
+    await page.getByRole("link", { name: "View All" }).click();
+    await expect(page).toHaveURL(/\/profile$/);
+    await expect(page.locator("body")).not.toContainText(title);
+    await page.goto("/dashboard");
+    await expect(page.getByRole("heading", { name: "No courses yet" })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(title);
+    expect(await page.evaluate(() => sessionStorage.getItem("learning-switch-leak"))).toBeNull();
+  } finally {
+    release();
+    await page.unroute("**/api/enrollments");
+    requireAuditDevelopment();
+    try {
+      if (lessonIds.length && created.length) await db.delete(lessonCompletionsTable).where(
+        and(eq(lessonCompletionsTable.userId, created[0]), inArray(lessonCompletionsTable.lessonId, lessonIds)),
+      );
+      if (courseId !== undefined && created.length) await db.delete(enrollmentsTable).where(
+        and(eq(enrollmentsTable.userId, created[0]), eq(enrollmentsTable.courseId, courseId)),
+      );
+      if (lessonIds.length) await db.delete(lessonsTable).where(inArray(lessonsTable.id, lessonIds));
+      if (courseId !== undefined) await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
+      if (categoryId !== undefined) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
+    } finally {
+      await cleanUpAccounts(client, created);
+    }
+  }
+});
+
 test("staged answers survive real sign-out and sign-in without saving to the wrong verified account", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
