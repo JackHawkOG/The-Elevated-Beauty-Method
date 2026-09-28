@@ -34,6 +34,7 @@ const waitingSuccessId = `test-waiting-success-${run}`;
 const waitingSuccessActor = `Test Waiting Success ${run}`;
 const courseTitle = `Accelerator progress test ${run}`;
 const requestError = vi.fn();
+const droppedReplyStatuses: number[] = [];
 let courseId: number;
 let categoryId: number;
 let lessonIds: number[];
@@ -70,6 +71,17 @@ beforeAll(async () => {
   const app = express();
   app.use((req, _res, next) => {
     req.log = { error: requestError } as unknown as typeof req.log;
+    next();
+  });
+  app.use((req, res, next) => {
+    if (req.method === "POST" && req.path === "/enrollments" && req.header("x-test-drop-enrollment-reply") === run) {
+      // The route calls json only after its enrollment/activity transaction commits.
+      res.json = ((_body: unknown) => {
+        droppedReplyStatuses.push(res.statusCode);
+        res.destroy();
+        return res;
+      }) as typeof res.json;
+    }
     next();
   });
   app.use(express.json(), coursesRouter, enrollmentsRouter, dashboardRouter);
@@ -336,6 +348,65 @@ test("retries waiting on a successful enrollment do not duplicate its activity",
     releaseActivity();
     await Promise.allSettled(requests);
     transactionSpy.mockRestore();
+  }
+});
+
+test("a retry after a committed enrollment's HTTP reply is lost reuses its feed activity", async () => {
+  const userId = `test-lost-reply-${run}`;
+  const actorName = `Test Lost Reply ${run}`;
+  const title = `Lost reply course ${run}`;
+  let lostReplyCourseId: number | undefined;
+  try {
+    await db.insert(usersTable).values({
+      clerkId: userId, displayName: actorName,
+      email: `${userId}@example.invalid`, membershipTier: "Elevated",
+    });
+    const [course] = await db.insert(coursesTable).values({
+      title, description: "Lost enrollment reply fixture", categoryId,
+      instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+    }).returning();
+    lostReplyCourseId = course.id;
+
+    await expect(fetch(`${baseUrl}/enrollments`, {
+      method: "POST",
+      headers: {
+        "x-test-user": userId,
+        "x-test-drop-enrollment-reply": run,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ courseId: course.id }),
+    })).rejects.toThrow();
+    expect(droppedReplyStatuses).toEqual([201]);
+
+    const persisted = await db.select().from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id),
+    ));
+    expect(persisted).toHaveLength(1);
+    const retry = await request(userId, "/enrollments", "POST", { courseId: course.id });
+    expect(retry.status).toBe(201);
+    expect((retry.data as { id: number }).id).toBe(persisted[0].id);
+    expect(await db.select().from(enrollmentsTable).where(and(
+      eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, course.id),
+    ))).toHaveLength(1);
+    const activity = await db.select().from(activityTable).where(and(
+      eq(activityTable.type, "enrollment"),
+      eq(activityTable.entityTitle, title),
+      eq(activityTable.actorName, actorName),
+    ));
+    expect(activity).toHaveLength(1);
+  } finally {
+    if (lostReplyCourseId) {
+      await db.delete(enrollmentsTable).where(and(
+        eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.courseId, lostReplyCourseId),
+      ));
+      await db.delete(activityTable).where(and(
+        eq(activityTable.type, "enrollment"),
+        eq(activityTable.entityTitle, title),
+        eq(activityTable.actorName, actorName),
+      ));
+      await db.delete(coursesTable).where(eq(coursesTable.id, lostReplyCourseId));
+    }
+    await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
   }
 });
 
