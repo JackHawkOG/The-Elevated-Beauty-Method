@@ -8,6 +8,7 @@ import { ensureRadiantAuditSchema, startRadiantAuditReceiptCleanup, startRadiant
 import { ensureMembershipSchema } from "./lib/ensure-membership-schema";
 import { ensureAnnouncementSchema } from "./lib/ensure-announcement-schema";
 import { reconcileAnnouncementActivity } from "./lib/reconcile-announcement-activity";
+import { reportAfterFirstHealthcheck } from "./routes/health";
 import { ensureMemberStoriesSchema } from "./lib/ensure-member-stories-schema";
 import { getStripeSync } from "./lib/stripeClient";
 import { startMembershipReconciliation } from "./lib/membership-reconciliation";
@@ -38,7 +39,16 @@ await ensureRadiantAuditSchema();
 await ensureMembershipSchema();
 const needsPublicationBackfill = await ensurePublicationSchema();
 await ensureMemberJourneyContent(needsPublicationBackfill);
-await reconcileAnnouncementActivity();
+const announcementRepair = await reconcileAnnouncementActivity();
+// Deployment logs may not index pre-listen output. The configured startup
+// health check runs after the server is accepting requests; report the
+// committed result once there rather than rerunning a non-repeatable repair.
+reportAfterFirstHealthcheck(() => {
+  logger.info(announcementRepair, "Legacy announcement activity reconciliation");
+  if (announcementRepair.review.length) {
+    logger.warn({ review: announcementRepair.review }, "Ambiguous legacy announcement activity requires manual review");
+  }
+});
 
 if (!process.env.DATABASE_URL || !process.env.REPLIT_DOMAINS?.split(",")[0]) {
   throw new Error("Stripe requires DATABASE_URL and REPLIT_DOMAINS");

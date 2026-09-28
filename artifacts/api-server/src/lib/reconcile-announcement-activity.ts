@@ -1,6 +1,5 @@
 import { activityTable, announcementsTable, db } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
-import { logger } from "./logger";
 
 type AnnouncementRow = {
   id: number;
@@ -20,6 +19,7 @@ type ActivityRow = {
 };
 
 type Review = { announcementId: number; activityIds: number[]; reason: string };
+export type AnnouncementActivityRepairResult = { repairedIds: number[]; review: Review[] };
 
 // A title is evidence, not an ID. Normalize only the known trademark-spacing
 // variation, and refuse to assign a feed entry when a title occurs more than once.
@@ -70,8 +70,8 @@ export function planAnnouncementActivityRepair(
   return { missing, review };
 }
 
-export async function reconcileAnnouncementActivity(): Promise<void> {
-  const result = await db.transaction(async tx => {
+export async function reconcileAnnouncementActivity(): Promise<AnnouncementActivityRepairResult> {
+  return db.transaction(async tx => {
     // Serialize startup repairs across server instances; reread after acquiring
     // the lock so a second startup sees the first one's newly inserted rows.
     await tx.execute(sql`select pg_advisory_xact_lock(750075)`);
@@ -90,8 +90,4 @@ export async function reconcileAnnouncementActivity(): Promise<void> {
     }
     return { repairedIds: plan.missing.map(row => row.id), review: plan.review };
   });
-  logger.info(result, "Legacy announcement activity reconciliation");
-  if (result.review.length) {
-    logger.warn({ review: result.review }, "Ambiguous legacy announcement activity requires manual review");
-  }
 }

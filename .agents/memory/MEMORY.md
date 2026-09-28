@@ -31,3 +31,4 @@
 - [pnpm audit workspace rewrites](pnpm-audit-workspace-rewrites.md) — audit --fix can rewrite workspace configuration and remove its comments; review shared overrides before installing.
 - [Enrollment index repair safety](enrollment-index-repair-safety.md) — fail closed on incompatible same-name indexes instead of dropping an unknown legacy object automatically.
 - [Audit browser fixture seeding](audit-browser-fixture-seeding.md) — seed saved drafts away from the mounted form; its delayed initial empty-state effect can erase fixtures.
+- [Published startup log visibility](published-startup-log-visibility.md) — deployment log queries showed health requests but not API pre-listen Pino lines; log committed startup outcomes after readiness.

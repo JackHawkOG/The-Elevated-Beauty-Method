@@ -19,7 +19,13 @@ The production database cannot be written through the read-only inspection conne
 
 After the updated API was published, the production announcements schema includes `actor_id` and `request_key`. Read-only production counts show exactly one title-matching announcement activity each for announcement 1 (activity 3), announcement 2 (activity 11), and announcement 3 (activity 7). The public `/api/dashboard/recent-activity` response also includes those three activity IDs exactly once each. No manual production insert was needed.
 
-The available deployment startup logs did not include the `Legacy announcement activity reconciliation` summary (`repairedIds`/`review`), so the log's exact repair result could not be independently confirmed. Neither announcement gained a duplicate feed entry.
+The available deployment startup logs did not include the `Legacy announcement activity reconciliation` summary (`repairedIds`/`review`), so the log's exact repair result could not be independently confirmed. Neither announcement gained a duplicate feed entry. The author-label discrepancy for announcements 1 and 3 was subsequently evaluated as a historical display-name variation, while exact source attribution remains for staff review (below). A later repeat run cannot reconstruct the original `repairedIds`: already-repaired rows are skipped.
+
+## Finding the result after a future publish
+
+Deployment logs fetched on September 28 included platform startup lines and an API `request completed` entry for `/api/healthz`, but not the API's pre-listen reconciliation summary or `Server listening` entry. The September 27 startup entries were not returned by the available deployment-log query; whether they were never indexed or have since expired could not be determined. Do not infer the original repair result from a later run.
+
+The API now holds the committed repair result until the first successful `/api/healthz` response (the configured production startup health check), then writes one `Legacy announcement activity reconciliation` log entry with `repairedIds` and `review`. Ambiguous cases also produce `Ambiguous legacy announcement activity requires manual review`. Neither result is returned to the health-check caller. Search the API's **Publishing logs** for these exact messages immediately after publishing, and preserve the entry externally if it is needed beyond the deployment log window. An empty `repairedIds` on later startups means there was nothing left to insert on *that* run; it is not evidence about a prior publish.
 
 ## Historical author-label decision on September 28, 2026
 
