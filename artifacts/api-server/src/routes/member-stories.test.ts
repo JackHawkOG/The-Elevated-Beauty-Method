@@ -87,12 +87,7 @@ test("only explicitly permitted stories reach the public feed and withdrawal iso
 
 test("signed-in removal requests hide the identified story and keep the claim private for owner review", async () => {
   const input = { quote: `Removal claim ${run}`, attribution: "Member name", permissionRecord: "Recorded permission", permissionConfirmed: true };
-    const published = await request("/member-stories", owner, "POST", {
-      quote: `${outcome} ${run}`, attribution: "Approved name", permissionRecord: "Written permission",
-      permissionConfirmed: true,
-    });
-
-    const claimant = `test-claimant-${outcome}-${run}`;
+  const published = await request("/member-stories", owner, "POST", input);
   expect(published.status).toBe(201);
   created.push(published.data.id);
   const path = `/member-stories/${published.data.id}/removal-request`;
@@ -124,16 +119,34 @@ test("signed-in removal requests hide the identified story and keep the claim pr
   expect(JSON.stringify(alerts.data)).not.toContain("I withdrew my permission");
   const managed = await request("/member-stories/manage", owner);
   const story = managed.data.find((row: { id: number }) => row.id === published.data.id);
-
-  const reviewPath = `/member-stories/${published.data.id}/removal-review`;
-    expect(reviewed.status).toBe(200);
-    expect(reviewed.data.removalReviewOutcome).toBe(outcome);
-    expect((await request("/member-stories")).data.some((row: { id: number }) => row.id === published.data.id)).toBe(false);
-  }
+  expect(story.removalRequestNote).toBe("I withdrew my permission");
+  expect(story.removalRequestedBy).toBe(member);
+  expect(story.removalRequesterEmail).toBe(`${member}@example.test`);
+  expect(story.withdrawnAt).toBeTruthy();
 });
 
-  const review = await request(reviewPath, owner, "POST", { outcome: "claim_unsubstantiated", note: "Could not corroborate the claim; seek fresh permission before any new publication." });
-
-  const publicAfterReview = await request("/member-stories");
-
-    const reviewed = await request(`/member-stories/${published.data.id}/removal-review`, owner, "POST", { outcome, note: "Privately assessed" });
+test("owner reviews a hidden claim privately without republishing the story", async () => {
+  for (const outcome of ["withdrawal_confirmed", "claim_unsubstantiated", "inconclusive"] as const) {
+    const published = await request("/member-stories", owner, "POST", {
+      quote: `${outcome} ${run}`, attribution: "Approved name", permissionRecord: "Written permission",
+      permissionConfirmed: true,
+    });
+    expect(published.status).toBe(201);
+    created.push(published.data.id);
+    const claimant = `test-claimant-${outcome}-${run}`;
+    expect((await request(`/member-stories/${published.data.id}/removal-request`, claimant, "POST", { note: "This is my story" })).status).toBe(200);
+    const reviewPath = `/member-stories/${published.data.id}/removal-review`;
+    expect((await request(reviewPath, undefined, "POST", { outcome, note: "Privately assessed" })).status).toBe(401);
+    expect((await request(reviewPath, member, "POST", { outcome, note: "Privately assessed" })).status).toBe(403);
+    expect((await request(reviewPath, owner, "POST", { outcome, note: " " })).status).toBe(400);
+    const reviewed = await request(reviewPath, owner, "POST", { outcome, note: "Privately assessed" });
+    expect(reviewed.status).toBe(200);
+    expect(reviewed.data.removalReviewOutcome).toBe(outcome);
+    expect(reviewed.data.removalReviewNote).toBe("Privately assessed");
+    expect(reviewed.data.removalReviewedBy).toBe(owner);
+    expect((await request(reviewPath, owner, "POST", { outcome, note: "Again" })).status).toBe(404);
+    const publicAfterReview = await request("/member-stories");
+    expect(publicAfterReview.data.some((row: { id: number }) => row.id === published.data.id)).toBe(false);
+    expect(JSON.stringify(publicAfterReview.data)).not.toContain("Privately assessed");
+  }
+});

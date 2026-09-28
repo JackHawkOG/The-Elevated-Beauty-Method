@@ -303,7 +303,9 @@ test("a temporary Stripe retrieval failure rolls back the event so redelivery ca
         if (retrievals === 1) throw new Error("Temporary Stripe outage");
         return { status: "canceled", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
       },
+      cancel: vi.fn(),
     },
+    invoices: { list: vi.fn(async () => ({ data: [], has_more: false })) },
   } as unknown as Stripe;
   vi.mocked(getStripeSync).mockResolvedValue({ processWebhook: vi.fn().mockResolvedValue(undefined) } as never);
   vi.mocked(getUncachableStripeClient).mockResolvedValue(stripe);
@@ -343,11 +345,47 @@ test("a temporary Stripe retrieval failure rolls back the event so redelivery ca
 
     expect(await deliver("customer.subscription.updated", event, eventId)).toBe(200);
     expect(retrievals).toBe(2); // A processed replay does not reconcile again.
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(stripe.invoices.list).toHaveBeenCalledTimes(1);
     expect(await retryState()).toMatchObject({ status: "forfeited", membership_tier: "Free" });
   } finally {
     await pool.query("DELETE FROM membership_webhook_events WHERE id = $1", [eventId]);
     await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [retryClerkId]);
     await pool.query("DELETE FROM users WHERE clerk_id = $1", [retryClerkId]);
+  }
+});
+
+test("an already canceled subscription ends access even when invoice history is unavailable", async () => {
+  const canceledClerkId = `billing-ended-${id}`;
+  const canceledSubscriptionId = `sub_billing_ended_${id}`;
+  const cancel = vi.fn();
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: {
+      retrieve: async (requestedId: string) => {
+        expect(requestedId).toBe(canceledSubscriptionId);
+        return { status: "canceled", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+      },
+      cancel,
+    },
+    invoices: { list: async () => { throw new Error("Invoice lookup unavailable"); } },
+  } as unknown as Stripe);
+  await pool.query(
+    "INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [canceledClerkId, "Ended membership fixture", `${canceledClerkId}@example.invalid`],
+  );
+  try {
+    await pool.query(
+      "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id, failed_months) VALUES ($1, 'founding', 'confirmed', $2, 0)",
+      [canceledClerkId, canceledSubscriptionId],
+    );
+    await reconcileMemberships(canceledSubscriptionId);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(await state(canceledSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 0, last_failed_invoice: null, membership_tier: "Free",
+    });
+  } finally {
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [canceledClerkId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [canceledClerkId]);
   }
 });
 
@@ -407,17 +445,19 @@ test("a lost cancellation response rolls back the webhook, then redelivery obser
 
     expect(await deliver("invoice.payment_failed", event, eventId)).toBe(200);
     expect(retrieve).toHaveBeenCalledTimes(2);
-    expect(list).toHaveBeenCalledTimes(2); // The first delivery double-checks invoices; a canceled retry does not list them again.
+    expect(list).toHaveBeenCalledTimes(3); // The canceled retry reads history once without re-canceling.
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(await recordedEvents()).toEqual([{ id: eventId }]);
     expect(await state(lostSubscriptionId)).toEqual({
-      status: "forfeited", failed_months: 0, last_failed_invoice: null, membership_tier: "Free",
+      status: "forfeited", failed_months: 3, last_failed_invoice: failures[0].id, membership_tier: "Free",
     });
 
     expect(await deliver("invoice.payment_failed", event, eventId)).toBe(200);
     expect(retrieve).toHaveBeenCalledTimes(2);
     expect(cancel).toHaveBeenCalledTimes(1);
-    expect(await state(lostSubscriptionId)).toMatchObject({ status: "forfeited", membership_tier: "Free" });
+    expect(await state(lostSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 3, last_failed_invoice: failures[0].id, membership_tier: "Free",
+    });
   } finally {
     await pool.query("DELETE FROM membership_webhook_events WHERE id = $1", [eventId]);
     await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [lostClerkId]);

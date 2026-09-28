@@ -1076,6 +1076,8 @@ export const GetRecentActivityResponseItem = zod.object({
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
 
+export const reviewMemberStoryRemovalBodyNoteMax = 2000;
+
 export const ReviewMemberStoryRemovalBody = zod.object({
   "outcome": zod.enum(['withdrawal_confirmed', 'claim_unsubstantiated', 'inconclusive']),
   "note": zod.string().min(1).max(reviewMemberStoryRemovalBodyNoteMax).describe('Owner-only rationale and checks made during private review')
@@ -1083,8 +1085,6 @@ export const ReviewMemberStoryRemovalBody = zod.object({
 
 
 export const ListMemberStoryRemovalAlertsResponse = zod.array(ListMemberStoryRemovalAlertsResponseItem)
-
-export const reviewMemberStoryRemovalBodyNoteMax = 2000;
 
 export const ReviewMemberStoryRemovalResponse = zod.object({
   "id": zod.number(),

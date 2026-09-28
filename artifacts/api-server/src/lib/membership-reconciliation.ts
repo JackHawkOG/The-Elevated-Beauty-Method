@@ -57,8 +57,11 @@ export async function reconcileSubscription(
   subscriptionId: string,
   stripe: Stripe,
 ): Promise<void> {
-  const result = await client.query<{ id: string; clerk_id: string; kind: string; status: string }>(
-    "SELECT id, clerk_id, kind, status FROM membership_checkouts WHERE stripe_subscription_id = $1 FOR UPDATE",
+  const result = await client.query<{
+    id: string; clerk_id: string; kind: string; status: string;
+    failed_months: number; last_failed_invoice: string | null;
+  }>(
+    "SELECT id, clerk_id, kind, status, failed_months, last_failed_invoice FROM membership_checkouts WHERE stripe_subscription_id = $1 FOR UPDATE",
     [subscriptionId],
   );
   const row = result.rows[0];
@@ -66,14 +69,26 @@ export async function reconcileSubscription(
 
   let subscription = await stripe.subscriptions.retrieve(subscriptionId);
   let failed = { count: 0, lastId: null as string | null };
-  if (row.kind === "founding" && !isSubscriptionEnded(subscription)) {
-    failed = await currentFailedBillingMonths(stripe, subscriptionId);
-    if (failed.count >= 3) {
+  if (row.kind === "founding") {
+    // A cancellation may have succeeded at Stripe while its response was lost.
+    // Read the same invoice history on redelivery so forfeiture keeps its cause.
+    if (isSubscriptionEnded(subscription)) {
+      try {
+        failed = await currentFailedBillingMonths(stripe, subscriptionId);
+      } catch (err) {
+        // Ending access must not depend on a second Stripe API being available.
+        logger.warn({ err, subscriptionId }, "Unable to read ended membership invoice history");
+        failed = { count: row.failed_months, lastId: row.last_failed_invoice };
+      }
+    } else {
+      failed = await currentFailedBillingMonths(stripe, subscriptionId);
+    }
+    if (!isSubscriptionEnded(subscription) && failed.count >= 3) {
       // The invoice snapshot can change while it is being paginated. Confirm
       // from a new first page before making the irreversible Stripe call.
       failed = await currentFailedBillingMonths(stripe, subscriptionId);
     }
-    if (failed.count >= 3) {
+    if (!isSubscriptionEnded(subscription) && failed.count >= 3) {
       // Stripe is the source of truth; a retry after a successful cancellation
       // observes canceled instead of issuing another cancellation.
       subscription = await stripe.subscriptions.cancel(subscriptionId);
