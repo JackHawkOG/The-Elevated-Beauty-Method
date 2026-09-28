@@ -22,6 +22,7 @@ import { RadiantAuditComparison } from "@/components/radiant-audit-comparison";
 import { announceHistoryChange, historyChangeKey } from "@/lib/radiant-audit-history-sync";
 import {
   clearAuditVerification, rememberAuditVerification, trackAuditResumptionIfRequested,
+  trackAuditDraftConflictDisplayed, trackAuditDraftConflictResolved,
   trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
 } from "@/lib/analytics";
 import { canAutoRetryPendingAudit, clearPendingAudit, isAuditReadyToSave, readPendingAudit, restartPendingAudit, stageAudit, type PendingAudit } from "@/lib/radiant-audit-session";
@@ -62,6 +63,8 @@ export default function RadiantAuditPage() {
   const draftWrite = useRef<Promise<void>>(Promise.resolve());
   const draftBlocked = useRef(false);
   const conflictPending = useRef(false);
+  const conflictDisplayed = useRef(false);
+  const conflictResolving = useRef(false);
   const draftVersion = useRef<{ owner: string; revision: string } | null>(null);
   const latestAnswers = useRef<RadiantAuditSubmission | null>(null);
   const skipRestoredChange = useRef(false);
@@ -88,6 +91,8 @@ export default function RadiantAuditPage() {
     setCompletedConflict(false);
     draftBlocked.current = false;
     conflictPending.current = false;
+    conflictDisplayed.current = false;
+    conflictResolving.current = false;
     draftBaseline.current = null;
     draftVersion.current = null;
     draftHadAnswers.current = false;
@@ -163,6 +168,10 @@ export default function RadiantAuditPage() {
         draft: remote && "updatedAt" in remote ? remote : null,
         discarded: !!remote && "discardedAt" in remote,
       });
+      if (!conflictDisplayed.current) {
+        conflictDisplayed.current = true;
+        trackAuditDraftConflictDisplayed();
+      }
       setDraftWarning(null);
     } catch {
       setDraftWarning("Another device changed your online draft. Reload this page to compare drafts.");
@@ -300,7 +309,8 @@ export default function RadiantAuditPage() {
   }, [accountId, email, queueDraft, queueClearDraft]);
 
   async function keepThisDraft() {
-    if (!accountId || !latestAnswers.current || !draftConflict) return;
+    if (!accountId || !latestAnswers.current || !draftConflict || conflictResolving.current) return;
+    conflictResolving.current = true;
     const answers = latestAnswers.current;
     try {
       const saved = await saveRadiantAuditDraft(auditAnswers(answers) as RadiantAuditDraft, { headers: {
@@ -308,18 +318,24 @@ export default function RadiantAuditPage() {
         "x-audit-draft-baseline": draftBaseline.current?.completedAt ?? "none",
         "x-audit-draft-revision": draftVersion.current?.revision ?? "none",
       } });
+      if (activeAccount.current !== accountId) return;
       draftVersion.current = { owner: accountId, revision: saved.updatedAt };
+      trackAuditDraftConflictResolved("local");
+      conflictDisplayed.current = false;
       setDraftConflict(null);
       setDraftWarning(null);
       conflictPending.current = false;
       draftBlocked.current = false;
     } catch (failure) {
       if (!handleDraftConflict(accountId, failure)) setDraftWarning("Your choice couldn't be saved online. Try again.");
+    } finally {
+      conflictResolving.current = false;
     }
   }
 
   function useOtherDraft() {
-    if (!accountId || !draftConflict) return;
+    if (!accountId || !draftConflict || conflictResolving.current) return;
+    conflictResolving.current = true;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     const answers = draftConflict.draft ? { ...draftConflict.draft, email: email ?? "" } : null;
     try { clearAuditDraft(accountId); } catch { /* The online draft is still available. */ }
@@ -328,10 +344,13 @@ export default function RadiantAuditPage() {
     draftHadAnswers.current = !!answers;
     setLoadedDraft({ accountId, answers });
     setDraftRevision(value => value + 1);
+    trackAuditDraftConflictResolved(draftConflict.draft ? "online" : "discard");
+    conflictDisplayed.current = false;
     setDraftConflict(null);
     setDraftWarning(null);
     conflictPending.current = false;
     draftBlocked.current = false;
+    conflictResolving.current = false;
   }
 
   async function discardDraft() {

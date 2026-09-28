@@ -1335,6 +1335,7 @@ test("returning to the dashboard clears invalid local Audit answers but preserve
 test("two devices choose which unfinished Audit draft to keep", async ({ page, browser }) => {
   let online: (Answers & { updatedAt: string }) | null = null;
   let sequence = 0;
+  let failNextResolution = false;
   const handler = async (route: import("@playwright/test").Route) => {
     const req = route.request();
     if (new URL(req.url()).pathname.endsWith("/draft")) {
@@ -1342,6 +1343,10 @@ test("two devices choose which unfinished Audit draft to keep", async ({ page, b
       if (req.headers()["x-audit-draft-revision"] !== (online?.updatedAt ?? "none"))
         return route.fulfill({ status: 409, json: { error: "Draft changed" } });
       if (req.method() === "PUT") {
+        if (failNextResolution) {
+          failNextResolution = false;
+          return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+        }
         online = { ...(req.postDataJSON() as Answers), updatedAt: new Date(2026, 0, 1, 0, 0, sequence++).toISOString() };
         return route.fulfill({ json: online });
       }
@@ -1351,9 +1356,11 @@ test("two devices choose which unfinished Audit draft to keep", async ({ page, b
     return route.fulfill({ json: null });
   };
   await page.route("**/api/users/me/radiant-audit**", handler);
+  await captureAuditTracking(page);
   const secondContext = await browser.newContext({ baseURL: "http://127.0.0.1:4179" });
   try {
     const second = await secondContext.newPage();
+    await captureAuditTracking(second);
     await second.route("**/api/users/me/radiant-audit**", handler);
     await signInAs(page, "member-a");
     await signInAs(second, "member-a");
@@ -1362,19 +1369,35 @@ test("two devices choose which unfinished Audit draft to keep", async ({ page, b
     await second.locator("#beauty-trend").fill("second device");
     await expect(second.getByRole("heading", { name: "Your Audit draft changed on another device" })).toBeVisible();
     expect(online?.beautyTrend).toBe("first device");
+    failNextResolution = true;
+    await second.getByRole("button", { name: "Keep this device's answers" }).click();
+    await expect(second.getByText("Your choice couldn't be saved online. Try again.")).toBeVisible();
+    expect(await auditConflictEvents(second)).toEqual([
+      { name: "radiant_audit_draft_conflict_displayed", data: undefined },
+    ]);
     await second.getByRole("button", { name: "Keep this device's answers" }).click();
     await expect.poll(() => online?.beautyTrend).toBe("second device");
+    await expect(second.getByRole("heading", { name: "Your Audit draft changed on another device" })).toHaveCount(0);
+    expect(await auditConflictEvents(second)).toEqual([
+      { name: "radiant_audit_draft_conflict_displayed", data: undefined },
+      { name: "radiant_audit_draft_conflict_resolved", data: { choice: "local" } },
+    ]);
     await page.locator("#beauty-trend").fill("first device revised");
     await expect(page.getByRole("heading", { name: "Your Audit draft changed on another device" })).toBeVisible();
     await page.getByRole("button", { name: "Use the other device's answers" }).click();
     await expect(page.locator("#beauty-trend")).toHaveValue("second device");
     expect(online?.beautyTrend).toBe("second device");
+    expect(await auditConflictEvents(page)).toEqual([
+      { name: "radiant_audit_draft_conflict_displayed", data: undefined },
+      { name: "radiant_audit_draft_conflict_resolved", data: { choice: "online" } },
+    ]);
   } finally {
     await secondContext.close();
   }
 });
 
 test("an idle form notices online edits and deletion on visibility without replacing local answers", async ({ page }) => {
+  await captureAuditTracking(page);
   let online: (Answers & { updatedAt: string }) | { discardedAt: string } | null = null;
   let sequence = 0;
   const revision = () => online
@@ -1402,6 +1425,10 @@ test("an idle form notices online edits and deletion on visibility without repla
   await expect(page.getByText("other device private trend")).toBeVisible();
   await page.getByRole("button", { name: "Use the other device's answers" }).click();
   await expect(page.locator("#beauty-trend")).toHaveValue("other device private trend");
+  expect(await auditConflictEvents(page)).toEqual([
+    { name: "radiant_audit_draft_conflict_displayed", data: undefined },
+    { name: "radiant_audit_draft_conflict_resolved", data: { choice: "online" } },
+  ]);
 
   // No local edit is needed to discover the deletion marker either.
   online = { discardedAt: new Date(Date.UTC(2026, 0, 1, 0, 0, sequence++)).toISOString() };
@@ -1411,6 +1438,31 @@ test("an idle form notices online edits and deletion on visibility without repla
   await page.getByRole("button", { name: "Keep this device's answers" }).click();
   await expect.poll(() => online && "beautyTrend" in online ? online.beautyTrend : null).toBe("other device private trend");
   await expect(page.getByRole("heading", { name: "Your Audit draft changed on another device" })).toHaveCount(0);
+  expect(await auditConflictEvents(page)).toEqual([
+    { name: "radiant_audit_draft_conflict_displayed", data: undefined },
+    { name: "radiant_audit_draft_conflict_resolved", data: { choice: "online" } },
+    { name: "radiant_audit_draft_conflict_displayed", data: undefined },
+    { name: "radiant_audit_draft_conflict_resolved", data: { choice: "local" } },
+  ]);
+});
+
+test("keeping an online deletion records a discard choice without sending answers", async ({ page }) => {
+  await captureAuditTracking(page);
+  await page.route("**/api/users/me/radiant-audit**", route => {
+    if (!route.request().url().endsWith("/draft")) return route.fulfill({ json: null });
+    if (route.request().method() === "GET")
+      return route.fulfill({ json: { discardedAt: "2026-01-01T00:00:01.000Z" } });
+    return route.fulfill({ status: 409, json: { error: "Draft changed" } });
+  });
+  await signInAs(page, "member-a");
+  await page.locator("#beauty-trend").fill("private answer");
+  await expect(page.getByRole("button", { name: "Keep the online draft discarded" })).toBeVisible();
+  await page.getByRole("button", { name: "Keep the online draft discarded" }).click();
+  await expect(page.getByRole("heading", { name: "Your Audit draft changed on another device" })).toHaveCount(0);
+  expect(await auditConflictEvents(page)).toEqual([
+    { name: "radiant_audit_draft_conflict_displayed", data: undefined },
+    { name: "radiant_audit_draft_conflict_resolved", data: { choice: "discard" } },
+  ]);
 });
 
 test("the bounded idle check stays scoped to the signed-in account", async ({ page }) => {
@@ -1482,6 +1534,13 @@ async function captureAuditTracking(page: Page) {
       },
     };
   });
+}
+
+async function auditConflictEvents(page: Page): Promise<TrackingEvent[]> {
+  return page.evaluate(() =>
+    (window as unknown as { __auditTracking: TrackingEvent[] }).__auditTracking
+      .filter(event => event.name.startsWith("radiant_audit_draft_conflict")),
+  );
 }
 
 async function auditTracking(page: Page): Promise<TrackingEvent[]> {

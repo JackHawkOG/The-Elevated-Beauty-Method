@@ -22,6 +22,14 @@ export function trackRadiantAuditSaved(completionKind: "first_time" | "retake"):
   trackEvent("radiant_audit_saved", { completion_kind: completionKind });
 }
 
+export function trackAuditDraftConflictDisplayed(): void {
+  trackEvent("radiant_audit_draft_conflict_displayed");
+}
+
+export function trackAuditDraftConflictResolved(choice: "local" | "online" | "discard"): void {
+  trackEvent("radiant_audit_draft_conflict_resolved", { choice });
+}
+
 type AuditVerificationLocation = "form" | "completion";
 const auditVerificationKey = "radiant_audit_verification_account";
 
