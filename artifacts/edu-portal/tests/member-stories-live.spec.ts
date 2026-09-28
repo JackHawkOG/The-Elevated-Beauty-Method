@@ -37,6 +37,20 @@ test("real owner publication and withdrawal update an already-open signed-out la
     created.push(member.id);
 
     await signIn(page, ownerEmail);
+    // Establish the signed-out visitor's initial empty result before publishing.
+    // Waiting for the feed response prevents a slow first load from masquerading as a poll.
+    visitorContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    const visitor = await visitorContext.newPage();
+    const initialFeed = visitor.waitForResponse(response =>
+      /\/api\/member-stories(?:\?.*)?$/.test(response.url()) && response.status() === 200,
+    );
+    await visitor.goto("/");
+    await initialFeed;
+    await expect(visitor.getByRole("link", { name: "Sign In", exact: true })).toBeVisible();
+    const publicStory = visitor.locator("figure").filter({ hasText: quote });
+    await expect(publicStory).toHaveCount(0);
+    await expect(visitor.locator("body")).not.toContainText(attribution);
+
     await expect(page.getByRole("link", { name: "Member stories" })).toBeVisible();
     await page.getByRole("link", { name: "Member stories" }).click();
     await expect(page.getByRole("heading", { name: "Publish an approved story" })).toBeVisible();
@@ -51,13 +65,10 @@ test("real owner publication and withdrawal update an already-open signed-out la
     await expect(story).toContainText(attribution);
     await expect(story).toContainText("Published");
 
-    // This separate visitor stays on the landing page while the owner uses their own tab.
-    visitorContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
-    const visitor = await visitorContext.newPage();
-    await visitor.goto("/");
-    await expect(visitor.getByRole("link", { name: "Sign In", exact: true })).toBeVisible();
-    const publicStory = visitor.locator("figure").filter({ hasText: quote });
+    // The visitor must receive both fields via polling, without navigating or reloading.
+    await expect(publicStory).toContainText(quote, { timeout: 12_000 });
     await expect(publicStory).toContainText(attribution);
+    await expect(visitor).toHaveURL("/");
     await expect(visitor.locator("body")).not.toContainText(permission);
 
     // An outage after the quote loaded must not leave an unverified quote visible.
