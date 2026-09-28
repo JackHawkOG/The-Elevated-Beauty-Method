@@ -27,6 +27,7 @@ export async function ensureMemberStoriesSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "subject_verified_at" timestamptz`);
   await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "subject_verified_by" text`);
   await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "removal_requester_is_verified_subject" boolean`);
+  await db.execute(sql`ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "test_visibility_key" text`);
   await db.execute(sql`CREATE TABLE IF NOT EXISTS "member_story_review_corrections" (
     "id" serial PRIMARY KEY,
     "story_id" integer NOT NULL REFERENCES "member_stories"("id") ON DELETE CASCADE,

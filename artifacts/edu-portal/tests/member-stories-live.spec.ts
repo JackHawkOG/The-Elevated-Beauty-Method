@@ -1,7 +1,18 @@
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { randomBytes } from "node:crypto";
 import { newStoryFixtureTag, requireStoryDevelopment, storyFixtureEmail, storyFixturePrivateMetadata } from "./member-stories-fixtures";
+
+async function routeStoryVisibility(context: BrowserContext | Page, visibilityKey: string, method: "GET" | "POST") {
+  await context.route("**/api/member-stories", async route => {
+    if (route.request().method() === method) {
+      await route.continue({ headers: { ...route.request().headers(), "x-story-test-visibility": visibilityKey } });
+    } else {
+      await route.continue();
+    }
+  });
+}
 
 async function signIn(page: Page, email: string) {
   await page.goto("/dashboard");
@@ -16,6 +27,7 @@ test("real owner publication and withdrawal update an already-open signed-out la
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const marker = newStoryFixtureTag();
+  const visibilityKey = randomBytes(16).toString("hex");
   const ownerEmail = storyFixtureEmail("owner", marker);
   const memberEmail = storyFixtureEmail("member", marker);
   const quote = `Approved browser check ${marker}`;
@@ -23,6 +35,7 @@ test("real owner publication and withdrawal update an already-open signed-out la
   const permission = `Disposable test approval for exact quote and attribution ${marker}`;
   const created: string[] = [];
   let visitorContext: BrowserContext | undefined;
+  let ordinaryVisitor: BrowserContext | undefined;
   try {
     const owner = await client.users.createUser({
       emailAddress: [ownerEmail], firstName: "Story", lastName: "Owner",
@@ -37,9 +50,11 @@ test("real owner publication and withdrawal update an already-open signed-out la
     created.push(member.id);
 
     await signIn(page, ownerEmail);
+    await routeStoryVisibility(page, visibilityKey, "POST");
     // Establish the signed-out visitor's initial empty result before publishing.
     // Waiting for the feed response prevents a slow first load from masquerading as a poll.
     visitorContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    await routeStoryVisibility(visitorContext, visibilityKey, "GET");
     const visitor = await visitorContext.newPage();
     const initialFeed = visitor.waitForResponse(response =>
       /\/api\/member-stories(?:\?.*)?$/.test(response.url()) && response.status() === 200,
@@ -70,6 +85,11 @@ test("real owner publication and withdrawal update an already-open signed-out la
     await expect(publicStory).toContainText(attribution);
     await expect(visitor).toHaveURL("/");
     await expect(visitor.locator("body")).not.toContainText(permission);
+    ordinaryVisitor = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    const ordinaryPage = await ordinaryVisitor.newPage();
+    await ordinaryPage.goto("/");
+    await expect(ordinaryPage.locator("figure").filter({ hasText: quote })).toHaveCount(0);
+    await expect(ordinaryPage.locator("body")).not.toContainText(attribution);
 
     // An outage after the quote loaded must not leave an unverified quote visible.
     let failedRefreshes = 0;
@@ -117,7 +137,7 @@ test("real owner publication and withdrawal update an already-open signed-out la
   } finally {
     // Remove only this run's disposable story and accounts, including on assertion failure.
     try {
-      await visitorContext?.close();
+      await Promise.all([visitorContext?.close(), ordinaryVisitor?.close()]);
     } finally {
       const [{ db, memberStoriesTable, usersTable }, { eq, inArray, and }] =
         await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
@@ -139,6 +159,7 @@ test("an open owner dashboard notices a member's removal request without exposin
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const marker = newStoryFixtureTag();
+  const visibilityKey = randomBytes(16).toString("hex");
   const ownerEmail = storyFixtureEmail("owner", marker);
   const memberEmail = storyFixtureEmail("member", marker);
   const quote = `Approved browser check ${marker}`;
@@ -163,6 +184,7 @@ test("an open owner dashboard notices a member's removal request without exposin
 
     await setupClerkTestingToken({ page });
     await signIn(page, ownerEmail);
+    await routeStoryVisibility(page, visibilityKey, "POST");
     await page.goto("/member-stories");
     await page.getByLabel("Approved quote").fill(quote);
     await page.getByLabel("Approved public attribution").fill(attribution);
@@ -181,6 +203,7 @@ test("an open owner dashboard notices a member's removal request without exposin
 
     const origin = new URL(page.url()).origin;
     visitorContext = await browser.newContext({ baseURL: origin });
+    await routeStoryVisibility(visitorContext, visibilityKey, "GET");
     const visitor = await visitorContext.newPage();
     await visitor.goto("/");
     const publicStory = visitor.locator("figure").filter({ hasText: quote });
@@ -188,6 +211,7 @@ test("an open owner dashboard notices a member's removal request without exposin
     await expect(visitor.locator("body")).not.toContainText(permission);
 
     memberContext = await browser.newContext({ baseURL: origin });
+    await routeStoryVisibility(memberContext, visibilityKey, "GET");
     const memberPage = await memberContext.newPage();
     await setupClerkTestingToken({ page: memberPage });
     await signIn(memberPage, memberEmail);

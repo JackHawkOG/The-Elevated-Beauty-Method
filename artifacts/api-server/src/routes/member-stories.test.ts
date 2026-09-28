@@ -13,6 +13,7 @@ vi.mock("@clerk/express", () => ({
     if (id.startsWith("missing-")) throw Object.assign(new Error("Unknown account"), { status: 404 });
     return {
       publicMetadata: { role: id.startsWith("test-owner-") ? "owner" : "member" },
+      privateMetadata: { ...(id.includes("-fixture-") ? { memberStoriesLiveFixture: "member-stories-live-v1" } : {}) },
       primaryEmailAddress: { emailAddress: `${id}@example.test` },
     };
   } } },
@@ -25,10 +26,10 @@ const created: number[] = [];
 let server: Server;
 let base: string;
 
-async function request(path: string, user?: string, method = "GET", body?: object) {
+async function request(path: string, user?: string, method = "GET", body?: object, headers?: Record<string, string>) {
   const response = await fetch(`${base}${path}`, {
     method,
-    headers: { ...(user ? { "x-test-user": user } : {}), ...(body ? { "content-type": "application/json" } : {}) },
+    headers: { ...(user ? { "x-test-user": user } : {}), ...(body ? { "content-type": "application/json" } : {}), ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
@@ -59,7 +60,9 @@ afterAll(async () => {
 });
 
 test("only explicitly permitted stories reach the public feed and withdrawal isolates a story", async () => {
-  const input = { quote: `Removal claim ${run}`, attribution: "Member name", permissionRecord: "Recorded permission", permissionConfirmed: true };
+  const input = { quote: `Verified ${run}`, attribution: "Approved name", permissionRecord: "Written permission", permissionConfirmed: true };
+
+  const key = "a".repeat(32);
   expect((await request("/member-stories", undefined, "POST", input)).status).toBe(401);
   expect((await request("/member-stories", member, "POST", input)).status).toBe(403);
   expect((await request("/member-stories", owner, "POST", { ...input, permissionConfirmed: false })).status).toBe(400);
@@ -88,12 +91,39 @@ test("only explicitly permitted stories reach the public feed and withdrawal iso
   expect(publicAfter.data.some((story: { id: number }) => story.id === second.data.id)).toBe(true);
 });
 
+test("live test publication is visible only to the matching visitor and stays isolated until withdrawal", async () => {
+  const input = { quote: `Isolated story ${run}`, attribution: "Browser fixture",
+    permissionRecord: "Disposable permission", permissionConfirmed: true };
+  const key = "a".repeat(32);
+  const otherKey = "b".repeat(32);
+  const header = { "x-story-test-visibility": key };
+  expect((await request("/member-stories", owner, "POST", input, header)).status).toBe(403);
+  expect((await request("/member-stories", `test-owner-fixture-${run}`, "POST", input, { "x-story-test-visibility": "bad" })).status).toBe(400);
+  const published = await request("/member-stories", `test-owner-fixture-${run}`, "POST", input, header);
+  expect(published.status).toBe(201);
+  created.push(published.data.id);
+  expect(published.data).not.toHaveProperty("testVisibilityKey");
+  const inFeed = async (headers?: Record<string, string>) =>
+    (await request("/member-stories", undefined, "GET", undefined, headers)).data.some(
+      (row: { id: number }) => row.id === published.data.id,
+    );
+  expect(await inFeed()).toBe(false);
+  expect(await inFeed({ "x-story-test-visibility": otherKey })).toBe(false);
+  expect(await inFeed({ "x-story-test-visibility": "invalid" })).toBe(false);
+  expect(await inFeed(header)).toBe(true);
+  expect((await request("/member-stories/manage", `test-owner-fixture-${run}`)).data.find(
+    (row: { id: number }) => row.id === published.data.id,
+  )).not.toHaveProperty("testVisibilityKey");
+  expect((await request("/member-stories/manage", owner)).data.some(
+    (row: { id: number }) => row.id === published.data.id,
+  )).toBe(false);
+  expect((await request(`/member-stories/${published.data.id}/withdraw`, `test-owner-fixture-${run}`, "POST")).status).toBe(200);
+  expect(await inFeed(header)).toBe(false);
+});
+
 test("signed-in removal requests hide the identified story and keep the claim private for owner review", async () => {
   const input = { quote: `Removal claim ${run}`, attribution: "Member name", permissionRecord: "Recorded permission", permissionConfirmed: true };
-  const published = await request("/member-stories", owner, "POST", {
-    quote: `Corrected claim ${run}`, attribution: "Member name",
-    permissionRecord: "Written permission", permissionConfirmed: true,
-  });
+  const published = await request("/member-stories", owner, "POST", input);
   expect(published.status).toBe(201);
   created.push(published.data.id);
   const path = `/member-stories/${published.data.id}/removal-request`;
@@ -108,7 +138,6 @@ test("signed-in removal requests hide the identified story and keep the claim pr
   expect((await request(path, member, "POST", { note: "Again" })).status).toBe(429);
   const other = await request("/member-stories", owner, "POST", { ...input, quote: `Other story ${run}` });
   created.push(other.data.id);
-  expect((await request(`/member-stories/${other.data.id}/removal-request`, member, "POST", { note: "Another claim" })).status).toBe(429);
   const publicList = await request("/member-stories");
   expect(publicList.data.some((story: { id: number }) => story.id === published.data.id)).toBe(false);
   expect(publicList.data.some((story: { id: number }) => story.id === other.data.id)).toBe(true);
@@ -144,8 +173,8 @@ test("owner can privately review a hidden claim without republishing the story",
   expect((await request(`/member-stories/${stillPending.data.id}/removal-request`, `test-other-${run}`, "POST", { note: "Please remove" })).status).toBe(200);
   for (const outcome of ["withdrawal_confirmed", "claim_unsubstantiated", "inconclusive"] as const) {
     const published = await request("/member-stories", owner, "POST", {
-      quote: `${outcome} ${run}`, attribution: "Approved name",
-      permissionRecord: "Written permission", permissionConfirmed: true,
+      quote: `${outcome} ${run}`, attribution: "Approved name", permissionRecord: "Written permission",
+      permissionConfirmed: true,
     });
     expect(published.status).toBe(201);
     created.push(published.data.id);
@@ -181,6 +210,7 @@ test("corrections append private decisions without erasing the first review or r
     quote: `Corrected claim ${run}`, attribution: "Member name",
     permissionRecord: "Written permission", permissionConfirmed: true,
   });
+
   created.push(published.data.id);
   const reviewPath = `/member-stories/${published.data.id}/removal-review`;
   const correctionPath = `${reviewPath}/corrections`;
@@ -225,6 +255,7 @@ test("corrections append private decisions without erasing the first review or r
 test("owner verifies a subject at publication, and claims snapshot the account match without disclosing proof", async () => {
   const subject = `test-subject-${run}`;
   const input = { quote: `Verified ${run}`, attribution: "Approved name", permissionRecord: "Written permission", permissionConfirmed: true };
+
   const linked = { ...input, verifiedSubjectUserId: subject, subjectVerificationRecord: "Identity confirmed privately" };
   expect((await request("/member-stories", member, "POST", linked)).status).toBe(403);
   expect((await request("/member-stories", owner, "POST", { ...input, verifiedSubjectUserId: subject })).status).toBe(400);

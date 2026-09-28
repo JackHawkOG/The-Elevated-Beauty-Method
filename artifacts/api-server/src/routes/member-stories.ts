@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { clerkClient } from "@clerk/express";
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, memberStoriesTable, memberStoryReviewCorrectionsTable } from "@workspace/db";
 import {
   ListPublishedMemberStoriesResponse,
@@ -19,6 +19,8 @@ import {
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router = Router();
+const testVisibilityHeader = "x-story-test-visibility";
+const testVisibilityPattern = /^[0-9a-f]{32}$/;
 
 async function requireOwner(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -37,8 +39,9 @@ async function requireOwner(req: Request, res: Response, next: NextFunction): Pr
 type Correction = typeof memberStoryReviewCorrectionsTable.$inferSelect;
 
 function ownerStory(row: typeof memberStoriesTable.$inferSelect, corrections: Correction[] = []) {
+  const { testVisibilityKey: _testVisibilityKey, ...story } = row;
   return {
-    ...row,
+    ...story,
     permissionRecordedAt: row.permissionRecordedAt.toISOString(),
     subjectVerifiedAt: row.subjectVerifiedAt?.toISOString() ?? null,
     publishedAt: row.publishedAt.toISOString(),
@@ -58,21 +61,30 @@ function ownerStory(row: typeof memberStoriesTable.$inferSelect, corrections: Co
   };
 }
 
-router.get("/member-stories", async (_req, res): Promise<void> => {
+router.get("/member-stories", async (req, res): Promise<void> => {
   res.set("Cache-Control", "no-store");
+  const header = req.header(testVisibilityHeader);
+  const visibilityKey = header && testVisibilityPattern.test(header) ? header : null;
   const rows = await db.select({
     id: memberStoriesTable.id,
     quote: memberStoriesTable.quote,
     attribution: memberStoriesTable.attribution,
   }).from(memberStoriesTable)
-    .where(isNull(memberStoriesTable.withdrawnAt))
+    .where(and(
+      isNull(memberStoriesTable.withdrawnAt),
+      visibilityKey
+        ? or(isNull(memberStoriesTable.testVisibilityKey), eq(memberStoriesTable.testVisibilityKey, visibilityKey))
+        : isNull(memberStoriesTable.testVisibilityKey),
+    ))
     .orderBy(desc(memberStoriesTable.publishedAt));
   res.json(ListPublishedMemberStoriesResponse.parse(rows));
 });
 
-router.get("/member-stories/manage", requireAuth, requireOwner, async (_req, res): Promise<void> => {
+router.get("/member-stories/manage", requireAuth, requireOwner, async (req, res): Promise<void> => {
   res.set("Cache-Control", "private, no-store");
-  const rows = await db.select().from(memberStoriesTable).orderBy(desc(memberStoriesTable.publishedAt));
+  const rows = await db.select().from(memberStoriesTable)
+    .where(or(isNull(memberStoriesTable.testVisibilityKey), eq(memberStoriesTable.permissionRecordedBy, req.userId!)))
+    .orderBy(desc(memberStoriesTable.publishedAt));
   const corrections = rows.length ? await db.select().from(memberStoryReviewCorrectionsTable)
     .where(inArray(memberStoryReviewCorrectionsTable.storyId, rows.map(row => row.id)))
     .orderBy(asc(memberStoryReviewCorrectionsTable.id)) : [];
@@ -116,6 +128,24 @@ router.post("/member-stories", requireAuth, requireOwner, async (req, res): Prom
     res.status(400).json({ error: "Quote, attribution and permission record are required" });
     return;
   }
+  const testVisibilityKey = req.header(testVisibilityHeader);
+  if (testVisibilityKey !== undefined) {
+    if (process.env.NODE_ENV === "production" || !testVisibilityPattern.test(testVisibilityKey)) {
+      res.status(400).json({ error: "Invalid story test visibility key" });
+      return;
+    }
+    try {
+      const user = await clerkClient.users.getUser(req.userId!);
+      if (user.privateMetadata.memberStoriesLiveFixture !== "member-stories-live-v1") {
+        res.status(403).json({ error: "Story test visibility is reserved for test accounts" });
+        return;
+      }
+    } catch (err) {
+      req.log.error({ err }, "Could not verify story test account");
+      res.status(503).json({ error: "Unable to verify story test account" });
+      return;
+    }
+  }
   const subjectId = parsed.data.verifiedSubjectUserId?.trim();
   const verificationRecord = parsed.data.subjectVerificationRecord?.trim();
   if ((!!subjectId !== !!verificationRecord) || (subjectId && subjectId.length > 255) || (verificationRecord && verificationRecord.length > 2000)) {
@@ -138,6 +168,7 @@ router.post("/member-stories", requireAuth, requireOwner, async (req, res): Prom
   const [row] = await db.insert(memberStoriesTable).values({
     quote, attribution, permissionRecord,
     permissionRecordedAt: now, permissionRecordedBy: req.userId!, publishedAt: now,
+    testVisibilityKey: testVisibilityKey ?? null,
     verifiedSubjectUserId: subjectId || null,
     subjectVerificationRecord: verificationRecord || null,
     subjectVerifiedAt: subjectId ? now : null,

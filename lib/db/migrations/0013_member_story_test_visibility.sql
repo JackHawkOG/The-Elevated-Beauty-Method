@@ -1,0 +1,1 @@
+ALTER TABLE "member_stories" ADD COLUMN IF NOT EXISTS "test_visibility_key" text;

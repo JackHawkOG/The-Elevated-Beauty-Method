@@ -14,6 +14,7 @@ export const memberStoriesTable = pgTable("member_stories", {
   subjectVerifiedAt: timestamp("subject_verified_at", { withTimezone: true }),
   subjectVerifiedBy: text("subject_verified_by"),
   publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+  testVisibilityKey: text("test_visibility_key"),
   withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
   withdrawnBy: text("withdrawn_by"),
   removalRequestedAt: timestamp("removal_requested_at", { withTimezone: true }),
