@@ -147,12 +147,15 @@ export default function RadiantAuditPage() {
     };
   }, [accountId, email]);
 
-  const showDraftConflict = useCallback(async (owner: string) => {
+  const showDraftConflict = useCallback(async (
+    owner: string, knownRemote?: Awaited<ReturnType<typeof getRadiantAuditDraft>>,
+  ) => {
     if (owner !== activeAccount.current) return;
     draftBlocked.current = true;
     conflictPending.current = true;
     try {
-      const remote = await getRadiantAuditDraft({ responseType: "json" });
+      const remote = knownRemote === undefined
+        ? await getRadiantAuditDraft({ responseType: "json" }) : knownRemote;
       if (owner !== activeAccount.current) return;
       draftVersion.current = { owner, revision: remote
         ? ("discardedAt" in remote ? remote.discardedAt : remote.updatedAt) : "none" };
@@ -165,6 +168,43 @@ export default function RadiantAuditPage() {
       setDraftWarning("Another device changed your online draft. Reload this page to compare drafts.");
     }
   }, []);
+
+  useEffect(() => {
+    if (!accountId || loadedDraft?.accountId !== accountId) return;
+    const owner = accountId;
+    let active = true;
+    let checking = false;
+    const checkFreshness = async () => {
+      if (!active || checking || document.visibilityState !== "visible" ||
+          activeAccount.current !== owner || draftBlocked.current || saveConfirmed.current ||
+          draftTimer.current || draftVersion.current?.owner !== owner) return;
+      checking = true;
+      try {
+        await draftWrite.current.catch(() => {});
+        if (!active || activeAccount.current !== owner || draftBlocked.current ||
+            saveConfirmed.current || draftTimer.current) return;
+        const expected = draftVersion.current?.revision;
+        const remote = await getRadiantAuditDraft({ responseType: "json" });
+        if (!active || activeAccount.current !== owner || draftBlocked.current ||
+            saveConfirmed.current || draftTimer.current || draftVersion.current?.revision !== expected) return;
+        const revision = remote
+          ? ("discardedAt" in remote ? remote.discardedAt : remote.updatedAt) : "none";
+        if (revision !== expected) await showDraftConflict(owner, remote);
+      } catch {
+        // The next visibility check or interval retries; never replace local answers on read failure.
+      } finally {
+        checking = false;
+      }
+    };
+    const onVisibilityChange = () => { if (document.visibilityState === "visible") void checkFreshness(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const interval = window.setInterval(() => void checkFreshness(), 30_000);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(interval);
+    };
+  }, [accountId, loadedDraft?.accountId, showDraftConflict]);
 
   const handleDraftConflict = useCallback((owner: string, failure: unknown) => {
     if (owner !== activeAccount.current) return;
