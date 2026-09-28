@@ -17,6 +17,7 @@
     "test:publication": "vitest run artifacts/api-server/src/routes/publication-authorization.test.ts --maxWorkers=1",
     "test:audit-ui": "playwright test artifacts/edu-portal/tests/radiant-audit.spec.ts",
     "test:membership-ui": "playwright test artifacts/edu-portal/tests/membership-conversion.spec.ts",
+    "test:membership-live": "playwright test --config playwright.membership-live.config.ts",
     "test:audit-live": "playwright test --config playwright.audit-live.config.ts",
     "cleanup:audit-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/radiant-audit-fixtures-cleanup.ts",
     "cleanup:community-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/community-fixtures-cleanup.ts",

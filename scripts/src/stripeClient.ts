@@ -25,6 +25,13 @@ export async function getUncachableStripeClient(): Promise<Stripe> {
   return new Stripe(secretKey);
 }
 
+// Live browser fixtures must never create subscriptions in a production Stripe account.
+export async function getTestStripeClient(): Promise<Stripe> {
+  const { secretKey } = await credentials();
+  if (!secretKey.startsWith("sk_test_")) throw new Error("Membership fixtures require Stripe test mode.");
+  return new Stripe(secretKey);
+}
+
 export async function getStripeSync(): Promise<StripeSync> {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required for Stripe");
   const { secretKey, webhookSecret } = await credentials();
