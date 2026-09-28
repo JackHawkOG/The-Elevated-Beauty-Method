@@ -2,29 +2,11 @@ import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup } from "@clerk/testing/playwright";
 import { expect, test } from "@playwright/test";
-
-function requireDevelopment() {
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT ||
-      !process.env.CLERK_SECRET_KEY?.startsWith("sk_test_") ||
-      !process.env.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_") ||
-      !process.env.REPLIT_DEV_DOMAIN?.endsWith(".replit.dev") ||
-      !process.env.DATABASE_URL || !process.env.PGHOST || !process.env.PGPORT ||
-      !process.env.PGDATABASE || !process.env.PGUSER) {
-    throw new Error("The live profile check requires development Clerk, preview, and database.");
-  }
-  const target = new URL(process.env.DATABASE_URL);
-  if (target.hostname !== process.env.PGHOST ||
-      (target.port || "5432") !== process.env.PGPORT ||
-      decodeURIComponent(target.pathname.slice(1)) !== process.env.PGDATABASE ||
-      decodeURIComponent(target.username) !== process.env.PGUSER ||
-      [...target.searchParams.keys()].some(key => /^(host|hostaddr|port|dbname|user|service)$/i.test(key))) {
-    throw new Error("DATABASE_URL does not target the workspace development database.");
-  }
-}
+import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 test("a completed profile save cannot update the next member when its response arrives late", async ({ page }) => {
   test.setTimeout(120_000);
-  requireDevelopment();
+  requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const marker = randomUUID().slice(0, 12);

@@ -4,7 +4,16 @@ import path from "node:path";
 import ts from "typescript";
 
 const apiSource = fileURLToPath(new URL("../../artifacts/api-server/src/", import.meta.url));
+const browserTests = fileURLToPath(new URL("../../artifacts/edu-portal/tests/", import.meta.url));
 const suiteDirectories = ["routes", "lib"];
+
+// Only these imports resolve to guards that validate the workspace development
+// database target. A same-named local function or arbitrary import is not proof.
+const liveGuards = new Map([
+  ["./radiant-audit-fixtures", new Set(["requireAuditDevelopment"])],
+  ["./community-fixtures", new Set(["requireCommunityDevelopment"])],
+  ["./member-stories-fixtures", new Set(["requireStoryDevelopment"])],
+]);
 
 function visit(node, predicate) {
   if (predicate(node)) return true;
@@ -169,6 +178,133 @@ export function checkSuite(source, filename = "suite.test.ts") {
   return problems;
 }
 
+function isLiveDatabaseModule(module) {
+  return module === "@workspace/db" || /(?:^|\/)lib\/db\/src\/index(?:\.[cm]?[jt]s)?$/.test(module);
+}
+
+function isFixtureCall(node) {
+  return ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    (node.expression.name.text === "createUser" && calleeName(node.expression.expression) === "users");
+}
+
+function isTestRegistration(call) {
+  if (ts.isIdentifier(call.expression) && call.expression.text === "test") return true;
+  return ts.isCallExpression(call.expression) &&
+    ts.isPropertyAccessExpression(call.expression.expression) &&
+    ["each", "skipIf", "runIf"].includes(call.expression.expression.name.text) &&
+    calleeName(call.expression.expression.expression) === "test";
+}
+
+function firstLiveGuard(body, guards) {
+  if (!body) return false;
+  const statements = body.statements.filter(statement =>
+    !(ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression) &&
+      ts.isPropertyAccessExpression(statement.expression.expression) &&
+      ts.isIdentifier(statement.expression.expression.expression) &&
+      statement.expression.expression.expression.text === "test" &&
+      statement.expression.expression.name.text === "setTimeout"));
+  const first = statements[0];
+  const expression = first && ts.isExpressionStatement(first) ? first.expression : undefined;
+  const call = expression && ts.isAwaitExpression(expression) ? expression.expression : expression;
+  return !!call && ts.isCallExpression(call) && ts.isIdentifier(call.expression) &&
+    guards.has(call.expression.text) && call.arguments.length === 0;
+}
+
+export function checkLiveSuite(source, filename = "browser-live.spec.ts") {
+  const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const guards = new Set();
+  const declarations = new Map();
+  const dbNames = new Set(["db", "pool"]);
+  let usesDatabase = false;
+  let usesPg = false;
+  let dbMocked = false;
+  for (const statement of ast.statements) {
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+      const module = statement.moduleSpecifier.text;
+      if (isLiveDatabaseModule(module)) {
+        usesDatabase = true;
+        if (statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)) {
+          for (const binding of statement.importClause.namedBindings.elements) {
+            if (["db", "pool"].includes(binding.propertyName?.text ?? binding.name.text)) {
+              dbNames.add(binding.name.text);
+            }
+          }
+        }
+      }
+      if (module === "pg") usesPg = true;
+      const allowed = liveGuards.get(module);
+      if (allowed && statement.importClause?.namedBindings &&
+          ts.isNamedImports(statement.importClause.namedBindings)) {
+        for (const binding of statement.importClause.namedBindings.elements) {
+          if (!statement.importClause.isTypeOnly && !binding.isTypeOnly &&
+              allowed.has(binding.propertyName?.text ?? binding.name.text)) guards.add(binding.name.text);
+        }
+      }
+    }
+    if (ts.isFunctionDeclaration(statement) && statement.name) declarations.set(statement.name.text, statement);
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+          declarations.set(declaration.name.text, declaration.initializer);
+        }
+      }
+    }
+  }
+  visit(ast, node => {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments[0] && ts.isStringLiteral(node.arguments[0]) &&
+        isLiveDatabaseModule(node.arguments[0].text)) usesDatabase = true;
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "vi" &&
+        node.expression.name.text === "mock" && node.arguments[0] &&
+        ts.isStringLiteral(node.arguments[0]) && isLiveDatabaseModule(node.arguments[0].text)) dbMocked = true;
+    return false;
+  });
+  // The Clerk fixture path also writes app users through the API, even when a
+  // browser spec never imports the database directly.
+  const createsUser = visit(ast, isFixtureCall);
+  if ((!usesDatabase || dbMocked) && !usesPg && !createsUser) return [];
+
+  const issues = [];
+  let registeredTests = 0;
+  visit(ast, node => {
+    if (!ts.isCallExpression(node)) return false;
+    const call = node;
+    const hook = ts.isPropertyAccessExpression(call.expression) &&
+      ts.isIdentifier(call.expression.expression) && call.expression.expression.text === "test" &&
+      ["beforeAll", "beforeEach"].includes(call.expression.name.text);
+    if (hook) {
+      if (!firstLiveGuard(bodyOf(call.arguments[0], declarations), guards)) {
+        issues.push(`${call.expression.name.text} must begin with a workspace development database guard`);
+      }
+    } else if (isTestRegistration(call)) {
+      registeredTests++;
+      if (!firstLiveGuard(bodyOf(call.arguments[1], declarations), guards)) {
+        issues.push(`live test must call a workspace development database guard before fixture or cleanup work`);
+      }
+    }
+    return false;
+  });
+  if (!registeredTests) issues.push("database fixture work has no guarded live test");
+  // A setup hook cannot protect work executed while loading the spec.
+  const isModuleFixtureWork = node => isFixtureCall(node) ||
+    ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) && dbNames.has(node.expression.expression.text) &&
+    ["insert", "update", "delete", "execute", "transaction", "query", "connect"].includes(node.expression.name.text);
+  for (const statement of ast.statements) {
+    if (ts.isVariableStatement(statement) || ts.isExpressionStatement(statement)) {
+      const expressions = ts.isVariableStatement(statement)
+        ? statement.declarationList.declarations.map(decl => decl.initializer).filter(Boolean)
+        : [statement.expression];
+      if (expressions.some(expr => visitOutsideFunctions(expr, isModuleFixtureWork))) {
+        issues.push("fixture work runs at module scope before the development guard");
+      }
+    }
+  }
+  return issues;
+}
+
 async function main() {
   const failures = [];
   for (const directory of suiteDirectories) {
@@ -179,11 +315,16 @@ async function main() {
       for (const issue of issues) failures.push(`${path.relative(process.cwd(), filename)}: ${issue}`);
     }
   }
+  for (const name of (await readdir(browserTests)).filter(name => /-live\.spec\.tsx?$/.test(name))) {
+    const filename = path.join(browserTests, name);
+    const issues = checkLiveSuite(await readFile(filename, "utf8"), filename);
+    for (const issue of issues) failures.push(`${path.relative(process.cwd(), filename)}: ${issue}`);
+  }
   if (failures.length) {
     console.error(`Database safety check failed:\n${failures.join("\n")}`);
     process.exitCode = 1;
   } else {
-    console.log("API test database safety check passed");
+    console.log("API and live browser test database safety check passed");
   }
 }
 

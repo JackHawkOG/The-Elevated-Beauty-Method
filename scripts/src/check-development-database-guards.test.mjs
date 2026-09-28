@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkSuite } from "./check-development-database-guards.mjs";
+import { checkLiveSuite, checkSuite } from "./check-development-database-guards.mjs";
 
 const imports = `import { db, pool } from "@workspace/db";
 import { requireDevelopmentDatabase } from "./test-development-database";`;
@@ -89,4 +89,68 @@ test("detects direct pg pools and workspace database namespace imports", () => {
     test("writes", async () => { await connection.query("INSERT INTO users VALUES (1)"); });`).length);
   assert.ok(checkSuite(`import * as database from "@workspace/db";
     test("writes", async () => { await database.db.insert(usersTable).values({}); });`).length);
+});
+
+const liveImports = `import { test } from "@playwright/test";
+  import { requireAuditDevelopment } from "./radiant-audit-fixtures";`;
+
+test("live database fixtures require a guard before setup and cleanup", () => {
+  const fixture = `const { db } = await import("../../../lib/db/src/index");
+    await db.delete(usersTable);`;
+  assert.deepEqual(checkLiveSuite(`${liveImports}
+    test("cleanup", async () => {
+      test.setTimeout(120_000);
+      requireAuditDevelopment();
+      try { await doBrowserWork(); } finally { ${fixture} }
+    });`), []);
+  for (const body of [
+    `try { await doBrowserWork(); } finally { ${fixture} }`,
+    `await clerkSetup(); requireAuditDevelopment(); try { await doBrowserWork(); } finally { ${fixture} }`,
+  ]) {
+    assert.match(checkLiveSuite(`${liveImports} test("cleanup", async () => { ${body} });`)[0], /guard/);
+  }
+  assert.match(checkLiveSuite(`${liveImports}
+    test.beforeEach(async () => { await client.users.createUser({}); });
+    test("cleanup", async () => { requireAuditDevelopment(); ${fixture} });`)[0], /beforeEach/);
+  assert.match(checkLiveSuite(`${liveImports}
+    client.users.createUser({});
+    test("cleanup", async () => { requireAuditDevelopment(); ${fixture} });`)[0], /module scope/);
+  assert.match(checkLiveSuite(`${liveImports}
+    import { db } from "@workspace/db";
+    const pending = db.delete(usersTable);
+    test("cleanup", async () => { requireAuditDevelopment(); await pending; });`)[0], /module scope/);
+  assert.match(checkLiveSuite(`${liveImports}
+    test.describe("group", () => {
+      test("unguarded nested cleanup", async () => { ${fixture} });
+    });`)[0], /guard/);
+});
+
+test("recognized imported guards protect live specs, not lookalike names", () => {
+  const write = `const { pool } = await import("../../../lib/db/src/index");
+    await pool.query("DELETE FROM users");`;
+  assert.deepEqual(checkLiveSuite(`${liveImports}
+    test("writes", async () => { requireAuditDevelopment(); ${write} });`), []);
+  assert.deepEqual(checkLiveSuite(`import { test } from "@playwright/test";
+    import { requireCommunityDevelopment } from "./community-fixtures";
+    test("writes", async () => { requireCommunityDevelopment(); ${write} });`), []);
+  assert.deepEqual(checkLiveSuite(`import { test } from "@playwright/test";
+    import { requireStoryDevelopment } from "./member-stories-fixtures";
+    test("writes", async () => { requireStoryDevelopment(); ${write} });`), []);
+  assert.ok(checkLiveSuite(`import { test } from "@playwright/test";
+    function requireAuditDevelopment() {}
+    test("writes", async () => { requireAuditDevelopment(); ${write} });`).length);
+  assert.ok(checkLiveSuite(`import { test } from "@playwright/test";
+    import { requireAuditDevelopment } from "./other-fixtures";
+    test("writes", async () => { requireAuditDevelopment(); ${write} });`).length);
+});
+
+test("mock-only browser checks do not need database guards", () => {
+  assert.deepEqual(checkLiveSuite(`import { test } from "@playwright/test";
+    test("mock", async ({ page }) => {
+      await page.route("**/api/users", route => route.fulfill({ json: [] }));
+    });`), []);
+  assert.deepEqual(checkLiveSuite(`import { test } from "@playwright/test";
+    import { db } from "@workspace/db";
+    vi.mock("@workspace/db", () => ({ db: { delete: vi.fn() } }));
+    test("mock", async () => { await db.delete(usersTable); });`), []);
 });
