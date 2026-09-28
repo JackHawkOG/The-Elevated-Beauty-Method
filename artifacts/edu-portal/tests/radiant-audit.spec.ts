@@ -50,6 +50,8 @@ const originalEmail = "original@example.invalid";
 const correctedEmail = "corrected@example.invalid";
 const signedInDraftKey = "tebm:radiant-audit:signed-in-draft";
 
+type TrackingEvent = { name: string; data?: unknown };
+
 test.beforeEach(async ({ page }) => {
   // Default draft API for tests concerned with other Audit flows.
   await page.route("**/api/users/me/radiant-audit/draft", route => {
@@ -302,7 +304,7 @@ test("an unverified account cannot save staged answers, even when its email matc
   const writes: string[] = [];
   await page.route("**/api/users/me/radiant-audit**", route => {
     if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
-    return route.fulfill({ json: null });
+    return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
   });
   await stageVisitorAnswers(page);
   await page.evaluate(() => {
@@ -322,7 +324,7 @@ test("an unverified signed-in member cannot save directly from the Audit form", 
   const writes: string[] = [];
   await page.route("**/api/users/me/radiant-audit**", route => {
     if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
-    return route.fulfill({ json: null });
+    return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
   });
   await page.goto("/tests/audit-harness.html");
   await page.evaluate(() => {
@@ -338,6 +340,84 @@ test("an unverified signed-in member cannot save directly from the Audit form", 
   await page.getByRole("button", { name: "Save my Audit" }).click();
   await expect(page.getByRole("alert")).toHaveText("Verify your account email before saving your Audit.");
   expect(writes).toHaveLength(0);
+});
+
+test("verification and account-switch buttons report their actual form and completion actions", async ({ page }) => {
+  await captureAuditTracking(page);
+  await page.route("**/api/users/me/radiant-audit**", route =>
+    route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null }),
+  );
+  await signInAs(page, "original");
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "false"));
+  await page.reload();
+  await page.getByRole("button", { name: "Verify my email" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("audit-test-profile-opened"))).toBe("true");
+  expect(await auditTracking(page)).toEqual([
+    { name: "radiant_audit_verification_action", data: { action: "verify_email", location: "form" } },
+  ]);
+  await page.getByRole("button", { name: "Use another account" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("audit-test-account"))).toBeNull();
+  expect(await auditTracking(page)).toEqual([
+    { name: "radiant_audit_verification_action", data: { action: "verify_email", location: "form" } },
+    { name: "radiant_audit_verification_action", data: { action: "switch_account", location: "form" } },
+  ]);
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "original"));
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  await page.getByRole("button", { name: "Verify my email" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("audit-test-profile-opened"))).toBe("true");
+  await page.getByRole("button", { name: "Use another account" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("audit-test-account"))).toBeNull();
+  expect(await auditTracking(page)).toEqual([
+    { name: "radiant_audit_verification_action", data: { action: "verify_email", location: "completion" } },
+    { name: "radiant_audit_verification_action", data: { action: "switch_account", location: "completion" } },
+  ]);
+});
+
+test("a verified automatic save reports one private resumption only after confirmation", async ({ page }) => {
+  await captureAuditTracking(page);
+  let writes = 0;
+  await page.route("**/api/users/me/radiant-audit**", route => {
+    const request = route.request();
+    if (request.method() === "PUT") {
+      writes++;
+      if (writes === 1) return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+      const answers = request.postDataJSON() as Answers;
+      return route.fulfill({ json: {
+        audit: { ...answers, routineScore: 2, valuesScore: 2, completedAt: "2026-09-02T12:00:00.000Z" },
+        completionKind: "first_time",
+      } });
+    }
+    return route.fulfill({ json: request.url().endsWith("/history") ? [] : null });
+  });
+  await stageVisitorAnswers(page);
+  await page.evaluate(() => {
+    (window as unknown as { __auditTracking: TrackingEvent[] }).__auditTracking = [];
+    localStorage.setItem("audit-test-account", "original");
+    localStorage.setItem("audit-test-verified", "false");
+  });
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  await page.getByRole("button", { name: "Verify my email" }).click();
+  expect(await auditTracking(page)).toEqual([
+    { name: "radiant_audit_verification_action", data: { action: "verify_email", location: "completion" } },
+  ]);
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "true"));
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Try saving again" })).toBeVisible();
+  expect(writes).toBe(1);
+  expect(await auditTracking(page)).toEqual([]);
+  await page.getByRole("button", { name: "Try saving again" }).click();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  expect(writes).toBe(2);
+  await expect.poll(() => auditTracking(page)).toEqual([
+    { name: "radiant_audit_saved", data: { completion_kind: "first_time" } },
+    { name: "radiant_audit_resumed_after_verification", data: { location: "completion" } },
+  ]);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  expect(await auditTracking(page)).toEqual([]);
+  expect(writes).toBe(2);
 });
 
 test("partial answers staged for email verification return to the form and never auto-save", async ({ page }) => {
@@ -481,7 +561,7 @@ test("signing out of the mismatched account preserves the staged answers for the
 test("signed-in member compares both earlier Audits after saving and reload, without another member or answers in tracking", async ({ page }) => {
   const latest = new Map<string, Audit>();
   const history = new Map<string, HistoryEntry[]>();
-  const tracking: Array<{ name: string; data?: unknown }> = [];
+  const tracking: TrackingEvent[] = [];
   let nextId = 1;
   let nextMinute = 0;
   const outsider = fixture("outsider");
@@ -639,7 +719,6 @@ test("a committed signed-in save with a lost response retries after reload witho
       return route.fulfill({ json: new URL(request.url()).pathname.endsWith("/history") ? history : current });
     }
     if (request.method() !== "PUT") return route.fulfill({ status: 405 });
-
     const { submissionId, ...input } = request.postDataJSON() as Answers & { submissionId: string };
     submissionIds.push(submissionId);
     if (!current) {
@@ -738,6 +817,12 @@ test("failed signed-in save preserves answers and checks until a successful retr
     };
     saved.push(audit);
     return route.fulfill({ json: { audit, completionKind: "first_time" } });
+  });
+  // Keep background draft writes distinct from the completed-Audit PUTs counted above.
+  await page.route("**/api/users/me/radiant-audit/draft", route => {
+    if (route.request().method() === "GET") return route.fulfill({ json: null });
+    if (route.request().method() === "DELETE") return route.fulfill({ status: 204 });
+    return route.fulfill({ json: route.request().postDataJSON() });
   });
 
   await signInAs(page, "member-a");
@@ -865,10 +950,7 @@ test("an unfinished Audit continues in a separate browser, stays private, and di
       const { submissionId: _id, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
       const audit = { ...answers, routineScore: 1, valuesScore: 1, completedAt: new Date().toISOString() };
       completed.set(account, audit);
-      return route.fulfill({ json: {
-        audit,
-        completionKind: "first_time",
-      } });
+      return route.fulfill({ json: { audit, completionKind: "first_time" } });
     }
     return route.fulfill({ json: path.endsWith("/history") ? [] : completed.get(account) ?? null });
   };
@@ -1032,3 +1114,18 @@ test("a completed Audit conflict cannot be dismissed as a draft choice", async (
   await expect(page.getByRole("button", { name: "Use the other device's answers" })).not.toBeVisible();
   await expect(page.getByRole("button", { name: "Reload and review Audit" })).toBeVisible();
 });
+
+async function captureAuditTracking(page: Page) {
+  await page.addInitScript(() => {
+    (window as unknown as { __auditTracking: TrackingEvent[] }).__auditTracking = [];
+    (window as unknown as { umami: { track: (name: string, data?: unknown) => void } }).umami = {
+      track: (name, data) => {
+        (window as unknown as { __auditTracking: TrackingEvent[] }).__auditTracking.push({ name, data });
+      },
+    };
+  });
+}
+
+async function auditTracking(page: Page): Promise<TrackingEvent[]> {
+  return page.evaluate(() => (window as unknown as { __auditTracking: TrackingEvent[] }).__auditTracking);
+}
