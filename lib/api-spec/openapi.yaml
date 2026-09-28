@@ -82,10 +82,10 @@ paths:
     get:
       operationId: listMemberStoryRemovalAlerts
       tags: [member-stories]
-      summary: Owner-only story removal notices without account or permission details
+      summary: Owner-only outstanding story removal requests without account or permission details
       responses:
         "200":
-          description: Story IDs and request times, newest first
+          description: Unreviewed story IDs and request times, newest first
           content:
             application/json:
               schema:

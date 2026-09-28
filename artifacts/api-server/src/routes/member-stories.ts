@@ -67,7 +67,11 @@ router.get("/member-stories/removal-alerts", requireAuth, requireOwner, async (_
     storyId: memberStoriesTable.id,
     requestedAt: memberStoriesTable.removalRequestedAt,
   }).from(memberStoriesTable)
-    .where(sql`${memberStoriesTable.removalRequestedAt} IS NOT NULL`)
+    .where(and(
+      sql`${memberStoriesTable.removalRequestedAt} IS NOT NULL`,
+      isNull(memberStoriesTable.removalReviewedAt),
+      isNull(memberStoriesTable.removalReviewOutcome),
+    ))
     .orderBy(desc(memberStoriesTable.removalRequestedAt));
   res.json(ListMemberStoryRemovalAlertsResponse.parse(rows.map(row => ({
     storyId: row.storyId,

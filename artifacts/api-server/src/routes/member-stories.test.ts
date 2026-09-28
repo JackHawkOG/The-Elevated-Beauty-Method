@@ -126,6 +126,13 @@ test("signed-in removal requests hide the identified story and keep the claim pr
 });
 
 test("owner can privately review a hidden claim without republishing the story", async () => {
+  const stillPending = await request("/member-stories", owner, "POST", {
+    quote: `Still awaiting review ${run}`, attribution: "Approved name", permissionRecord: "Written permission",
+    permissionConfirmed: true,
+  });
+  expect(stillPending.status).toBe(201);
+  created.push(stillPending.data.id);
+  expect((await request(`/member-stories/${stillPending.data.id}/removal-request`, `test-other-${run}`, "POST", { note: "Please remove" })).status).toBe(200);
   for (const outcome of ["withdrawal_confirmed", "claim_unsubstantiated", "inconclusive"] as const) {
     const published = await request("/member-stories", owner, "POST", {
       quote: `${outcome} ${run}`, attribution: "Approved name", permissionRecord: "Written permission",
@@ -137,6 +144,7 @@ test("owner can privately review a hidden claim without republishing the story",
     const reviewPath = `/member-stories/${published.data.id}/removal-review`;
     expect((await request(reviewPath, owner, "POST", { outcome, note: "Before claim" })).status).toBe(404);
     expect((await request(`/member-stories/${published.data.id}/removal-request`, claimant, "POST", { note: "Please remove this" })).status).toBe(200);
+    expect((await request("/member-stories/removal-alerts", owner)).data.some((row: { storyId: number }) => row.storyId === published.data.id)).toBe(true);
     expect((await request(reviewPath, undefined, "POST", { outcome, note: "Privately assessed" })).status).toBe(401);
     expect((await request(reviewPath, member, "POST", { outcome, note: "Privately assessed" })).status).toBe(403);
     expect((await request(reviewPath, owner, "POST", { outcome, note: "  " })).status).toBe(400);
@@ -152,5 +160,8 @@ test("owner can privately review a hidden claim without republishing the story",
     expect(JSON.stringify((await request("/member-stories")).data)).not.toContain("Privately assessed");
     expect((await request("/member-stories/manage", member)).status).toBe(403);
     expect((await request("/member-stories/manage", owner)).data.find((row: { id: number }) => row.id === published.data.id).removalReviewOutcome).toBe(outcome);
+    const alertsAfterReview = await request("/member-stories/removal-alerts", owner);
+    expect(alertsAfterReview.data.some((row: { storyId: number }) => row.storyId === published.data.id)).toBe(false);
+    expect(alertsAfterReview.data.some((row: { storyId: number }) => row.storyId === stillPending.data.id)).toBe(true);
   }
 });

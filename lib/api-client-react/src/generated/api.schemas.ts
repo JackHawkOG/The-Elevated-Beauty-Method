@@ -700,3 +700,4 @@ offset?: number;
 export type ListAnnouncementsParams = {
 limit?: number;
 };
+

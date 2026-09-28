@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListManagedMemberStories, usePublishMemberStory, useWithdrawMemberStory, useReviewMemberStoryRemoval,
-  getListManagedMemberStoriesQueryKey, getListPublishedMemberStoriesQueryKey,
+  getListManagedMemberStoriesQueryKey, getListPublishedMemberStoriesQueryKey, getListMemberStoryRemovalAlertsQueryKey,
 } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,8 @@ export default function MemberStoriesPage() {
   const [reviewNote, setReviewNote] = useState("");
   const requests = list.data?.filter(story => story.removalRequestedAt)
     .sort((a, b) => new Date(b.removalRequestedAt!).getTime() - new Date(a.removalRequestedAt!).getTime()) ?? [];
+  const outstanding = requests.filter(story => !story.removalReviewedAt && !story.removalReviewOutcome);
+  const reviewed = requests.filter(story => story.removalReviewedAt || story.removalReviewOutcome);
   useEffect(() => {
     if (!list.data || !window.location.hash.startsWith("#story-")) return;
     const id = Number(window.location.hash.slice("#story-".length));
@@ -31,6 +33,7 @@ export default function MemberStoriesPage() {
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: getListManagedMemberStoriesQueryKey() });
     void qc.invalidateQueries({ queryKey: getListPublishedMemberStoriesQueryKey() });
+    void qc.invalidateQueries({ queryKey: getListMemberStoryRemovalAlertsQueryKey() });
   };
   const publish = usePublishMemberStory({ mutation: {
     onSuccess: () => {
@@ -85,11 +88,21 @@ export default function MemberStoriesPage() {
         <Button type="submit" disabled={!confirmed || publish.isPending}> {publish.isPending ? "Publishing…" : "Publish story"}</Button>
       </form>
       {message && <p role="status">{message}</p>}
-      {requests.length > 0 && <section aria-labelledby="removal-requests-title" className="rounded-2xl border border-destructive/50 bg-destructive/10 p-6">
-        <h2 id="removal-requests-title" className="font-serif text-2xl">Removal requests received ({requests.length})</h2>
-        <p className="mt-2 text-sm">These stories were hidden immediately. Review each request and its permission record privately.</p>
-        <ul className="mt-3 space-y-1">{requests.map(story => <li key={story.id}>
+      <section aria-labelledby="removal-requests-title" className="rounded-2xl border border-destructive/50 bg-destructive/10 p-6">
+        <h2 id="removal-requests-title" className="font-serif text-2xl">Outstanding removal requests ({outstanding.length})</h2>
+        {list.isPending ? <p className="mt-2 text-sm">Loading requests…</p> :
+          list.isError ? <p className="mt-2 text-sm" role="alert">Could not load requests. <Button variant="outline" onClick={() => void list.refetch()}>Retry</Button></p> :
+          outstanding.length === 0 ? <p className="mt-2 text-sm">No outstanding requests.</p> : <>
+        <p className="mt-2 text-sm">These stories were hidden immediately. Check each request against its permission record privately before saving a review.</p>
+        <ul className="mt-3 space-y-1">{outstanding.map(story => <li key={story.id}>
           <a className="underline underline-offset-2" href={`#story-${story.id}`}>Story #{story.id} · received {new Date(story.removalRequestedAt!).toLocaleString()}</a>
+        </li>)}</ul></>}
+      </section>
+      {reviewed.length > 0 && <section aria-labelledby="reviewed-requests-title" className="rounded-2xl border border-border bg-card p-6">
+        <h2 id="reviewed-requests-title" className="font-serif text-2xl">Reviewed removal requests ({reviewed.length})</h2>
+        <p className="mt-2 text-sm text-muted-foreground">These stories remain hidden. Their private review and permission records are below.</p>
+        <ul className="mt-3 space-y-1">{reviewed.map(story => <li key={story.id}>
+          <a className="underline underline-offset-2" href={`#story-${story.id}`}>Story #{story.id} · reviewed {story.removalReviewedAt ? new Date(story.removalReviewedAt).toLocaleString() : "previously"}</a>
         </li>)}</ul>
       </section>}
       <section aria-labelledby="story-list-title">

@@ -58,7 +58,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </SidebarMenuItem>}
               {canManageStories && <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={location.startsWith("/member-stories")}>
-                  <Link href="/member-stories"><Quote /> <span>Member stories</span>{removalCount > 0 && <span className="ml-auto rounded-full bg-destructive px-2 text-xs text-destructive-foreground" aria-label={`${removalCount} story removal requests`}>{removalCount}</span>}</Link>
+                   <Link href="/member-stories"><Quote /> <span>Member stories</span>{removalCount > 0 && <span className="ml-auto rounded-full bg-destructive px-2 text-xs text-destructive-foreground" aria-label={`${removalCount} outstanding story removal requests`}>{removalCount}</span>}</Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>}
               {canManageStories && <SidebarMenuItem>
@@ -117,9 +117,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </span>
             </Link>
           </header>
-          {latestRemoval && <div role="status" className="border-b border-destructive/30 bg-destructive/10 px-4 py-3 text-sm">
+           {canManageStories && removalAlerts.isError && <div role="alert" className="border-b border-destructive/30 bg-destructive/10 px-4 py-3 text-sm">
+             Could not check outstanding story removal requests. <Link href="/member-stories" className="underline">Open member stories</Link> to review them.
+           </div>}
+           {latestRemoval && !removalAlerts.isError && <div role="status" className="border-b border-destructive/30 bg-destructive/10 px-4 py-3 text-sm">
             <Link href={`/member-stories#story-${latestRemoval.storyId}`} className="font-semibold text-foreground underline underline-offset-2">
-              {removalCount} story removal {removalCount === 1 ? "request" : "requests"} received — review private request for story #{latestRemoval.storyId}
+               {removalCount} outstanding story removal {removalCount === 1 ? "request" : "requests"} — review private request for story #{latestRemoval.storyId}
             </Link>
           </div>}
           <div className="flex-1 overflow-auto">

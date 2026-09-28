@@ -18,7 +18,7 @@
 - [Workspace command shims](workspace-command-shims.md) — generated package binaries can lack executable bits; distinguish launcher permissions from failing tests.
 - [Pooled PostgreSQL temp fixtures](pooled-postgres-temp-fixtures.md) — session-local tables and functions survive pool release; clean both before the next test borrows the client.
 - [Story removal privacy](story-removal-privacy.md) — hide disputed stories immediately while keeping claimant identity and owner review private.
-- [Story removal notice semantics](story-removal-notices.md) — owner notices report received requests, not unresolved cases; avoid implying an acknowledgement state exists.
+- [Story removal notice semantics](story-removal-notices.md) — owner alerts show unreviewed requests; reviewed requests stay in private history, and stories remain hidden.
 - [Nullable JSON API responses](nullable-json-api-responses.md) — use explicit JSON response mode for nullable direct client calls; automatic inference can return the string "null".
 - [Shared development schema freshness](shared-development-schema-freshness.md) — after merged schema changes, isolated DB tests may fail until the managed API startup brings the shared dev database current.
 - [Vitest source-check callback shapes](vitest-source-check-callbacks.md) — static checks must account for optional timeouts and curried each callbacks when locating test bodies.
