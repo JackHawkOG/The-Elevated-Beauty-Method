@@ -16,6 +16,7 @@ import { ArrowLeft, CheckCircle, Circle, ChevronLeft, ChevronRight, Menu, Loader
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { useState } from "react";
 
 function LessonContent({ content }: { content: string }) {
   return (
@@ -46,6 +47,8 @@ export default function LessonPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [savedLessonKey, setSavedLessonKey] = useState<string | null>(null);
+  const lessonKey = `${courseId}:${lessonId}`;
 
   const { data: course } = useGetCourse(courseId, { 
     query: { queryKey: getGetCourseQueryKey(courseId), enabled: !!courseId } 
@@ -60,7 +63,7 @@ export default function LessonPage() {
   });
   const { data: enrollments } = useListEnrollments();
   const completedIds = new Set(enrollments?.find(item => item.courseId === courseId)?.completedLessonIds ?? []);
-  const isComplete = completedIds.has(lessonId);
+  const isComplete = completedIds.has(lessonId) || savedLessonKey === lessonKey;
   const currentIndex = lessons?.findIndex(l => l.id === lessonId) ?? -1;
   const outlineReady = !lessonsLoading && !lessonsError && currentIndex >= 0;
   const prevLesson = outlineReady && currentIndex > 0 ? lessons?.[currentIndex - 1] : null;
@@ -69,6 +72,7 @@ export default function LessonPage() {
   const updateProgress = useUpdateProgress({
     mutation: {
       onSuccess: () => {
+        setSavedLessonKey(lessonKey);
         queryClient.invalidateQueries({ queryKey: getListEnrollmentsQueryKey() });
         // Do not interpret an unavailable outline as the end of the course.
         const outlineState = queryClient.getQueryState(getListLessonsQueryKey(courseId));
@@ -94,7 +98,12 @@ export default function LessonPage() {
   });
 
   const handleComplete = () => {
-    if (outlineReady) updateProgress.mutate({ courseId, data: { lessonId } });
+    if (!outlineReady || updateProgress.isPending) return;
+    if (isComplete) {
+      setLocation(nextLesson ? `/courses/${courseId}/lessons/${nextLesson.id}` : `/courses/${courseId}`);
+    } else {
+      updateProgress.mutate({ courseId, data: { lessonId } });
+    }
   };
 
   if (isLoading) {

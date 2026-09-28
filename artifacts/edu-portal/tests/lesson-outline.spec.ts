@@ -58,6 +58,24 @@ test("completing a genuinely final lesson returns to the course overview", async
   await expectLocation(page, coursePath);
 });
 
+test("continuing an already completed final lesson returns to the course without another save", async ({ page }) => {
+  await stubLesson(page);
+  await page.unroute("**/api/enrollments");
+  await page.route("**/api/enrollments", route =>
+    route.fulfill({ json: [{ courseId: 7, completedLessonIds: [42] }] }));
+  await page.route("**/api/courses/7/lessons", route => route.fulfill({ json: [lesson] }));
+  let progressSaves = 0;
+  await page.route("**/api/enrollments/7/progress", route => {
+    progressSaves++;
+    return route.fulfill({ json: { courseId: 7, completedLessonIds: [42] } });
+  });
+
+  await page.goto("/tests/lesson-harness.html");
+  await page.getByRole("button", { name: "Return to Course" }).click();
+  await expectLocation(page, coursePath);
+  expect(progressSaves).toBe(0);
+});
+
 test("a failed outline refresh during a progress save never treats the lesson as final", async ({ page }) => {
   await stubLesson(page);
   let outlineRequests = 0;
@@ -65,13 +83,17 @@ test("a failed outline refresh during a progress save never treats the lesson as
     outlineRequests++;
     return outlineRequests === 1
       ? route.fulfill({ json: [lesson, nextLesson] })
-      : route.fulfill({ status: 503, json: { message: "Outline unavailable" } });
+      : outlineRequests === 2
+        ? route.fulfill({ status: 503, json: { message: "Outline unavailable" } })
+        : route.fulfill({ json: [lesson, nextLesson] });
   });
+  let progressSaves = 0;
   let releaseSave!: () => void;
   const saveHeld = new Promise<void>(resolve => { releaseSave = resolve; });
   let saveStarted!: () => void;
   const saveRequested = new Promise<void>(resolve => { saveStarted = resolve; });
   await page.route("**/api/enrollments/7/progress", async route => {
+    progressSaves++;
     saveStarted();
     await saveHeld;
     await route.fulfill({ json: { courseId: 7, completedLessonIds: [42] } });
@@ -93,4 +115,13 @@ test("a failed outline refresh during a progress save never treats the lesson as
   await expectLocation(page, lessonPath);
   await expect(page.getByTestId("button-retry-outline")).toBeEnabled();
   expect(outlineRequests).toBe(2);
+  expect(progressSaves).toBe(1);
+
+  await page.getByTestId("button-retry-outline").click();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Completed · Continue" })).toBeEnabled();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expectLocation(page, `${coursePath}/lessons/43`);
+  expect(outlineRequests).toBe(3);
+  expect(progressSaves).toBe(1);
 });
