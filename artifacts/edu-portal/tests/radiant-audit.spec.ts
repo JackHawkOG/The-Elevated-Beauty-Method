@@ -420,6 +420,52 @@ test("a verified automatic save reports one private resumption only after confir
   expect(writes).toBe(2);
 });
 
+test("saving as a different verified account does not claim the first account's verification recovery", async ({ page }) => {
+  await captureAuditTracking(page);
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
+  await page.route("**/api/users/me/radiant-audit**", route => {
+    const request = route.request();
+    if (request.method() === "PUT") {
+      const { submissionId: _submissionId, ...answers } = request.postDataJSON() as Answers & { submissionId: string };
+      writes.push({ account: request.headers().authorization, answers });
+      return route.fulfill({ json: {
+        audit: { ...answers, routineScore: 2, valuesScore: 2, completedAt: "2026-09-02T12:00:00.000Z" },
+        completionKind: "first_time",
+      } });
+    }
+    return route.fulfill({ json: request.url().endsWith("/history") ? [] : null });
+  });
+
+  await stageVisitorAnswers(page);
+  await page.evaluate(() => {
+    localStorage.setItem("audit-test-account", "original");
+    localStorage.setItem("audit-test-verified", "false");
+  });
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  await page.getByRole("button", { name: "Verify my email" }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem("radiant_audit_verification_account"))).toBe("original");
+  expect(writes).toHaveLength(0);
+
+  // Switch identities without the Audit switch button, so the first account's marker remains.
+  await page.evaluate(() => {
+    localStorage.setItem("audit-test-account", "corrected");
+    localStorage.setItem("audit-test-verified", "true");
+  });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("radiant_audit_verification_account"))).toBe("original");
+  expect(writes).toHaveLength(0);
+  await page.getByRole("checkbox", { name: /I confirm that these are my Audit answers/ }).check();
+  await page.getByRole("button", { name: "Correct email and save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  expect(writes).toEqual([{ account: "Bearer corrected", answers: stagedAnswers }]);
+  await expect.poll(() => auditTracking(page)).toEqual([
+    { name: "radiant_audit_saved", data: { completion_kind: "first_time" } },
+  ]);
+  expect(JSON.stringify(await auditTracking(page))).not.toMatch(/@|private|original|corrected/);
+});
+
 test("partial answers staged for email verification return to the form and never auto-save", async ({ page }) => {
   const writes: Array<{ account: string | undefined; answers: Answers }> = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
