@@ -1003,7 +1003,7 @@ test("a wrong sign-in code leaves staged answers untouched until the existing ac
   }
 });
 
-test("a wrong signup code keeps staged answers and only a verified retry saves the Audit", async ({ page }) => {
+test("a wrong signup code and reload keep staged answers until a verified retry saves the Audit", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
   await clerkSetup();
@@ -1093,6 +1093,17 @@ test("a wrong signup code keeps staged answers and only a verified retry saves t
     const afterWrongPending = await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"));
     expect(afterWrongPending).toBe(pending);
 
+    await page.reload();
+    await expect(page).toHaveURL(/\/sign-up(?:\/|$)/);
+    await expect(page.getByLabel("Enter verification code")).toBeVisible();
+    expect(await page.evaluate(() => sessionStorage.getItem("tebm:radiant-audit:pending"))).toBe(pending);
+    expect(auditWrites).toHaveLength(0);
+    expect(await db.select().from(usersTable).where(eq(usersTable.email, email))).toHaveLength(0);
+    if (created.length) {
+      expect(await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0]))).toHaveLength(0);
+      expect(await db.select().from(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, created[0]))).toHaveLength(0);
+    }
+
     await page.getByLabel("Enter verification code").fill("424242");
     await expect.poll(async () => (await client.users.getUserList({ emailAddress: [email] })).data.length).toBe(1);
     const verified = (await client.users.getUserList({ emailAddress: [email] })).data[0];
@@ -1124,6 +1135,7 @@ test("a wrong signup code keeps staged answers and only a verified retry saves t
   } finally {
     // Signup may create the identity before the verification screen or an assertion fails.
     // Find only the unique email allocated above, then remove its rows and Clerk identity.
+    await page.close();
     const matches = (await client.users.getUserList({ emailAddress: [email] })).data
       .filter(user => user.emailAddresses.some(address => address.emailAddress.toLowerCase() === email));
     await cleanUpAccounts(client, [...new Set([...created, ...matches.map(user => user.id)])]);
