@@ -11,6 +11,7 @@ import {
   getGetRadiantAuditHistoryQueryKey,
   type RadiantAuditInput,
   type RadiantAuditDraft,
+  type RadiantAuditStoredDraft,
   getRadiantAuditDraft,
   getRadiantAudit,
   saveRadiantAuditDraft,
@@ -48,22 +49,35 @@ export default function RadiantAuditPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [draftWarning, setDraftWarning] = useState<string | null>(null);
+  const [draftConflict, setDraftConflict] = useState<{ draft: RadiantAuditStoredDraft | null; discarded: boolean } | null>(null);
+  const [completedConflict, setCompletedConflict] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [loadedDraft, setLoadedDraft] = useState<{ accountId: string; answers: RadiantAuditSubmission | null } | null>(null);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftWrite = useRef<Promise<void>>(Promise.resolve());
   const draftBlocked = useRef(false);
+  const conflictPending = useRef(false);
+  const draftVersion = useRef<{ owner: string; revision: string } | null>(null);
+  const latestAnswers = useRef<RadiantAuditSubmission | null>(null);
+  const skipRestoredChange = useRef(false);
   const draftBaseline = useRef<{ owner: string; completedAt: string } | null>(null);
   const draftHadAnswers = useRef(false);
   const save = useSaveRadiantAudit();
   const attempt = useRef<{ accountId: string; answers: string; id: string } | null>(null);
   const email = user?.primaryEmailAddress?.emailAddress;
   const accountId = isLoaded && isSignedIn ? user?.id : undefined;
+  const activeAccount = useRef(accountId);
+  activeAccount.current = accountId;
   useEffect(() => {
     if (!accountId) return;
     let active = true;
     setLoadedDraft(null);
+    setDraftConflict(null);
+    setCompletedConflict(false);
+    draftBlocked.current = false;
+    conflictPending.current = false;
     draftBaseline.current = null;
+    draftVersion.current = null;
     draftHadAnswers.current = false;
     const local = readAuditDraft(accountId);
     void getRadiantAuditDraft({ responseType: "json" }).then(async remote => {
@@ -101,9 +115,12 @@ export default function RadiantAuditPage() {
         const answers = localAnswer ?? (remoteAnswer && !("discardedAt" in remoteAnswer)
           ? { ...remoteAnswer, email: email ?? "" } : readPendingAudit());
         draftBaseline.current = { owner: accountId, completedAt: current?.completedAt ?? "none" };
+        draftVersion.current = { owner: accountId, revision: remote
+          ? ("discardedAt" in remote ? remote.discardedAt : remote.updatedAt) : "none" };
         draftHadAnswers.current = !!(answers?.routineChecks.length || answers?.valuesChecks.length ||
           answers?.beautyTrend || answers?.masteryGoal || answers?.researchTime);
         setLoadedDraft({ accountId, answers });
+        latestAnswers.current = answers;
       }
     }).catch(() => {
       if (active) {
@@ -117,6 +134,40 @@ export default function RadiantAuditPage() {
     };
   }, [accountId, email]);
 
+  const showDraftConflict = useCallback(async (owner: string) => {
+    if (owner !== activeAccount.current) return;
+    draftBlocked.current = true;
+    conflictPending.current = true;
+    try {
+      const remote = await getRadiantAuditDraft({ responseType: "json" });
+      if (owner !== activeAccount.current) return;
+      draftVersion.current = { owner, revision: remote
+        ? ("discardedAt" in remote ? remote.discardedAt : remote.updatedAt) : "none" };
+      setDraftConflict({
+        draft: remote && "updatedAt" in remote ? remote : null,
+        discarded: !!remote && "discardedAt" in remote,
+      });
+      setDraftWarning(null);
+    } catch {
+      setDraftWarning("Another device changed your online draft. Reload this page to compare drafts.");
+    }
+  }, []);
+
+  const handleDraftConflict = useCallback((owner: string, failure: unknown) => {
+    if (owner !== activeAccount.current) return;
+    const error = failure as { status?: number; data?: { code?: string } };
+    if (error.status !== 409) return false;
+    if (error.data?.code === "completed_audit_changed") {
+      draftBlocked.current = true;
+      conflictPending.current = true;
+      setDraftConflict(null);
+      setCompletedConflict(true);
+    } else {
+      void showDraftConflict(owner);
+    }
+    return true;
+  }, [showDraftConflict]);
+
   const queueDraft = useCallback((owner: string, answers: RadiantAuditSubmission) => {
     const baseline = draftBaseline.current?.owner === owner ? draftBaseline.current.completedAt : null;
     if (!baseline) return;
@@ -127,29 +178,51 @@ export default function RadiantAuditPage() {
       const data = auditAnswers(answers) as RadiantAuditDraft;
       // Serial writes prevent an older response from replacing the newest answers.
       draftWrite.current = draftWrite.current.catch(() => {}).then(async () => {
-        await saveRadiantAuditDraft(data, { headers: {
+        if (draftBlocked.current) return;
+        const saved = await saveRadiantAuditDraft(data, { headers: {
           "x-audit-draft-owner": owner,
           "x-audit-draft-baseline": baseline,
+          "x-audit-draft-revision": draftVersion.current?.owner === owner ? draftVersion.current.revision : "none",
         } });
-      }).catch(() => {
-        setDraftWarning("Your online draft couldn't be saved. Your answers are still in this browser.");
+        if (draftVersion.current?.owner === owner) draftVersion.current.revision = saved.updatedAt;
+      }).catch((failure: unknown) => {
+        if (!handleDraftConflict(owner, failure) && owner === activeAccount.current) {
+          setDraftWarning("Your online draft couldn't be saved. Your answers are still in this browser.");
+        }
       });
     }, 600);
-  }, []);
+  }, [handleDraftConflict]);
   const queueClearDraft = useCallback((owner: string) => {
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
       draftTimer.current = null;
       if (draftBlocked.current) return;
       draftWrite.current = draftWrite.current.catch(() => {}).then(async () => {
-        await deleteRadiantAuditDraft({ headers: { "x-audit-draft-owner": owner } });
-      }).catch(() => {
-        setDraftWarning("Your online draft couldn't be cleared. Please try discarding it.");
+        if (draftBlocked.current) return;
+        await deleteRadiantAuditDraft({ headers: {
+          "x-audit-draft-owner": owner,
+          "x-audit-draft-revision": draftVersion.current?.owner === owner ? draftVersion.current.revision : "none",
+        } });
+        // A deletion marker has its own revision; read it before another write.
+        const remote = await getRadiantAuditDraft({ responseType: "json" });
+        if (draftVersion.current?.owner === owner && remote && "discardedAt" in remote)
+          draftVersion.current.revision = remote.discardedAt;
+      }).catch((failure: unknown) => {
+        if (typeof failure === "object" && failure !== null && "status" in failure && failure.status === 409) {
+          void showDraftConflict(owner);
+        } else if (owner === activeAccount.current) {
+          setDraftWarning("Your online draft couldn't be cleared. Please try discarding it.");
+        }
       });
     }, 600);
-  }, []);
+  }, [showDraftConflict]);
   const persistDraft = useCallback((answers: RadiantAuditSubmission) => {
-    if (!accountId || draftBlocked.current) return;
+    if (!accountId) return;
+    latestAnswers.current = answers;
+    if (skipRestoredChange.current) {
+      skipRestoredChange.current = false;
+      return;
+    }
     const hasAnswers = !!(answers.routineChecks.length || answers.valuesChecks.length ||
       answers.beautyTrend || answers.masteryGoal || answers.researchTime);
     try {
@@ -164,17 +237,60 @@ export default function RadiantAuditPage() {
     } catch {
       setDraftWarning("This browser couldn't keep your draft. Keep this page open until your Audit is saved.");
     }
-    if (hasAnswers) queueDraft(accountId, answers);
-    else if (draftHadAnswers.current) queueClearDraft(accountId);
+    if (!draftBlocked.current) {
+      if (hasAnswers) queueDraft(accountId, answers);
+      else if (draftHadAnswers.current) queueClearDraft(accountId);
+    }
     draftHadAnswers.current = hasAnswers;
   }, [accountId, email, queueDraft, queueClearDraft]);
 
+  async function keepThisDraft() {
+    if (!accountId || !latestAnswers.current || !draftConflict) return;
+    const answers = latestAnswers.current;
+    try {
+      const saved = await saveRadiantAuditDraft(auditAnswers(answers) as RadiantAuditDraft, { headers: {
+        "x-audit-draft-owner": accountId,
+        "x-audit-draft-baseline": draftBaseline.current?.completedAt ?? "none",
+        "x-audit-draft-revision": draftVersion.current?.revision ?? "none",
+      } });
+      draftVersion.current = { owner: accountId, revision: saved.updatedAt };
+      setDraftConflict(null);
+      setDraftWarning(null);
+      conflictPending.current = false;
+      draftBlocked.current = false;
+    } catch (failure) {
+      if (!handleDraftConflict(accountId, failure)) setDraftWarning("Your choice couldn't be saved online. Try again.");
+    }
+  }
+
+  function useOtherDraft() {
+    if (!accountId || !draftConflict) return;
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    const answers = draftConflict.draft ? { ...draftConflict.draft, email: email ?? "" } : null;
+    try { clearAuditDraft(accountId); } catch { /* The online draft is still available. */ }
+    skipRestoredChange.current = true;
+    latestAnswers.current = answers;
+    draftHadAnswers.current = !!answers;
+    setLoadedDraft({ accountId, answers });
+    setDraftRevision(value => value + 1);
+    setDraftConflict(null);
+    setDraftWarning(null);
+    conflictPending.current = false;
+    draftBlocked.current = false;
+  }
+
   async function discardDraft() {
+    if (draftConflict) return;
     draftBlocked.current = true;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     try {
       await draftWrite.current;
-      await deleteRadiantAuditDraft({ headers: { "x-audit-draft-owner": accountId! } });
+      await deleteRadiantAuditDraft({ headers: {
+        "x-audit-draft-owner": accountId!,
+        "x-audit-draft-revision": draftVersion.current?.revision ?? "none",
+      } });
+      const marker = await getRadiantAuditDraft({ responseType: "json" });
+      if (marker && "discardedAt" in marker) draftVersion.current = { owner: accountId!, revision: marker.discardedAt };
       clearAuditDraft(accountId);
       clearPendingAudit();
       attempt.current = null;
@@ -183,14 +299,23 @@ export default function RadiantAuditPage() {
       setError(null);
       setLoadedDraft({ accountId: accountId!, answers: null });
       setDraftRevision(revision => revision + 1);
-    } catch {
-      setDraftWarning("Your draft couldn't be removed everywhere. Please try again.");
-    } finally {
+      conflictPending.current = false;
       draftBlocked.current = false;
+    } catch (failure) {
+      if (typeof failure === "object" && failure !== null && "status" in failure && failure.status === 409)
+        await showDraftConflict(accountId!);
+      else {
+        draftBlocked.current = false;
+        setDraftWarning("Your draft couldn't be removed everywhere. Please try again.");
+      }
     }
   }
 
   async function handleSubmit(audit: RadiantAuditSubmission) {
+    if (conflictPending.current || draftBlocked.current) {
+      setError(completedConflict ? "Reload and review the Audit saved on your other device before submitting again." : "Choose which unfinished draft to keep before saving your Audit.");
+      return;
+    }
     setError(null);
     if (!isLoaded) return;
     if (isSignedIn) {
@@ -206,6 +331,10 @@ export default function RadiantAuditPage() {
         draftBlocked.current = true;
         if (draftTimer.current) clearTimeout(draftTimer.current);
         await draftWrite.current;
+        if (conflictPending.current) {
+          setError(completedConflict ? "Reload and review the Audit saved on your other device before submitting again." : "Choose which unfinished draft to keep before saving your Audit.");
+          return;
+        }
         const answers = auditAnswers(audit);
         const signature = JSON.stringify(answers);
         if (attempt.current?.accountId !== user!.id || attempt.current.answers !== signature) {
@@ -228,8 +357,10 @@ export default function RadiantAuditPage() {
         try { clearPendingAudit(); } catch { /* A storage failure must not hide a confirmed save. */ }
         navigate("/radiant-audit/complete");
       } catch {
-        draftBlocked.current = false;
-        if (accountId) queueDraft(accountId, audit);
+        if (!conflictPending.current) {
+          draftBlocked.current = false;
+          if (accountId) queueDraft(accountId, audit);
+        }
         setError("We couldn't save your Audit. Your answers are still here; please try again.");
       }
       return;
@@ -258,6 +389,35 @@ export default function RadiantAuditPage() {
   if (accountId && loadedDraft?.accountId !== accountId) return <p role="status">Loading your draft…</p>;
 
   return (
+    <>
+    {completedConflict && (
+      <section role="alert" className="mx-auto mb-6 max-w-3xl rounded-xl border border-primary/50 bg-card p-5">
+        <h2 className="font-serif text-xl">Your completed Audit changed on another device</h2>
+        <p className="mt-2 text-sm">Your answers are still saved in this browser. Reload to review the latest completed Audit before you start or submit another one.</p>
+        <Button type="button" className="mt-4" onClick={() => window.location.reload()}>Reload and review Audit</Button>
+      </section>
+    )}
+    {draftConflict && (
+      <section role="alert" className="mx-auto mb-6 max-w-3xl rounded-xl border border-primary/50 bg-card p-5">
+        <h2 className="font-serif text-xl">Your Audit draft changed on another device</h2>
+        <p className="mt-2 text-sm">Your answers on this device are still here. {draftConflict.draft
+          ? "The online draft has different answers. Choose which complete draft to keep; the other version will be replaced."
+          : draftConflict.discarded ? "The online draft was discarded on another device. Choose whether to restore your answers or keep it discarded."
+          : "The online draft is no longer available. Choose whether to save these answers as a new draft or clear this form."}</p>
+        {draftConflict.draft && <div className="mt-3 rounded-lg bg-muted p-3 text-sm">
+          <p className="font-semibold">Online draft from the other device</p>
+          <p>Beauty trend: {draftConflict.draft.beautyTrend || "Not answered"}</p>
+          <p>Mastery goal: {draftConflict.draft.masteryGoal || "Not answered"}</p>
+          <p>Research time: {draftConflict.draft.researchTime || "Not answered"}</p>
+          <p>Routine choices: {draftConflict.draft.routineChecks.join(", ") || "None"}</p>
+          <p>Values choices: {draftConflict.draft.valuesChecks.join(", ") || "None"}</p>
+        </div>}
+        <div className="mt-4 flex flex-wrap gap-3">
+          <Button type="button" onClick={() => void keepThisDraft()}>Keep this device's answers</Button>
+          <Button type="button" variant="outline" onClick={useOtherDraft}>{draftConflict.draft ? "Use the other device's answers" : "Keep the online draft discarded"}</Button>
+        </div>
+      </section>
+    )}
     <RadiantAuditForm
       key={`${accountId ?? "visitor"}:${draftRevision}`}
       initialEmail={email}
@@ -285,6 +445,7 @@ export default function RadiantAuditPage() {
         }
       }}
     />
+    </>
   );
 }
 

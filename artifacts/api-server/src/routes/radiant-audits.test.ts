@@ -27,6 +27,8 @@ const otherAccount = `audit-test-${randomUUID()}`;
 const retryAccount = `audit-test-${randomUUID()}`;
 const draftAccount = `audit-test-${randomUUID()}`;
 const expiryAccount = `audit-test-${randomUUID()}`;
+const competingAccount = `audit-test-${randomUUID()}`;
+const draftRevisions = new Map<string, string>();
 let server: Server;
 let baseUrl: string;
 let databaseSafe = false;
@@ -37,11 +39,23 @@ async function request(method: string, body?: object, user = account, path = "")
     headers: {
       "x-test-user": user,
       ...(path === "/draft" ? { "x-audit-draft-owner": user } : {}),
+      ...(path === "/draft" && method === "PUT" ? { "x-audit-draft-baseline": "none" } : {}),
+      ...(path === "/draft" && method !== "GET" ? { "x-audit-draft-revision": draftRevisions.get(user) ?? "none" } : {}),
       ...(body ? { "content-type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return { status: response.status, data: response.status === 204 ? {} : await response.json() as Record<string, unknown> };
+  const data = response.status === 204 ? {} : await response.json() as Record<string, unknown>;
+  if (path === "/draft" && response.ok) {
+    if (data && typeof data.updatedAt === "string") draftRevisions.set(user, data.updatedAt);
+    if (data && typeof data.discardedAt === "string") draftRevisions.set(user, data.discardedAt);
+    if (method === "GET" && data === null) draftRevisions.set(user, "none");
+    if (method === "DELETE") {
+      const marker = await request("GET", undefined, user, "/draft");
+      if (typeof marker.data.discardedAt === "string") draftRevisions.set(user, marker.data.discardedAt);
+    }
+  }
+  return { status: response.status, data };
 }
 
 beforeAll(async () => {
@@ -81,13 +95,18 @@ beforeAll(async () => {
     displayName: "Expiry audit test",
     email: `${expiryAccount}@example.invalid`,
   });
+  await db.insert(usersTable).values({
+    clerkId: competingAccount,
+    displayName: "Competing draft test",
+    email: `${competingAccount}@example.invalid`,
+  });
 });
 
 afterAll(async () => {
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     if (!databaseSafe) return;
-    for (const user of [account, otherAccount, retryAccount, draftAccount, expiryAccount]) {
+    for (const user of [account, otherAccount, retryAccount, draftAccount, expiryAccount, competingAccount]) {
       await db.delete(radiantAuditDraftsTable).where(eq(radiantAuditDraftsTable.clerkId, user));
       await db.delete(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, user));
       await db.delete(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, user));
@@ -97,6 +116,47 @@ afterAll(async () => {
   } finally {
     await pool.end();
   }
+});
+
+test("competing devices cannot replace or delete a newer draft without reading its revision", async () => {
+  const answers = {
+    routineChecks: ["skincare-consistency"],
+    valuesChecks: [],
+    beautyTrend: "device one",
+    masteryGoal: "",
+    researchTime: "",
+  };
+  const write = async (revision: string, body: object, method = "PUT") => {
+    const response = await fetch(`${baseUrl}/users/me/radiant-audit/draft`, {
+      method,
+      headers: {
+        "x-test-user": competingAccount,
+        "x-audit-draft-owner": competingAccount,
+        "x-audit-draft-baseline": "none",
+        "x-audit-draft-revision": revision,
+        "content-type": "application/json",
+      },
+      body: method === "PUT" ? JSON.stringify(body) : undefined,
+    });
+    return { status: response.status, data: response.status === 204 ? null : await response.json() as Record<string, unknown> };
+  };
+  const [first, second] = await Promise.all([
+    write("none", answers),
+    write("none", { ...answers, beautyTrend: "device two" }),
+  ]);
+  expect([first.status, second.status].sort()).toEqual([200, 409]);
+  const winning = first.status === 200 ? first : second;
+  const oldVersion = winning.data!.updatedAt as string;
+  expect((await write("none", answers)).status).toBe(409);
+  expect((await write("none", {}, "DELETE")).status).toBe(409);
+  const next = await write(oldVersion, { ...answers, beautyTrend: "newer version" });
+  expect(next.status).toBe(200);
+  expect(next.data!.updatedAt).not.toBe(oldVersion);
+  expect((await write(oldVersion, answers)).status).toBe(409);
+  expect((await write(oldVersion, {}, "DELETE")).status).toBe(409);
+  expect((await request("GET", undefined, competingAccount, "/draft")).data).toMatchObject({ beautyTrend: "newer version" });
+  expect((await write(next.data!.updatedAt as string, {}, "DELETE")).status).toBe(204);
+  expect((await write(next.data!.updatedAt as string, answers)).status).toBe(409);
 });
 
 test("unfinished drafts belong only to their owner, expire, and are removed on submit", async () => {

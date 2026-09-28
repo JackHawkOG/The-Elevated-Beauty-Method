@@ -11,6 +11,14 @@ function draftOwnerMatches(req: { userId?: string; get(name: string): string | u
   return !!req.userId && req.get("x-audit-draft-owner") === req.userId;
 }
 
+function draftRevision(draft?: typeof radiantAuditDraftsTable.$inferSelect): string {
+  return draft?.updatedAt.toISOString() ?? "none";
+}
+
+function nextDraftDate(draft?: typeof radiantAuditDraftsTable.$inferSelect): Date {
+  return new Date(Math.max(Date.now(), (draft?.updatedAt.getTime() ?? 0) + 1));
+}
+
 function response(audit: typeof radiantAuditsTable.$inferSelect) {
   return {
     routineChecks: audit.routineChecks,
@@ -55,9 +63,12 @@ router.put("/users/me/radiant-audit/draft", requireAuth, jitProvisionUser, async
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${req.userId!}))`);
     const [current] = await tx.select({ completedAt: radiantAuditsTable.completedAt })
       .from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, req.userId!));
-    if (req.get("x-audit-draft-baseline") !== (current?.completedAt.toISOString() ?? "none")) return false;
+    if (req.get("x-audit-draft-baseline") !== (current?.completedAt.toISOString() ?? "none")) return "completed" as const;
     await tx.delete(radiantAuditDraftsTable).where(lte(radiantAuditDraftsTable.expiresAt, new Date()));
-    const now = new Date();
+    const [previous] = await tx.select().from(radiantAuditDraftsTable)
+      .where(eq(radiantAuditDraftsTable.clerkId, req.userId!));
+    if (req.get("x-audit-draft-revision") !== draftRevision(previous)) return "draft" as const;
+    const now = nextDraftDate(previous);
     await tx.insert(radiantAuditDraftsTable).values({
       clerkId: req.userId!,
       answers: parsed.data,
@@ -67,13 +78,17 @@ router.put("/users/me/radiant-audit/draft", requireAuth, jitProvisionUser, async
       target: radiantAuditDraftsTable.clerkId,
       set: { answers: parsed.data, expiresAt: new Date(now.getTime() + draftLifetimeMs), updatedAt: now },
     });
-    return true;
+    return now.toISOString();
   });
-  if (!saved) {
-    res.status(409).json({ error: "Your Audit was saved on another device. Reload before editing a new draft." });
+  if (saved === "completed") {
+    res.status(409).json({ code: "completed_audit_changed", error: "Your Audit was saved on another device. Reload before editing a new draft." });
     return;
   }
-  res.json(SaveRadiantAuditDraftResponse.parse(parsed.data));
+  if (saved === "draft") {
+    res.status(409).json({ error: "Your online draft changed on another device. Choose which draft to keep." });
+    return;
+  }
+  res.json(SaveRadiantAuditDraftResponse.parse({ ...parsed.data, updatedAt: saved }));
 });
 
 router.delete("/users/me/radiant-audit/draft", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
@@ -83,16 +98,28 @@ router.delete("/users/me/radiant-audit/draft", requireAuth, jitProvisionUser, as
   }
   // Retain only a short-lived deletion marker, not the written answers.
   // Other browsers use it to reject their older local copies.
-  const discardedAt = new Date();
-  await db.insert(radiantAuditDraftsTable).values({
-    clerkId: req.userId!,
-    answers: { discardedAt: discardedAt.toISOString() },
-    expiresAt: new Date(discardedAt.getTime() + draftLifetimeMs),
-    updatedAt: discardedAt,
-  }).onConflictDoUpdate({
-    target: radiantAuditDraftsTable.clerkId,
-    set: { answers: { discardedAt: discardedAt.toISOString() }, expiresAt: new Date(discardedAt.getTime() + draftLifetimeMs), updatedAt: discardedAt },
+  const discarded = await db.transaction(async tx => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${req.userId!}))`);
+    await tx.delete(radiantAuditDraftsTable).where(lte(radiantAuditDraftsTable.expiresAt, new Date()));
+    const [previous] = await tx.select().from(radiantAuditDraftsTable)
+      .where(eq(radiantAuditDraftsTable.clerkId, req.userId!));
+    if (req.get("x-audit-draft-revision") !== draftRevision(previous)) return false;
+    const discardedAt = nextDraftDate(previous);
+    await tx.insert(radiantAuditDraftsTable).values({
+      clerkId: req.userId!,
+      answers: { discardedAt: discardedAt.toISOString() },
+      expiresAt: new Date(discardedAt.getTime() + draftLifetimeMs),
+      updatedAt: discardedAt,
+    }).onConflictDoUpdate({
+      target: radiantAuditDraftsTable.clerkId,
+      set: { answers: { discardedAt: discardedAt.toISOString() }, expiresAt: new Date(discardedAt.getTime() + draftLifetimeMs), updatedAt: discardedAt },
+    });
+    return true;
   });
+  if (!discarded) {
+    res.status(409).json({ error: "Your online draft changed on another device. Choose which draft to keep." });
+    return;
+  }
   res.sendStatus(204);
 });
 

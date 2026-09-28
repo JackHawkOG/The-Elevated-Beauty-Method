@@ -21,3 +21,4 @@
 - [Vitest source-check callback shapes](vitest-source-check-callbacks.md) — static checks must account for optional timeouts and curried each callbacks when locating test bodies.
 - [Audit dialog history tests](audit-dialog-history-tests.md) — synthetic visibility events may not refetch history during a modal; invalidate the test client's query to simulate an external update.
 - [Community fixture ownership](community-fixture-ownership.md) — unmarked older test identities are not provably disposable; automated cleanup requires explicit ownership proof.
+- [Audit draft revisions](audit-draft-revisions.md) — treat deletion markers as revisions too; make timestamps monotonic under the account lock so simultaneous writes cannot share a version.

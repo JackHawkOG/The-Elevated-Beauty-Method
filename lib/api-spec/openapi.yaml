@@ -769,7 +769,8 @@ paths:
     put:
       operationId: saveRadiantAuditDraft
       tags: [method]
-      summary: Replace the signed-in member's unfinished Audit draft
+      summary: Replace the draft only if its revision still matches the version read by this device
+      description: Send x-audit-draft-revision as the last GET or PUT updatedAt (or discardedAt for a deletion marker), or "none" when no draft exists. A mismatch returns 409; reload and ask the member which version to keep.
       requestBody:
         required: true
         content:
@@ -782,20 +783,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RadiantAuditDraft"
+                $ref: "#/components/schemas/RadiantAuditStoredDraft"
         "400":
           description: Invalid draft
         "401":
           description: Unauthorized
+        "409":
+          description: The completed Audit or unfinished draft changed; no answers were replaced
     delete:
       operationId: deleteRadiantAuditDraft
       tags: [method]
       summary: Discard the signed-in member's unfinished Audit draft
+      description: Send x-audit-draft-revision with the last observed revision, or "none" when absent. A mismatch returns 409.
       responses:
         "204":
           description: Draft discarded
         "401":
           description: Unauthorized
+        "409":
+          description: Another device changed the draft; no answers were deleted
 
   /users/me/radiant-audit/history:
     get:

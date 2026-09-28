@@ -2938,11 +2938,12 @@ export const getSaveRadiantAuditDraftUrl = () => {
 }
 
 /**
- * @summary Replace the signed-in member's unfinished Audit draft
+ * Send x-audit-draft-revision as the last GET or PUT updatedAt (or discardedAt for a deletion marker), or "none" when no draft exists. A mismatch returns 409; reload and ask the member which version to keep.
+ * @summary Replace the draft only if its revision still matches the version read by this device
  */
-export const saveRadiantAuditDraft = async (radiantAuditDraft: RadiantAuditDraft, options?: Parameters<typeof customFetch>[1]): Promise<RadiantAuditDraft> => {
+export const saveRadiantAuditDraft = async (radiantAuditDraft: RadiantAuditDraft, options?: Parameters<typeof customFetch>[1]): Promise<RadiantAuditStoredDraft> => {
 
-  return customFetch<RadiantAuditDraft>(getSaveRadiantAuditDraftUrl(),
+  return customFetch<RadiantAuditStoredDraft>(getSaveRadiantAuditDraftUrl(),
   {
     ...options,
     method: 'PUT',
@@ -2987,7 +2988,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SaveRadiantAuditDraftMutationError = ErrorType<void>
 
     /**
- * @summary Replace the signed-in member's unfinished Audit draft
+ * @summary Replace the draft only if its revision still matches the version read by this device
  */
 export const useSaveRadiantAuditDraft = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveRadiantAuditDraft>>, TError,{data: BodyType<RadiantAuditDraft>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -3009,6 +3010,7 @@ export const getDeleteRadiantAuditDraftUrl = () => {
 }
 
 /**
+ * Send x-audit-draft-revision with the last observed revision, or "none" when absent. A mismatch returns 409.
  * @summary Discard the signed-in member's unfinished Audit draft
  */
 export const deleteRadiantAuditDraft = async ( options?: Parameters<typeof customFetch>[1]): Promise<void> => {

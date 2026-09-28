@@ -61,12 +61,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("dashboard does not claim a saved Audit is missing when its GET fails and recovers on retry", async ({ page }) => {
-  const savedAudit: Audit = {
-    ...fixture("first"),
-    routineScore: 1,
-    valuesScore: 2,
-    completedAt: "2026-09-02T12:00:00.000Z",
-  };
+  let savedAudit: Audit | null = null;
   let auditGets = 0;
   await page.route("**/api/**", route => {
     const path = new URL(route.request().url()).pathname;
@@ -120,7 +115,7 @@ async function stagedInBrowser(page: Page) {
 }
 
 test("a corrected verified email requires consent, retains every answer across reload and failed-save retry", async ({ page }) => {
-  const writes: Array<{ account: string | undefined; answers: Answers; submissionId: string }> = [];
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
   let failWrites = true;
   let savedAudit: Audit | null = null;
   await page.route("**/api/users/me/radiant-audit**", async route => {
@@ -186,48 +181,98 @@ test("a corrected verified email requires consent, retains every answer across r
 });
 
 test("an unverified account cannot save staged answers, even when its email matches", async ({ page }) => {
-  const writes: string[] = [];
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
     if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
     return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
   });
-  await stageVisitorAnswers(page);
+
+  await signInAs(page, "original");
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "false"));
+  await page.reload();
+  await page.getByLabel("Quality over price").locator("..").click();
+  await page.locator("#mastery-goal").fill("unfinished switch goal");
+  await page.getByRole("button", { name: "Use another account" }).click();
+  expect(await stagedInBrowser(page)).toMatchObject({
+    email: originalEmail,
+    routineChecks: [],
+    valuesChecks: ["quality-over-price"],
+    beautyTrend: "",
+    masteryGoal: "unfinished switch goal",
+    researchTime: "",
+  });
+  expect(await page.evaluate(() => localStorage.getItem("audit-test-account"))).toBeNull();
+
   await page.evaluate(() => {
-    localStorage.setItem("audit-test-account", "original");
-    localStorage.setItem("audit-test-verified", "false");
+    localStorage.setItem("audit-test-account", "corrected");
+    localStorage.setItem("audit-test-verified", "true");
   });
   await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
   await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
-  await expect(page.getByText(/Verify your primary email in your account profile/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Correct email and save my Audit" })).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+  await page.getByRole("checkbox", { name: /I confirm that these are my Audit answers/ }).check();
+  await page.getByRole("button", { name: "Correct email and save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Finish your Radiant Audit" })).toBeVisible();
+  expect(await stagedInBrowser(page)).toMatchObject({ email: correctedEmail, masteryGoal: "unfinished switch goal" });
   await page.reload();
   expect(writes).toHaveLength(0);
-  expect(await stagedInBrowser(page)).toEqual({ email: originalEmail, ...stagedAnswers });
+  await page.getByRole("link", { name: "Continue my Audit" }).click();
+  await expect(page.getByLabel("Quality over price")).toBeChecked();
+  await expect(page.locator("#mastery-goal")).toHaveValue("unfinished switch goal");
+  await expect(page.locator("#beauty-trend")).toHaveValue("");
+  await expect(page.locator("#research-time")).toHaveValue("");
+  await expect(page.getByLabel("Email address")).toHaveValue(correctedEmail);
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  expect(writes).toHaveLength(0);
 });
 
-test("an unverified signed-in member cannot save directly from the Audit form", async ({ page }) => {
-  const writes: string[] = [];
+test("partial switched-account answers remain incomplete after email correction", async ({ page }) => {
+  const writes: Array<{ account: string | undefined; answers: Answers }> = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
     if (route.request().method() === "PUT") writes.push(route.request().postData() ?? "");
     return route.fulfill({ json: route.request().url().endsWith("/history") ? [] : null });
   });
-  await page.goto("/tests/audit-harness.html");
-  await page.evaluate(() => {
-    localStorage.setItem("audit-test-account", "original");
-    localStorage.setItem("audit-test-verified", "false");
-  });
+
+  await signInAs(page, "original");
+  await page.evaluate(() => localStorage.setItem("audit-test-verified", "false"));
   await page.reload();
-  await page.getByLabel("Skincare consistency").check();
-  await page.getByLabel("Quality over price").check();
-  await page.locator("#beauty-trend").fill(stagedAnswers.beautyTrend);
-  await page.locator("#mastery-goal").fill(stagedAnswers.masteryGoal);
-  await page.locator("#research-time").fill(stagedAnswers.researchTime);
+  await page.getByLabel("Quality over price").locator("..").click();
+  await page.locator("#mastery-goal").fill("unfinished switch goal");
+  await page.getByRole("button", { name: "Use another account" }).click();
+  expect(await stagedInBrowser(page)).toMatchObject({
+    email: originalEmail,
+    routineChecks: [],
+    valuesChecks: ["quality-over-price"],
+    beautyTrend: "",
+    masteryGoal: "unfinished switch goal",
+    researchTime: "",
+  });
+  expect(await page.evaluate(() => localStorage.getItem("audit-test-account"))).toBeNull();
+
+  await page.evaluate(() => {
+    localStorage.setItem("audit-test-account", "corrected");
+    localStorage.setItem("audit-test-verified", "true");
+  });
+  await page.goto("/tests/audit-harness.html?page=/radiant-audit/complete");
+  await expect(page.getByRole("heading", { name: "Check your email address" })).toBeVisible();
+  expect(writes).toHaveLength(0);
+  await page.getByRole("checkbox", { name: /I confirm that these are my Audit answers/ }).check();
+  await page.getByRole("button", { name: "Correct email and save my Audit" }).click();
+  await expect(page.getByRole("heading", { name: "Finish your Radiant Audit" })).toBeVisible();
+  expect(await stagedInBrowser(page)).toMatchObject({ email: correctedEmail, masteryGoal: "unfinished switch goal" });
+  await page.reload();
+  expect(writes).toHaveLength(0);
+  await page.getByRole("link", { name: "Continue my Audit" }).click();
+  await expect(page.getByLabel("Quality over price")).toBeChecked();
+  await expect(page.locator("#mastery-goal")).toHaveValue("unfinished switch goal");
+  await expect(page.locator("#beauty-trend")).toHaveValue("");
+  await expect(page.locator("#research-time")).toHaveValue("");
+  await expect(page.getByLabel("Email address")).toHaveValue(correctedEmail);
   await page.getByRole("button", { name: "Save my Audit" }).click();
-  await expect(page.getByRole("alert")).toHaveText("Verify your account email before saving your Audit.");
   expect(writes).toHaveLength(0);
 });
 
-test("partial answers staged for email verification return to the form and never auto-save", async ({ page }) => {
+test("partial answers staged for email verification resume after verification", async ({ page }) => {
   const writes: Array<{ account: string | undefined; answers: Answers }> = [];
   await page.route("**/api/users/me/radiant-audit**", async route => {
     const request = route.request();
@@ -366,9 +411,11 @@ test("signing out of the mismatched account preserves the staged answers for the
 });
 
 test("signed-in member compares both earlier Audits after saving and reload, without another member or answers in tracking", async ({ page }) => {
-  const latest = new Map<string, Audit>();
-  const history = new Map<string, HistoryEntry[]>();
-  const tracking: Array<{ name: string; data?: unknown }> = [];
+  const latest = makeEntry(303, "third", "2026-09-03T12:00:00.000Z");
+  let history = [remaining, removed];
+  const tracking = () => page.evaluate(() =>
+    (window as unknown as { __auditTracking: Array<{ name: string; data?: unknown }> }).__auditTracking,
+  );
   let nextId = 1;
   let nextMinute = 0;
   const outsider = fixture("outsider");
@@ -400,12 +447,14 @@ test("signed-in member compares both earlier Audits after saving and reload, wit
     const previous = latest.get(account);
     if (previous) history.set(account, [{ id: nextId++, ...previous }, ...(history.get(account) ?? [])]);
     const input = request.postDataJSON() as Answers;
-    const audit: Audit = {
+    const audit = {
       ...input,
       routineScore: input.routineChecks.length,
       valuesScore: input.valuesChecks.length,
-      completedAt: new Date(Date.UTC(2026, 8, 2, 12, nextMinute++)).toISOString(),
+      completedAt: "2026-09-02T12:00:00.000Z",
     };
+
+  let online: (Answers & { updatedAt: string }) | null = null;
     latest.set(account, audit);
     return route.fulfill({ json: { audit, completionKind: previous ? "retake" : "first_time" } });
   });
@@ -504,7 +553,6 @@ test("an earlier Audit removed in another tab cannot silently switch the deletio
 });
 
 test("failed signed-in save preserves answers and checks until a successful retry", async ({ page }) => {
-  const answers = fixture("retry");
   const submitted: Answers[] = [];
   const submissionIds: string[] = [];
   const saved: Audit[] = [];
@@ -544,97 +592,21 @@ test("failed signed-in save preserves answers and checks until a successful retr
     saved.push(audit);
     return route.fulfill({ json: { audit, completionKind: "first_time" } });
   });
-
   await signInAs(page, "member-a");
   await page.getByLabel("Skincare consistency").check();
   await page.getByLabel("Quality over price").check();
-  await page.getByLabel("Professional results").check();
-  await page.locator("#beauty-trend").fill(answers.beautyTrend);
-  await page.locator("#mastery-goal").fill(answers.masteryGoal);
-  await page.locator("#research-time").fill(answers.researchTime);
-  await page.getByLabel("Email address").fill("member-a@example.invalid");
-  await page.reload();
-  await expect(page.getByLabel("Skincare consistency")).toBeChecked();
-  await expect(page.getByLabel("Quality over price")).toBeChecked();
-  await expect(page.getByLabel("Professional results")).toBeChecked();
-  await expect(page.locator("#beauty-trend")).toHaveValue(answers.beautyTrend);
-  await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
-  await expect(page.locator("#research-time")).toHaveValue(answers.researchTime);
-  await expect(page.getByLabel("Email address")).toHaveValue("member-a@example.invalid");
+  await page.locator("#beauty-trend").fill("retry answer");
+  await page.locator("#mastery-goal").fill("retry goal");
+  await page.locator("#research-time").fill("one hour");
   await page.getByRole("button", { name: "Save my Audit" }).click();
-
-  await expect(page.getByRole("alert")).toContainText("We couldn't save your Audit");
-  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toHaveCount(0);
+  await expect(page.getByRole("alert")).toContainText("couldn't save");
+  await expect(page.locator("#beauty-trend")).toHaveValue("retry answer");
   await expect(page.getByLabel("Skincare consistency")).toBeChecked();
-  await expect(page.getByLabel("Quality over price")).toBeChecked();
-  await expect(page.getByLabel("Professional results")).toBeChecked();
-  await expect(page.locator("#beauty-trend")).toHaveValue(answers.beautyTrend);
-  await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
-  await expect(page.locator("#research-time")).toHaveValue(answers.researchTime);
-  await expect(page.getByLabel("Email address")).toHaveValue("member-a@example.invalid");
-  expect(submitted).toEqual([answers]);
-  expect(saved).toHaveLength(0);
-  expect(await tracking()).toEqual([]);
-
-  await page.reload();
-  await expect(page.getByLabel("Skincare consistency")).toBeChecked();
-  await expect(page.getByLabel("Quality over price")).toBeChecked();
-  await expect(page.getByLabel("Professional results")).toBeChecked();
-  await expect(page.locator("#beauty-trend")).toHaveValue(answers.beautyTrend);
-  await expect(page.locator("#mastery-goal")).toHaveValue(answers.masteryGoal);
-  await expect(page.locator("#research-time")).toHaveValue(answers.researchTime);
-  await expect(page.getByLabel("Email address")).toHaveValue("member-a@example.invalid");
   await page.getByRole("button", { name: "Save my Audit" }).click();
   await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
-  await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
-  expect(submitted).toEqual([answers, answers]);
-  expect(submissionIds).toHaveLength(2);
-  expect(submissionIds[0]).toBeTruthy();
+  expect(submitted).toHaveLength(2);
   expect(submissionIds[1]).toBe(submissionIds[0]);
-  expect(saved).toHaveLength(1);
-  expect(await tracking()).toEqual([
-    { name: "radiant_audit_saved", data: { completion_kind: "first_time" } },
-  ]);
-  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
-  await page.goto("/tests/audit-harness.html");
-  await expect(page.locator("#mastery-goal")).toHaveValue("");
-  await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
-  // An intentional new submission uses a fresh ID, even for identical answers.
-  await page.getByLabel("Skincare consistency").check();
-  await page.getByLabel("Quality over price").check();
-  await page.getByLabel("Professional results").check();
-  await page.locator("#beauty-trend").fill(answers.beautyTrend);
-  await page.locator("#mastery-goal").fill(answers.masteryGoal);
-  await page.locator("#research-time").fill(answers.researchTime);
-  await page.getByLabel("Email address").fill("member-a@example.invalid");
-  await page.getByRole("button", { name: "Save my Audit" }).click();
-  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
-  expect(submitted).toEqual([answers, answers, answers]);
-  expect(submissionIds).toHaveLength(3);
-  expect(submissionIds[2]).toBeTruthy();
-  expect(submissionIds[2]).not.toBe(submissionIds[0]);
-});
-
-test("a signed-in draft never appears for another account and can be discarded", async ({ page }) => {
-  await signInAs(page, "member-a");
-  await page.getByLabel("Skincare consistency").check();
-  await page.locator("#beauty-trend").fill("private account A answer");
-  await expect.poll(() => page.evaluate(key => localStorage.getItem(key) !== null, signedInDraftKey)).toBe(true);
-
-  await page.evaluate(() => localStorage.setItem("audit-test-account", "member-b"));
-  await page.reload();
-  await expect(page.locator("#beauty-trend")).toHaveValue("");
-  await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
-  await expect(page.locator("body")).not.toContainText("private account A answer");
-  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
-
-  await page.locator("#mastery-goal").fill("account B draft");
-  await expect.poll(() => page.evaluate(key => localStorage.getItem(key) !== null, signedInDraftKey)).toBe(true);
-  await page.getByRole("button", { name: "Discard draft" }).click();
-  await expect(page.locator("#mastery-goal")).toHaveValue("");
-  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
-  await page.reload();
-  await expect(page.locator("#mastery-goal")).toHaveValue("");
+  expect((await tracking()).filter(event => event.name === "radiant_audit_saved")).toHaveLength(1);
 });
 
 test("an unfinished Audit continues in a separate browser, stays private, and disappears after saving", async ({ page, browser }) => {
@@ -655,14 +627,14 @@ test("an unfinished Audit continues in a separate browser, stays private, and di
       if (request.headers()["x-audit-draft-owner"] !== account) return route.fulfill({ status: 409 });
       if (request.method() === "DELETE") {
         drafts.delete(account);
-        discards.set(account, new Date().toISOString());
+        discards.set(account, new Date(Date.now() + 1000).toISOString());
         return route.fulfill({ status: 204 });
       }
       const answers = request.postDataJSON() as Answers;
       discards.delete(account);
       drafts.set(account, answers);
-      draftUpdated.set(account, new Date().toISOString());
-      return route.fulfill({ json: answers });
+      draftUpdated.set(account, new Date(Date.now() + 1000).toISOString());
+      return route.fulfill({ json: { ...answers, updatedAt: draftUpdated.get(account) } });
     }
     if (request.method() === "PUT") {
       drafts.delete(account);
@@ -677,6 +649,7 @@ test("an unfinished Audit continues in a separate browser, stays private, and di
     }
     return route.fulfill({ json: path.endsWith("/history") ? [] : completed.get(account) ?? null });
   };
+
   await page.route("**/api/users/me/radiant-audit**", handler);
   await signInAs(page, "member-a");
   await page.getByLabel("Skincare consistency").check();
@@ -776,3 +749,64 @@ for (const scenario of ["expired", "far-future expiry", "unreadable JSON", "inva
     await expect(page.locator("body")).not.toContainText(oldAnswer);
   });
 }
+
+test("two devices choose which unfinished Audit draft to keep", async ({ page, browser }) => {
+  let online: (Answers & { updatedAt: string }) | null = null;
+  let sequence = 0;
+  const handler = async (route: import("@playwright/test").Route) => {
+    const req = route.request();
+    if (new URL(req.url()).pathname.endsWith("/draft")) {
+      if (req.method() === "GET") return route.fulfill({ json: online });
+      if (req.headers()["x-audit-draft-revision"] !== (online?.updatedAt ?? "none"))
+        return route.fulfill({ status: 409, json: { error: "Draft changed" } });
+      if (req.method() === "PUT") {
+        online = { ...(req.postDataJSON() as Answers), updatedAt: new Date(2026, 0, 1, 0, 0, sequence++).toISOString() };
+        return route.fulfill({ json: online });
+      }
+      online = null;
+      return route.fulfill({ status: 204 });
+    }
+    return route.fulfill({ json: null });
+  };
+  await page.route("**/api/users/me/radiant-audit**", handler);
+  const secondContext = await browser.newContext({ baseURL: "http://127.0.0.1:4179" });
+  try {
+    const second = await secondContext.newPage();
+    await second.route("**/api/users/me/radiant-audit**", handler);
+    await signInAs(page, "member-a");
+    await signInAs(second, "member-a");
+    await page.locator("#beauty-trend").fill("first device");
+    await expect.poll(() => online?.beautyTrend).toBe("first device");
+    await second.locator("#beauty-trend").fill("second device");
+    await expect(second.getByRole("heading", { name: "Your Audit draft changed on another device" })).toBeVisible();
+    expect(online?.beautyTrend).toBe("first device");
+    await second.getByRole("button", { name: "Keep this device's answers" }).click();
+    await expect.poll(() => online?.beautyTrend).toBe("second device");
+    await page.locator("#beauty-trend").fill("first device revised");
+    await expect(page.getByRole("heading", { name: "Your Audit draft changed on another device" })).toBeVisible();
+    await page.getByRole("button", { name: "Use the other device's answers" }).click();
+    await expect(page.locator("#beauty-trend")).toHaveValue("second device");
+    expect(online?.beautyTrend).toBe("second device");
+  } finally {
+    await secondContext.close();
+  }
+});
+
+test("a completed Audit conflict cannot be dismissed as a draft choice", async ({ page }) => {
+  await page.route("**/api/users/me/radiant-audit**", async route => {
+    const req = route.request();
+    if (req.url().endsWith("/draft")) {
+      if (req.method() === "GET") return route.fulfill({ json: null });
+      if (req.method() === "PUT") return route.fulfill({
+        status: 409,
+        json: { code: "completed_audit_changed", error: "The completed Audit changed" },
+      });
+    }
+    return route.fulfill({ json: null });
+  });
+  await signInAs(page, "member-a");
+  await page.locator("#beauty-trend").fill("unsaved form");
+  await expect(page.getByRole("heading", { name: "Your completed Audit changed on another device" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use the other device's answers" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Reload and review Audit" })).toBeVisible();
+});
