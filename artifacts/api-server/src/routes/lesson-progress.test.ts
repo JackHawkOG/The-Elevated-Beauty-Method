@@ -8,6 +8,7 @@ import {
   lessonCompletionsTable, lessonsTable, usersTable,
 } from "@workspace/db";
 import { ensureEnrollmentSchema } from "../lib/ensure-enrollment-schema";
+import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
 import { approvedTopicLessons } from "../lib/approved-topic-lessons";
 import { requireDevelopmentDatabase } from "./test-development-database";
 
@@ -60,6 +61,7 @@ beforeAll(async () => {
   requireDevelopmentDatabase();
   fixturesStarted = true;
   await ensureEnrollmentSchema();
+  await ensureAnnouncementSchema();
   const { default: coursesRouter } = await import("./courses");
   const { default: enrollmentsRouter } = await import("./enrollments");
   const { default: dashboardRouter } = await import("./dashboard");

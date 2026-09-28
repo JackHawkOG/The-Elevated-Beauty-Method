@@ -8,6 +8,7 @@ import {
   lessonCompletionsTable, lessonsTable, pool, usersTable,
 } from "@workspace/db";
 import { requireDevelopmentDatabase } from "./test-development-database";
+import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
 
 // Exercise the actual requireAuth middleware and route guards. Only the isolated
 // test server replaces Clerk's session lookup and public-metadata lookup.
@@ -84,6 +85,7 @@ async function assertCourseHidden(courseId: number, lessonId?: number) {
 beforeAll(async () => {
   requireDevelopmentDatabase();
   fixturesStarted = true;
+  await ensureAnnouncementSchema();
   const [{ default: courses }, { default: enrollments }, { default: dashboard }] = await Promise.all([
     import("./courses"), import("./enrollments"), import("./dashboard"),
   ]);

@@ -266,3 +266,124 @@ test("a writer waits for startup repair to merge legacy rows and install uniquen
     admin.release();
   }
 }, 15000);
+
+test("a writer waits for the SQL migration to merge legacy rows and install uniqueness", async () => {
+  requireDevelopmentDatabase();
+
+  // The migration's unqualified names resolve to this shared private schema,
+  // never to the workspace's public enrollments table or its index.
+  const schemaName = `enrollment_migration_${randomUUID().replaceAll("-", "")}`;
+  const admin = await pool.connect();
+  let migrationClient: PoolClient | undefined;
+  let writerClient: PoolClient | undefined;
+  let migrationRun: Promise<unknown> | undefined;
+  let writerRun: Promise<unknown> | undefined;
+  let gateHeld = false;
+  let created = false;
+  try {
+    await admin.query(`CREATE SCHEMA "${schemaName}"`);
+    created = true;
+    await admin.query(`
+      CREATE TABLE "${schemaName}".enrollments (
+        id integer PRIMARY KEY,
+        user_id text NOT NULL,
+        course_id integer NOT NULL,
+        completed_lessons integer NOT NULL DEFAULT 0,
+        last_lesson_id integer,
+        enrolled_at timestamp NOT NULL
+      )
+    `);
+    await admin.query(`
+      CREATE TABLE "${schemaName}".lessons (
+        id integer PRIMARY KEY,
+        course_id integer NOT NULL,
+        published_at timestamp
+      )
+    `);
+    await admin.query(`
+      INSERT INTO "${schemaName}".enrollments
+        (id, user_id, course_id, completed_lessons, enrolled_at)
+      VALUES (1, 'member', 7, 1, '2022-01-01'),
+             (2, 'member', 7, 4, '2023-01-01')
+    `);
+    // Hold the migration inside its UPDATE, which follows LOCK TABLE in the
+    // real script. The gate only affects this private schema's legacy row.
+    await admin.query(`
+      CREATE FUNCTION "${schemaName}".pause_migration() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        PERFORM pg_advisory_xact_lock(hashtext(TG_TABLE_SCHEMA));
+        RETURN NEW;
+      END
+      $$
+    `);
+    await admin.query(`
+      CREATE TRIGGER pause_migration BEFORE UPDATE ON "${schemaName}".enrollments
+      FOR EACH ROW EXECUTE FUNCTION "${schemaName}".pause_migration()
+    `);
+    await admin.query("SELECT pg_advisory_lock(hashtext($1))", [schemaName]);
+    gateHeld = true;
+
+    migrationClient = await pool.connect();
+    writerClient = await pool.connect();
+    await migrationClient.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+    await writerClient.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+    const { rows: [{ pid: adminPid }] } = await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const { rows: [{ pid: migrationPid }] } = await migrationClient.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const { rows: [{ pid: writerPid }] } = await writerClient.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+
+    const migration = await readFile(migrationUrl, "utf8");
+    migrationRun = migrationClient.query(migration).then(
+      () => ({ code: "committed" }),
+      (error: { code?: string }) => ({ code: error.code }),
+    );
+    const waitUntilBlockedBy = async (pid: number, blocker: number) => {
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const { rows: [{ waiting }] } = await admin.query<{ waiting: boolean }>(`
+          SELECT wait_event_type = 'Lock' AND $2::int = ANY(pg_blocking_pids(pid)) AS waiting
+          FROM pg_stat_activity WHERE pid = $1
+        `, [pid, blocker]);
+        if (waiting) return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
+    };
+    expect(await waitUntilBlockedBy(migrationPid, adminPid),
+      "migration must pause after acquiring its table lock").toBe(true);
+
+    writerRun = writerClient.query(`
+      INSERT INTO enrollments (id, user_id, course_id, enrolled_at)
+      VALUES (3, 'member', 7, '2024-01-01')
+    `).then(() => ({ code: "inserted" }), (error: { code?: string }) => ({ code: error.code }));
+    expect(await waitUntilBlockedBy(writerPid, migrationPid),
+      "writer must wait on the migration's table lock").toBe(true);
+    await admin.query("SELECT pg_advisory_unlock(hashtext($1))", [schemaName]);
+    gateHeld = false;
+
+    expect(await migrationRun).toEqual({ code: "committed" });
+    expect(await writerRun).toEqual({ code: "23505" });
+    expect((await admin.query(`
+      SELECT id, completed_lessons FROM "${schemaName}".enrollments
+      WHERE user_id = 'member' AND course_id = 7
+    `)).rows).toEqual([{ id: 1, completed_lessons: 4 }]);
+    expect((await admin.query(`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname = $1 AND indexname = 'enrollments_user_id_course_id_unique'
+    `, [schemaName])).rows).toHaveLength(1);
+  } finally {
+    if (gateHeld) await admin.query("SELECT pg_advisory_unlock(hashtext($1))", [schemaName]);
+    await Promise.allSettled([migrationRun, writerRun].filter((promise) => promise !== undefined));
+    if (migrationClient) {
+      await migrationClient.query("ROLLBACK");
+      await migrationClient.query("RESET search_path");
+      migrationClient.release();
+    }
+    if (writerClient) {
+      await writerClient.query("RESET search_path");
+      writerClient.release();
+    }
+    if (created) await admin.query(`DROP SCHEMA "${schemaName}" CASCADE`);
+    admin.release();
+  }
+}, 15000);

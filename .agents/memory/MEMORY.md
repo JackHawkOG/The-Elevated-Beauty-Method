@@ -20,6 +20,5 @@
 - [Nullable JSON API responses](nullable-json-api-responses.md) — use explicit JSON response mode for nullable direct client calls; automatic inference can return the string "null".
 - [Shared development schema freshness](shared-development-schema-freshness.md) — after merged schema changes, isolated DB tests may fail until the managed API startup brings the shared dev database current.
 - [Vitest source-check callback shapes](vitest-source-check-callbacks.md) — static checks must account for optional timeouts and curried each callbacks when locating test bodies.
-- [Audit dialog history tests](audit-dialog-history-tests.md) — synthetic visibility events may not refetch history during a modal; invalidate the test client's query to simulate an external update.
 - [Community fixture ownership](community-fixture-ownership.md) — unmarked older test identities are not provably disposable; automated cleanup requires explicit ownership proof.
 - [Audit draft revisions](audit-draft-revisions.md) — treat deletion markers as revisions too; make timestamps monotonic under the account lock so simultaneous writes cannot share a version.
