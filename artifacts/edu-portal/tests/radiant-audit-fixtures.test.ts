@@ -30,9 +30,11 @@ describe("Audit fixture cleanup boundaries", () => {
 
   it("refuses deployment, live Clerk keys, and another database target", () => {
     expect(() => requireAuditDevelopment(env)).not.toThrow();
+    expect(() => requireAuditDevelopment({ ...env, NODE_ENV: "production" })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, REPLIT_DEPLOYMENT: "1" })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, CLERK_SECRET_KEY: "sk_live_example" })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: "postgresql://dev@production.db/development" })).toThrow();
+    expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: "postgresql://dev@development.db/production" })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: `${env.DATABASE_URL}&host=production.db` })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, PGHOSTADDR: "127.0.0.1" })).toThrow();
   });

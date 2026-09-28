@@ -138,6 +138,84 @@ test("two real Clerk members keep saved and retaken Audit comparisons private ac
   }
 });
 
+test("a real member's online Audit draft is private and recovers in a fresh browser", async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const ownerEmail = auditFixtureEmail("a", tag);
+  const otherEmail = auditFixtureEmail("b", tag);
+  const answer = `private online draft ${tag}`;
+  const created: string[] = [];
+  const contexts: Array<Awaited<ReturnType<typeof browser.newContext>>> = [];
+  const draftPath = "/api/users/me/radiant-audit/draft";
+
+  try {
+    for (const email of [ownerEmail, otherEmail]) {
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
+      });
+      created.push(user.id);
+    }
+    await setupClerkTestingToken({ page });
+    await signIn(page, ownerEmail);
+    const baseURL = new URL(page.url()).origin;
+    await page.locator("#mastery-goal").fill(answer);
+    // Wait for the real debounced browser write, not just local form storage.
+    await expect.poll(async () => page.evaluate(async path => {
+      const response = await fetch(path);
+      if (!response.ok) throw new Error(`Owner draft GET failed: ${response.status}`);
+      return (await response.json() as { masteryGoal?: string } | null)?.masteryGoal;
+    }, draftPath)).toBe(answer);
+
+    const otherContext = await browser.newContext({ baseURL });
+    contexts.push(otherContext);
+    const otherPage = await otherContext.newPage();
+    await setupClerkTestingToken({ page: otherPage });
+    await signIn(otherPage, otherEmail);
+    const otherRead = await otherPage.evaluate(async path => {
+      const response = await fetch(path);
+      return { status: response.status, body: await response.json() };
+    }, draftPath);
+    expect(otherRead).toEqual({ status: 200, body: null });
+    await expect(otherPage.locator("main")).not.toContainText(answer);
+    // Even if the second member guesses the first member's ID, the server
+    // must reject the attempted discard rather than trust the supplied header.
+    const stolenDiscard = await otherPage.evaluate(async ({ path, owner }) => {
+      const response = await fetch(path, { method: "DELETE", headers: { "x-audit-draft-owner": owner } });
+      return response.status;
+    }, { path: draftPath, owner: created[0] });
+    expect(stolenDiscard).toBe(409);
+    const otherDiscard = await otherPage.evaluate(async ({ path, owner }) => {
+      const response = await fetch(path, { method: "DELETE", headers: { "x-audit-draft-owner": owner } });
+      return response.status;
+    }, { path: draftPath, owner: created[1] });
+    expect(otherDiscard).toBe(204);
+
+    const recoveredContext = await browser.newContext({ baseURL });
+    contexts.push(recoveredContext);
+    const recoveredPage = await recoveredContext.newPage();
+    await setupClerkTestingToken({ page: recoveredPage });
+    await signIn(recoveredPage, ownerEmail);
+    await expect(recoveredPage.locator("#mastery-goal")).toHaveValue(answer);
+    const recovered = await recoveredPage.evaluate(async path => {
+      const response = await fetch(path);
+      return { status: response.status, body: await response.json() };
+    }, draftPath);
+    expect(recovered.status).toBe(200);
+    expect(recovered.body).toMatchObject({ masteryGoal: answer });
+  } finally {
+    try {
+      await Promise.all(contexts.map(context => context.close()));
+    } finally {
+      await cleanUpAccounts(client, created);
+    }
+  }
+});
+
 test("a delayed Audit response from the previous member never appears after switching accounts", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
