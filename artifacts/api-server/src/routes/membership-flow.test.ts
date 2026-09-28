@@ -424,7 +424,7 @@ test("slow Stripe orphan listing cannot hold up offer or checkout requests", asy
 test("paid founding recovery via later reconciliation counts once and rejects mismatched Stripe ownership", async () => {
   clock(opens);
   const buyer = await addUser(214);
-  const before = await pool.query<{ count: string }>(
+  const foundingBefore = await pool.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM membership_checkouts WHERE kind = 'founding' AND status IN ('pending', 'confirmed', 'forfeited')",
   );
   const originalCreate = createSession.getMockImplementation()!;
@@ -446,12 +446,13 @@ test("paid founding recovery via later reconciliation counts once and rejects mi
   const creationsBefore = createSession.mock.calls.length;
   await reconcileUntrackedPaidSessions();
   expect(await row(buyer)).toMatchObject({ status: "confirmed", membership_tier: "Elevated", stripe_session_id: session.id });
+  expect((await pool.query("SELECT kind FROM membership_checkouts WHERE stripe_session_id = $1", [session.id])).rows[0].kind).toBe("founding");
   await reconcileUntrackedPaidSessions();
   expect(createSession.mock.calls).toHaveLength(creationsBefore);
   const after = await pool.query<{ count: string }>(
     "SELECT count(*)::text AS count FROM membership_checkouts WHERE kind = 'founding' AND status IN ('pending', 'confirmed', 'forfeited')",
   );
-  expect(Number(after.rows[0].count)).toBe(Number(before.rows[0].count) + 1);
+  expect(Number(after.rows[0].count)).toBe(Number(foundingBefore.rows[0].count) + 1);
   expect((await pool.query("SELECT 1 FROM membership_checkouts WHERE stripe_session_id = $1", [session.id])).rows).toHaveLength(1);
   vi.restoreAllMocks();
 });

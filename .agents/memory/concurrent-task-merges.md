@@ -15,4 +15,4 @@ When concurrent changes touch the same test file, verify the entire suite after 
 
 **Why:** A merge can preserve both sides' text while displacing statements, duplicating tests, or dropping setup and assertions; a previously passing focused run no longer describes the merged file.
 
-**How to apply:** Reconcile each test's intended behavior and run the full affected suite on the merged worktree.
+**How to apply:** Reconcile each test's intended behavior against its pre-merge version and run the full affected suite on the merged worktree. If the configured validation excludes a repaired test file, run that suite explicitly too; typechecking alone will not catch lost assertions.

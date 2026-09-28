@@ -11,15 +11,23 @@ export interface PublicMemberStory {
   attribution: string;
 }
 
+export interface MemberStoryRemovalAlert {
+  storyId: number;
+  requestedAt: string;
+}
+
 /**
  * @nullable
  */
 export type OwnerMemberStoryRemovalReviewOutcome = typeof OwnerMemberStoryRemovalReviewOutcome[keyof typeof OwnerMemberStoryRemovalReviewOutcome] | null;
 
-export interface MemberStoryRemovalAlert {
-  storyId: number;
-  requestedAt: string;
-}
+
+export const OwnerMemberStoryRemovalReviewOutcome = {
+  withdrawal_confirmed: 'withdrawal_confirmed',
+  claim_unsubstantiated: 'claim_unsubstantiated',
+  inconclusive: 'inconclusive',
+} as const;
+
 export interface OwnerMemberStory {
   id: number;
   quote: string;
@@ -51,6 +59,24 @@ export interface OwnerMemberStory {
 }
 
 export type MemberStoryRemovalReviewInputOutcome = typeof MemberStoryRemovalReviewInputOutcome[keyof typeof MemberStoryRemovalReviewInputOutcome];
+
+
+export const MemberStoryRemovalReviewInputOutcome = {
+  withdrawal_confirmed: 'withdrawal_confirmed',
+  claim_unsubstantiated: 'claim_unsubstantiated',
+  inconclusive: 'inconclusive',
+} as const;
+
+export interface MemberStoryRemovalReviewInput {
+  outcome: MemberStoryRemovalReviewInputOutcome;
+  /**
+     * Owner-only rationale and checks made during private review
+     * @minLength 1
+     * @maxLength 2000
+     */
+  note: string;
+}
+
 export interface MemberStoryRemovalInput {
   /**
      * How the requester is connected to the story, for private owner review; at most 500 characters
@@ -631,25 +657,3 @@ offset?: number;
 export type ListAnnouncementsParams = {
 limit?: number;
 };
-
-export const OwnerMemberStoryRemovalReviewOutcome = {
-  withdrawal_confirmed: 'withdrawal_confirmed',
-  claim_unsubstantiated: 'claim_unsubstantiated',
-  inconclusive: 'inconclusive',
-} as const;
-
-export interface MemberStoryRemovalReviewInput {
-  outcome: MemberStoryRemovalReviewInputOutcome;
-  /**
-     * Owner-only rationale and checks made during private review
-     * @minLength 1
-     * @maxLength 2000
-     */
-  note: string;
-}
-
-export const MemberStoryRemovalReviewInputOutcome = {
-  withdrawal_confirmed: 'withdrawal_confirmed',
-  claim_unsubstantiated: 'claim_unsubstantiated',
-  inconclusive: 'inconclusive',
-} as const;

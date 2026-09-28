@@ -134,8 +134,9 @@ test("owner reviews a hidden claim privately without republishing the story", as
     expect(published.status).toBe(201);
     created.push(published.data.id);
     const claimant = `test-claimant-${outcome}-${run}`;
-    expect((await request(`/member-stories/${published.data.id}/removal-request`, claimant, "POST", { note: "This is my story" })).status).toBe(200);
     const reviewPath = `/member-stories/${published.data.id}/removal-review`;
+    expect((await request(reviewPath, owner, "POST", { outcome, note: "Before claim" })).status).toBe(404);
+    expect((await request(`/member-stories/${published.data.id}/removal-request`, claimant, "POST", { note: "This is my story" })).status).toBe(200);
     expect((await request(reviewPath, undefined, "POST", { outcome, note: "Privately assessed" })).status).toBe(401);
     expect((await request(reviewPath, member, "POST", { outcome, note: "Privately assessed" })).status).toBe(403);
     expect((await request(reviewPath, owner, "POST", { outcome, note: " " })).status).toBe(400);
@@ -145,6 +146,9 @@ test("owner reviews a hidden claim privately without republishing the story", as
     expect(reviewed.data.removalReviewNote).toBe("Privately assessed");
     expect(reviewed.data.removalReviewedBy).toBe(owner);
     expect((await request(reviewPath, owner, "POST", { outcome, note: "Again" })).status).toBe(404);
+    const managed = (await request("/member-stories/manage", owner)).data.find((row: { id: number }) => row.id === published.data.id);
+    expect(managed.withdrawnAt).toBeTruthy();
+    expect(managed.removalReviewNote).toBe("Privately assessed");
     const publicAfterReview = await request("/member-stories");
     expect(publicAfterReview.data.some((row: { id: number }) => row.id === published.data.id)).toBe(false);
     expect(JSON.stringify(publicAfterReview.data)).not.toContain("Privately assessed");
