@@ -962,6 +962,124 @@ test("selected and clear-all earlier Audit confirmations remove only requested h
   }
 });
 
+test("a real member cannot delete another Audit after a second session removes the selected one", async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().slice(0, 12);
+  const email = auditFixtureEmail("a", tag);
+  const markers = [`first-${tag}`, `second-${tag}`, `current-${tag}`];
+  const created: string[] = [];
+  const contexts: Array<Awaited<ReturnType<typeof browser.newContext>>> = [];
+
+  try {
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      skipPasswordRequirement: true,
+      privateMetadata: auditFixturePrivateMetadata,
+    });
+    created.push(user.id);
+    await setupClerkTestingToken({ page });
+    await signIn(page, email);
+    for (const [index, marker] of markers.entries()) {
+      if (index) await page.goto("/radiant-audit");
+      await save(page, email, marker);
+    }
+
+    const [{ db, radiantAuditHistoryTable, radiantAuditsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const historyRows = () => db.select().from(radiantAuditHistoryTable)
+      .where(eq(radiantAuditHistoryTable.clerkId, user.id));
+    const original = await historyRows();
+    expect(original).toHaveLength(2);
+    const firstId = original.find(row => row.masteryGoal === reflections(markers[0]).masteryGoal)?.id;
+    const remainingId = original.find(row => row.masteryGoal === reflections(markers[1]).masteryGoal)?.id;
+    expect(firstId).toBeDefined();
+    expect(remainingId).toBeDefined();
+
+    const otherContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+    contexts.push(otherContext);
+    const otherPage = await otherContext.newPage();
+    await setupClerkTestingToken({ page: otherPage });
+    await signIn(otherPage, email);
+    await otherPage.goto("/radiant-audit/complete");
+    const otherComparison = otherPage.getByRole("region", { name: "How your answers have changed" });
+    await expect(otherComparison.getByRole("combobox", { name: "Compare with" }).locator("option")).toHaveCount(2);
+
+    // Radix makes the page aria-hidden while the dialog is open; DOM locators
+    // let us observe the actual selector updating behind that confirmation.
+    const comparison = page.locator('section[aria-labelledby="audit-history-heading"]');
+    const selector = page.locator("#earlier-audit");
+    await selector.selectOption(String(firstId));
+    await expect(comparison).toContainText(reflections(markers[0]).masteryGoal);
+    await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    const dialog = page.getByRole("alertdialog", { name: "Delete this earlier Audit?" });
+    await expect(dialog).toContainText(`ID ${firstId}`);
+
+    const firstSessionDeletes: string[] = [];
+    page.on("request", request => {
+      if (request.method() === "DELETE" && new URL(request.url()).pathname.startsWith("/api/users/me/radiant-audit/history")) {
+        firstSessionDeletes.push(new URL(request.url()).pathname);
+      }
+    });
+    await otherComparison.getByRole("combobox", { name: "Compare with" }).selectOption(String(firstId));
+    await otherComparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    const otherDialog = otherPage.getByRole("alertdialog", { name: "Delete this earlier Audit?" });
+    await expect(otherDialog).toContainText(`ID ${firstId}`);
+    const removed = otherPage.waitForResponse(response =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname === `/api/users/me/radiant-audit/history/${firstId}`,
+    );
+    await otherDialog.getByRole("button", { name: "Delete earlier Audit" }).click();
+    expect((await removed).status()).toBe(204);
+    await expect(otherDialog).toHaveCount(0);
+    expect((await historyRows()).map(row => row.id)).toEqual([remainingId]);
+
+    // Keep the first confirmation open while its signed-in query reconnects
+    // and fetches the changed history from the real server.
+    await page.bringToFront();
+    await page.context().setOffline(true);
+    const refreshed = page.waitForResponse(response =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === "/api/users/me/radiant-audit/history" &&
+      response.status() === 200,
+    );
+    await page.context().setOffline(false);
+    expect((await refreshed).status()).toBe(200);
+    await expect(selector.locator("option")).toHaveCount(2); // includes the disabled "choose" option
+    await expect(selector).toHaveValue("");
+    await expect(dialog).toContainText(`ID ${firstId}`);
+    await expect(dialog.getByRole("alert")).toContainText("That submission is no longer in your history.");
+    await expect(dialog.getByRole("button", { name: "Delete earlier Audit" })).toBeDisabled();
+    expect(firstSessionDeletes).toEqual([]);
+
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(comparison.getByRole("button", { name: "Delete selected earlier Audit" })).toBeDisabled();
+    await page.reload();
+    await expect(selector).toHaveValue("");
+    await expect(comparison.getByRole("button", { name: "Delete selected earlier Audit" })).toBeDisabled();
+    expect(firstSessionDeletes).toEqual([]);
+    expect((await historyRows()).map(row => row.id)).toEqual([remainingId]);
+    expect((await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, user.id)))
+      .map(row => row.masteryGoal)).toEqual([reflections(markers[2]).masteryGoal]);
+
+    await selector.selectOption(String(remainingId));
+    await expect(comparison).toContainText(reflections(markers[1]).masteryGoal);
+    await comparison.getByRole("button", { name: "Delete selected earlier Audit" }).click();
+    await expect(dialog).toContainText(`ID ${remainingId}`);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    expect(firstSessionDeletes).toEqual([]);
+    expect((await historyRows()).map(row => row.id)).toEqual([remainingId]);
+  } finally {
+    try {
+      await Promise.all(contexts.map(context => context.close()));
+    } finally {
+      await cleanUpAccounts(client, created);
+    }
+  }
+});
+
 for (const kind of ["selected", "all"] as const) {
   test(`a committed ${kind} earlier Audit deletion with a lost reply confirms the saved history`, async ({ page }) => {
     test.setTimeout(120_000);

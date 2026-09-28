@@ -26,3 +26,4 @@
 - [Live test database pool lifetime](live-test-pool-lifetime.md) — don't end a shared module's database pool inside one test in a multi-test Playwright worker.
 - [Paid founding recovery](paid-founding-recovery.md) — honor verified paid checkouts even when newer reservations have filled the founding limit.
 - [Stripe test catalog cleanup](stripe-test-catalog-cleanup.md) — user-created recurring prices prevent product deletion; archive both after disposable subscription checks.
+- [Audit live refresh checks](audit-live-refresh-checks.md) — use a browser reconnect to force real query refetch while an accessible modal hides the underlying page.
