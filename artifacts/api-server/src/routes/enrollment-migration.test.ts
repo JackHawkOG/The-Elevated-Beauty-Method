@@ -521,3 +521,182 @@ test("two startup repairs serialize on the same legacy enrollments", async () =>
     admin.release();
   }
 }, 15000);
+
+test("a waiting startup repair succeeds after the first repair rolls back", async () => {
+  requireDevelopmentDatabase();
+
+  const schemaName = `enrollment_repair_${randomUUID().replaceAll("-", "")}`;
+  const admin = await pool.connect();
+  let firstClient: PoolClient | undefined;
+  let secondClient: PoolClient | undefined;
+  let firstRun: Promise<void> | undefined;
+  let secondRun: Promise<void> | undefined;
+  let resumeFirst: (() => void) | undefined;
+  let resumeSecond: (() => void) | undefined;
+  let created = false;
+  try {
+    await admin.query(`CREATE SCHEMA "${schemaName}"`);
+    created = true;
+    await admin.query(`
+      CREATE TABLE "${schemaName}".enrollments (
+        id integer PRIMARY KEY,
+        user_id text NOT NULL,
+        course_id integer NOT NULL,
+        completed_lessons integer NOT NULL DEFAULT 0,
+        last_lesson_id integer,
+        enrolled_at timestamp NOT NULL
+      )
+    `);
+    await admin.query(`
+      CREATE TABLE "${schemaName}".lessons (
+        id integer PRIMARY KEY,
+        course_id integer NOT NULL,
+        published_at timestamp
+      )
+    `);
+    await admin.query(`
+      INSERT INTO "${schemaName}".lessons (id, course_id, published_at)
+      VALUES (31, 7, '2022-01-01')
+    `);
+    await admin.query(`
+      INSERT INTO "${schemaName}".enrollments
+        (id, user_id, course_id, completed_lessons, last_lesson_id, enrolled_at)
+      VALUES
+        (1, 'member', 7, 1, NULL, '2022-01-01'),
+        (2, 'member', 7, 4, 31, '2023-01-01')
+    `);
+    const rows = async () => (await admin.query(`
+      SELECT id, completed_lessons, last_lesson_id
+      FROM "${schemaName}".enrollments ORDER BY id
+    `)).rows;
+    const original = await rows();
+    const indexes = async () => (await admin.query(`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname = $1 AND indexname = 'enrollments_user_id_course_id_unique'
+    `, [schemaName])).rows;
+
+    firstClient = await pool.connect();
+    secondClient = await pool.connect();
+    await firstClient.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+    await secondClient.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+    // If the lock is never released, fail instead of leaving the test waiting
+    // indefinitely. Only this private-schema repair connection is affected.
+    await secondClient.query("SET lock_timeout = '4s'");
+    const { rows: [{ firstPid }] } = await firstClient.query<{ firstPid: number }>(
+      'SELECT pg_backend_pid() AS "firstPid"',
+    );
+    const { rows: [{ secondPid }] } = await secondClient.query<{ secondPid: number }>(
+      'SELECT pg_backend_pid() AS "secondPid"',
+    );
+
+    let signalFirstUpdate!: () => void;
+    const firstUpdated = new Promise<void>((resolve) => { signalFirstUpdate = resolve; });
+    const pauseFirst = new Promise<void>((resolve) => { resumeFirst = resolve; });
+    let firstStatements = 0;
+    const firstDb = drizzle(firstClient, { schema });
+    const failingDb: Pick<typeof db, "transaction"> = {
+      transaction: ((callback: Parameters<typeof db.transaction>[0]) =>
+        firstDb.transaction((tx) => callback(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property !== "execute") return Reflect.get(target, property, receiver);
+            return async (statement: Parameters<typeof tx.execute>[0]) => {
+              const result = await target.execute(statement);
+              // LOCK TABLE is the first execute; UPDATE is the second. Fail
+              // after a real merge write to prove the transaction rolls it back.
+              if (++firstStatements === 2) {
+                signalFirstUpdate();
+                await pauseFirst;
+                throw new Error("injected failure after enrollment merge");
+              }
+              return result;
+            };
+          },
+        })))) as typeof db.transaction,
+    };
+    firstRun = ensureEnrollmentSchema(failingDb);
+    const firstOutcome = firstRun.then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    await Promise.race([
+      firstUpdated,
+      firstOutcome.then(() => { throw new Error("First repair ended before updating legacy rows"); }),
+    ]);
+
+    let signalSecondLock!: () => void;
+    const secondLocked = new Promise<void>((resolve) => { signalSecondLock = resolve; });
+    const pauseSecond = new Promise<void>((resolve) => { resumeSecond = resolve; });
+    const secondDb = drizzle(secondClient, { schema });
+    const pausedSecondDb: Pick<typeof db, "transaction"> = {
+      transaction: ((callback: Parameters<typeof db.transaction>[0]) =>
+        secondDb.transaction((tx) => callback(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property !== "execute") return Reflect.get(target, property, receiver);
+            return async (statement: Parameters<typeof tx.execute>[0]) => {
+              const result = await target.execute(statement);
+              signalSecondLock();
+              await pauseSecond;
+              return result;
+            };
+          },
+        })))) as typeof db.transaction,
+    };
+    secondRun = ensureEnrollmentSchema(pausedSecondDb);
+    const secondOutcome = secondRun.then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    let blocked = false;
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      const { rows: [{ waiting }] } = await admin.query<{ waiting: boolean }>(`
+        SELECT wait_event_type = 'Lock' AND $2::int = ANY(pg_blocking_pids(pid)) AS waiting
+        FROM pg_stat_activity WHERE pid = $1
+      `, [secondPid, firstPid]);
+      if (waiting) {
+        blocked = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(blocked, "second repair must wait for the failed repair's table lock").toBe(true);
+    resumeFirst!();
+    expect(await firstOutcome).toMatchObject({
+      status: "rejected",
+      error: { message: "injected failure after enrollment merge" },
+    });
+    // The second transaction has acquired the lock but has not updated rows
+    // yet, so these reads expose only what the first transaction committed.
+    await Promise.race([
+      secondLocked,
+      secondOutcome.then(() => { throw new Error("Second repair ended before acquiring the table lock"); }),
+    ]);
+    expect(await rows()).toEqual(original);
+    expect(await indexes()).toHaveLength(0);
+
+    resumeSecond!();
+    expect(await secondOutcome).toEqual({ status: "fulfilled" });
+    expect(await rows()).toEqual([{ id: 1, completed_lessons: 4, last_lesson_id: 31 }]);
+    expect(await indexes()).toHaveLength(1);
+    await expect(admin.query(`
+      INSERT INTO "${schemaName}".enrollments (id, user_id, course_id, enrolled_at)
+      VALUES (3, 'member', 7, '2024-01-01')
+    `)).rejects.toMatchObject({ code: "23505" });
+  } finally {
+    resumeFirst?.();
+    resumeSecond?.();
+    await Promise.allSettled([firstRun, secondRun].filter((promise) => promise !== undefined));
+    if (firstClient) {
+      await firstClient.query("RESET search_path");
+      firstClient.release();
+    }
+    if (secondClient) {
+      await secondClient.query("RESET lock_timeout");
+      await secondClient.query("RESET search_path");
+      secondClient.release();
+    }
+    if (created) await admin.query(`DROP SCHEMA "${schemaName}" CASCADE`);
+    admin.release();
+  }
+}, 15000);
