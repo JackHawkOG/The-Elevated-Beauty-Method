@@ -53,6 +53,14 @@ export interface OwnerMemberStory {
   permissionRecord: string;
   permissionRecordedAt: string;
   permissionRecordedBy: string;
+  /** @nullable */
+  verifiedSubjectUserId: string | null;
+  /** @nullable */
+  subjectVerificationRecord: string | null;
+  /** @nullable */
+  subjectVerifiedAt: string | null;
+  /** @nullable */
+  subjectVerifiedBy: string | null;
   publishedAt: string;
   /** @nullable */
   withdrawnAt: string | null;
@@ -66,6 +74,11 @@ export interface OwnerMemberStory {
   removalRequesterEmail: string | null;
   /** @nullable */
   removalRequestNote: string | null;
+  /**
+     * Snapshot at request time; null for older claims without a stored determination
+     * @nullable
+     */
+  removalRequesterIsVerifiedSubject: boolean | null;
   /** @nullable */
   removalReviewOutcome: OwnerMemberStoryRemovalReviewOutcome;
   /** @nullable */
@@ -149,6 +162,18 @@ export interface MemberStoryInput {
      */
   permissionRecord: string;
   permissionConfirmed: true;
+  /**
+     * Optional Clerk account ID independently verified by the owner as the quoted subject
+     * @minLength 1
+     * @maxLength 255
+     */
+  verifiedSubjectUserId?: string;
+  /**
+     * Required with verifiedSubjectUserId; private explanation of how the subject-to-account link was established
+     * @minLength 1
+     * @maxLength 2000
+     */
+  subjectVerificationRecord?: string;
 }
 
 export type MembershipOfferPhase = typeof MembershipOfferPhase[keyof typeof MembershipOfferPhase];
@@ -741,4 +766,3 @@ offset?: number;
 export type ListAnnouncementsParams = {
 limit?: number;
 };
-

@@ -28,13 +28,19 @@ export const publishMemberStoryBodyAttributionMax = 120;
 
 export const publishMemberStoryBodyPermissionRecordMax = 2000;
 
+export const publishMemberStoryBodyVerifiedSubjectUserIdMax = 255;
+
+export const publishMemberStoryBodySubjectVerificationRecordMax = 2000;
+
 
 
 export const PublishMemberStoryBody = zod.object({
   "quote": zod.string().min(1).max(publishMemberStoryBodyQuoteMax),
   "attribution": zod.string().min(1).max(publishMemberStoryBodyAttributionMax),
   "permissionRecord": zod.string().min(1).max(publishMemberStoryBodyPermissionRecordMax).describe('How and when this member explicitly authorized the exact quote and public attribution'),
-  "permissionConfirmed": zod.literal(true)
+  "permissionConfirmed": zod.literal(true),
+  "verifiedSubjectUserId": zod.string().min(1).max(publishMemberStoryBodyVerifiedSubjectUserIdMax).optional().describe('Optional Clerk account ID independently verified by the owner as the quoted subject'),
+  "subjectVerificationRecord": zod.string().min(1).max(publishMemberStoryBodySubjectVerificationRecordMax).optional().describe('Required with verifiedSubjectUserId; private explanation of how the subject-to-account link was established')
 })
 
 export const PublishMemberStoryResponse = zod.object({
@@ -44,6 +50,10 @@ export const PublishMemberStoryResponse = zod.object({
   "permissionRecord": zod.string(),
   "permissionRecordedAt": zod.string(),
   "permissionRecordedBy": zod.string(),
+  "verifiedSubjectUserId": zod.string().nullable(),
+  "subjectVerificationRecord": zod.string().nullable(),
+  "subjectVerifiedAt": zod.string().nullable(),
+  "subjectVerifiedBy": zod.string().nullable(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
   "withdrawnBy": zod.string().nullable(),
@@ -51,6 +61,7 @@ export const PublishMemberStoryResponse = zod.object({
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
   "removalRequestNote": zod.string().nullable(),
+  "removalRequesterIsVerifiedSubject": zod.boolean().nullable().describe('Snapshot at request time; null for older claims without a stored determination'),
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
@@ -75,6 +86,10 @@ export const ListManagedMemberStoriesResponseItem = zod.object({
   "permissionRecord": zod.string(),
   "permissionRecordedAt": zod.string(),
   "permissionRecordedBy": zod.string(),
+  "verifiedSubjectUserId": zod.string().nullable(),
+  "subjectVerificationRecord": zod.string().nullable(),
+  "subjectVerifiedAt": zod.string().nullable(),
+  "subjectVerifiedBy": zod.string().nullable(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
   "withdrawnBy": zod.string().nullable(),
@@ -82,6 +97,7 @@ export const ListManagedMemberStoriesResponseItem = zod.object({
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
   "removalRequestNote": zod.string().nullable(),
+  "removalRequesterIsVerifiedSubject": zod.boolean().nullable().describe('Snapshot at request time; null for older claims without a stored determination'),
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
@@ -141,6 +157,10 @@ export const WithdrawMemberStoryResponse = zod.object({
   "permissionRecord": zod.string(),
   "permissionRecordedAt": zod.string(),
   "permissionRecordedBy": zod.string(),
+  "verifiedSubjectUserId": zod.string().nullable(),
+  "subjectVerificationRecord": zod.string().nullable(),
+  "subjectVerifiedAt": zod.string().nullable(),
+  "subjectVerifiedBy": zod.string().nullable(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
   "withdrawnBy": zod.string().nullable(),
@@ -148,6 +168,7 @@ export const WithdrawMemberStoryResponse = zod.object({
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
   "removalRequestNote": zod.string().nullable(),
+  "removalRequesterIsVerifiedSubject": zod.boolean().nullable().describe('Snapshot at request time; null for older claims without a stored determination'),
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
@@ -185,6 +206,10 @@ export const ReviewMemberStoryRemovalResponse = zod.object({
   "permissionRecord": zod.string(),
   "permissionRecordedAt": zod.string(),
   "permissionRecordedBy": zod.string(),
+  "verifiedSubjectUserId": zod.string().nullable(),
+  "subjectVerificationRecord": zod.string().nullable(),
+  "subjectVerifiedAt": zod.string().nullable(),
+  "subjectVerifiedBy": zod.string().nullable(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
   "withdrawnBy": zod.string().nullable(),
@@ -192,6 +217,7 @@ export const ReviewMemberStoryRemovalResponse = zod.object({
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
   "removalRequestNote": zod.string().nullable(),
+  "removalRequesterIsVerifiedSubject": zod.boolean().nullable().describe('Snapshot at request time; null for older claims without a stored determination'),
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
@@ -230,6 +256,10 @@ export const CorrectMemberStoryRemovalReviewResponse = zod.object({
   "permissionRecord": zod.string(),
   "permissionRecordedAt": zod.string(),
   "permissionRecordedBy": zod.string(),
+  "verifiedSubjectUserId": zod.string().nullable(),
+  "subjectVerificationRecord": zod.string().nullable(),
+  "subjectVerifiedAt": zod.string().nullable(),
+  "subjectVerifiedBy": zod.string().nullable(),
   "publishedAt": zod.string(),
   "withdrawnAt": zod.string().nullable(),
   "withdrawnBy": zod.string().nullable(),
@@ -237,6 +267,7 @@ export const CorrectMemberStoryRemovalReviewResponse = zod.object({
   "removalRequestedBy": zod.string().nullable(),
   "removalRequesterEmail": zod.string().nullable(),
   "removalRequestNote": zod.string().nullable(),
+  "removalRequesterIsVerifiedSubject": zod.boolean().nullable().describe('Snapshot at request time; null for older claims without a stored determination'),
   "removalReviewOutcome": zod.union([zod.literal('withdrawal_confirmed'),zod.literal('claim_unsubstantiated'),zod.literal('inconclusive'),zod.literal(null)]).nullable(),
   "removalReviewNote": zod.string().nullable(),
   "removalReviewedAt": zod.string().nullable(),
@@ -1279,5 +1310,3 @@ export const GetRecentActivityResponseItem = zod.object({
   "createdAt": zod.string()
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
-
-

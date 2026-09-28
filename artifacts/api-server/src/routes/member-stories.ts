@@ -40,6 +40,7 @@ function ownerStory(row: typeof memberStoriesTable.$inferSelect, corrections: Co
   return {
     ...row,
     permissionRecordedAt: row.permissionRecordedAt.toISOString(),
+    subjectVerifiedAt: row.subjectVerifiedAt?.toISOString() ?? null,
     publishedAt: row.publishedAt.toISOString(),
     withdrawnAt: row.withdrawnAt?.toISOString() ?? null,
     removalRequestedAt: row.removalRequestedAt?.toISOString() ?? null,
@@ -115,10 +116,32 @@ router.post("/member-stories", requireAuth, requireOwner, async (req, res): Prom
     res.status(400).json({ error: "Quote, attribution and permission record are required" });
     return;
   }
+  const subjectId = parsed.data.verifiedSubjectUserId?.trim();
+  const verificationRecord = parsed.data.subjectVerificationRecord?.trim();
+  if ((!!subjectId !== !!verificationRecord) || (subjectId && subjectId.length > 255) || (verificationRecord && verificationRecord.length > 2000)) {
+    res.status(400).json({ error: "A verified subject account and a private verification record must be provided together" });
+    return;
+  }
+  if (subjectId) {
+    try {
+      await clerkClient.users.getUser(subjectId);
+    } catch (err) {
+      req.log?.warn({ err }, "Could not verify story subject account");
+      const missing = typeof err === "object" && err !== null && "status" in err && err.status === 404;
+      res.status(missing ? 400 : 503).json({ error: missing
+        ? "The subject account was not found. Check the account ID before publishing."
+        : "Subject account verification is unavailable. Please try again before publishing." });
+      return;
+    }
+  }
   const now = new Date();
   const [row] = await db.insert(memberStoriesTable).values({
     quote, attribution, permissionRecord,
     permissionRecordedAt: now, permissionRecordedBy: req.userId!, publishedAt: now,
+    verifiedSubjectUserId: subjectId || null,
+    subjectVerificationRecord: verificationRecord || null,
+    subjectVerifiedAt: subjectId ? now : null,
+    subjectVerifiedBy: subjectId ? req.userId! : null,
   }).returning();
   res.set("Cache-Control", "private, no-store");
   res.status(201).json(PublishMemberStoryResponse.parse(ownerStory(row)));
@@ -160,6 +183,7 @@ router.post("/member-stories/:storyId/removal-request", requireAuth, async (req,
       removalRequestedBy: req.userId!,
       removalRequesterEmail: email,
       removalRequestNote: note,
+      removalRequesterIsVerifiedSubject: sql`${memberStoriesTable.verifiedSubjectUserId} IS NOT NULL AND ${memberStoriesTable.verifiedSubjectUserId} = ${req.userId!}`,
     }).where(and(eq(memberStoriesTable.id, id), isNull(memberStoriesTable.withdrawnAt))).returning({ id: memberStoriesTable.id });
     return { limited: false as const, row };
   });

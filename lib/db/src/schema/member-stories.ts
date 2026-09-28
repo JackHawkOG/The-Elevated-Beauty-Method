@@ -1,4 +1,4 @@
-import { integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -9,6 +9,10 @@ export const memberStoriesTable = pgTable("member_stories", {
   permissionRecord: text("permission_record").notNull(),
   permissionRecordedBy: text("permission_recorded_by").notNull(),
   permissionRecordedAt: timestamp("permission_recorded_at", { withTimezone: true }).notNull(),
+  verifiedSubjectUserId: text("verified_subject_user_id"),
+  subjectVerificationRecord: text("subject_verification_record"),
+  subjectVerifiedAt: timestamp("subject_verified_at", { withTimezone: true }),
+  subjectVerifiedBy: text("subject_verified_by"),
   publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
   withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
   withdrawnBy: text("withdrawn_by"),
@@ -16,6 +20,7 @@ export const memberStoriesTable = pgTable("member_stories", {
   removalRequestedBy: text("removal_requested_by"),
   removalRequesterEmail: text("removal_requester_email"),
   removalRequestNote: text("removal_request_note"),
+  removalRequesterIsVerifiedSubject: boolean("removal_requester_is_verified_subject"),
   removalReviewOutcome: text("removal_review_outcome"),
   removalReviewNote: text("removal_review_note"),
   removalReviewedAt: timestamp("removal_reviewed_at", { withTimezone: true }),

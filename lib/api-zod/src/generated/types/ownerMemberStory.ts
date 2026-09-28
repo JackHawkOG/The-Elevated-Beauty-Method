@@ -15,6 +15,14 @@ export interface OwnerMemberStory {
   permissionRecord: string;
   permissionRecordedAt: string;
   permissionRecordedBy: string;
+  /** @nullable */
+  verifiedSubjectUserId: string | null;
+  /** @nullable */
+  subjectVerificationRecord: string | null;
+  /** @nullable */
+  subjectVerifiedAt: string | null;
+  /** @nullable */
+  subjectVerifiedBy: string | null;
   publishedAt: string;
   /** @nullable */
   withdrawnAt: string | null;
@@ -28,6 +36,11 @@ export interface OwnerMemberStory {
   removalRequesterEmail: string | null;
   /** @nullable */
   removalRequestNote: string | null;
+  /**
+     * Snapshot at request time; null for older claims without a stored determination
+     * @nullable
+     */
+  removalRequesterIsVerifiedSubject: boolean | null;
   /** @nullable */
   removalReviewOutcome: OwnerMemberStoryRemovalReviewOutcome;
   /** @nullable */

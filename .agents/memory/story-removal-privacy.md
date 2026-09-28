@@ -14,3 +14,9 @@ An owner review, including an unsubstantiated claim, is not proof that the subje
 **Why:** Claimant identity is not linked to the story subject, and an earlier permission record cannot establish that permission remains in force after a withdrawal dispute.
 
 **How to apply:** Keep the disputed original hidden after review; any subsequent publication needs a separate, newly recorded permission decision.
+
+For new consent records, a subject-to-account link is optional and must be independently established by the owner. Classify the requester's match against that link when the removal claim is made; a later account or story change must not rewrite what was known at claim time. Treat unlinked stories and other-account claims as manual reviews, not as grounds to delay hiding.
+
+**Why:** A login proves who submitted a claim, not who the quote concerns. A verified link helps triage, but it cannot make withdrawal contingent on verification or retroactively certify legacy consent.
+
+**How to apply:** Keep the verification evidence owner-only, record the match at claim time, and never expose the account association through public story responses.

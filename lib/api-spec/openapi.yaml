@@ -1075,7 +1075,7 @@ components:
         requestedAt: { type: string }
     OwnerMemberStory:
       type: object
-      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote, removalReviewOutcome, removalReviewNote, removalReviewedAt, removalReviewedBy, reviewHistory]
+      required: [id, quote, attribution, permissionRecord, permissionRecordedAt, permissionRecordedBy, verifiedSubjectUserId, subjectVerificationRecord, subjectVerifiedAt, subjectVerifiedBy, publishedAt, withdrawnAt, withdrawnBy, removalRequestedAt, removalRequestedBy, removalRequesterEmail, removalRequestNote, removalRequesterIsVerifiedSubject, removalReviewOutcome, removalReviewNote, removalReviewedAt, removalReviewedBy, reviewHistory]
       properties:
         id: { type: number }
         quote: { type: string }
@@ -1083,6 +1083,10 @@ components:
         permissionRecord: { type: string }
         permissionRecordedAt: { type: string }
         permissionRecordedBy: { type: string }
+        verifiedSubjectUserId: { type: ["string", "null"] }
+        subjectVerificationRecord: { type: ["string", "null"] }
+        subjectVerifiedAt: { type: ["string", "null"] }
+        subjectVerifiedBy: { type: ["string", "null"] }
         publishedAt: { type: string }
         withdrawnAt: { type: ["string", "null"] }
         withdrawnBy: { type: ["string", "null"] }
@@ -1090,6 +1094,7 @@ components:
         removalRequestedBy: { type: ["string", "null"] }
         removalRequesterEmail: { type: ["string", "null"] }
         removalRequestNote: { type: ["string", "null"] }
+        removalRequesterIsVerifiedSubject: { type: ["boolean", "null"], description: "Snapshot at request time; null for older claims without a stored determination" }
         removalReviewOutcome: { type: ["string", "null"], enum: [withdrawal_confirmed, claim_unsubstantiated, inconclusive, null] }
         removalReviewNote: { type: ["string", "null"] }
         removalReviewedAt: { type: ["string", "null"] }
@@ -1140,6 +1145,8 @@ components:
         attribution: { type: string, minLength: 1, maxLength: 120 }
         permissionRecord: { type: string, minLength: 1, maxLength: 2000, description: "How and when this member explicitly authorized the exact quote and public attribution" }
         permissionConfirmed: { type: boolean, enum: [true] }
+        verifiedSubjectUserId: { type: string, minLength: 1, maxLength: 255, description: "Optional Clerk account ID independently verified by the owner as the quoted subject" }
+        subjectVerificationRecord: { type: string, minLength: 1, maxLength: 2000, description: "Required with verifiedSubjectUserId; private explanation of how the subject-to-account link was established" }
     MembershipOffer:
       type: object
       required: [phase, foundingAvailable, foundingPrice, standardPrice]

@@ -24,4 +24,16 @@ export interface MemberStoryInput {
      */
   permissionRecord: string;
   permissionConfirmed: true;
+  /**
+     * Optional Clerk account ID independently verified by the owner as the quoted subject
+     * @minLength 1
+     * @maxLength 255
+     */
+  verifiedSubjectUserId?: string;
+  /**
+     * Required with verifiedSubjectUserId; private explanation of how the subject-to-account link was established
+     * @minLength 1
+     * @maxLength 2000
+     */
+  subjectVerificationRecord?: string;
 }

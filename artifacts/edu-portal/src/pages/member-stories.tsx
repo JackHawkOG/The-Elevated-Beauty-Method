@@ -14,6 +14,8 @@ export default function MemberStoriesPage() {
   const [quote, setQuote] = useState("");
   const [attribution, setAttribution] = useState("");
   const [permissionRecord, setPermissionRecord] = useState("");
+  const [verifiedSubjectUserId, setVerifiedSubjectUserId] = useState("");
+  const [subjectVerificationRecord, setSubjectVerificationRecord] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [message, setMessage] = useState("");
   const [withdrawId, setWithdrawId] = useState<number | null>(null);
@@ -38,7 +40,7 @@ export default function MemberStoriesPage() {
   };
   const publish = usePublishMemberStory({ mutation: {
     onSuccess: () => {
-      setQuote(""); setAttribution(""); setPermissionRecord(""); setConfirmed(false);
+      setQuote(""); setAttribution(""); setPermissionRecord(""); setVerifiedSubjectUserId(""); setSubjectVerificationRecord(""); setConfirmed(false);
       setMessage("Story published.");
       refresh();
     },
@@ -71,13 +73,16 @@ export default function MemberStoriesPage() {
   function submit(event: FormEvent) {
     event.preventDefault();
     setMessage("");
-    publish.mutate({ data: { quote: quote.trim(), attribution: attribution.trim(), permissionRecord: permissionRecord.trim(), permissionConfirmed: true } });
+    publish.mutate({ data: {
+      quote: quote.trim(), attribution: attribution.trim(), permissionRecord: permissionRecord.trim(), permissionConfirmed: true,
+      ...(verifiedSubjectUserId.trim() ? { verifiedSubjectUserId: verifiedSubjectUserId.trim(), subjectVerificationRecord: subjectVerificationRecord.trim() } : {}),
+    } });
   }
   return <AppLayout>
     <main className="mx-auto w-full max-w-4xl space-y-10 px-6 py-12">
       <div>
         <h1 className="font-serif text-4xl">Member stories</h1>
-        <p className="mt-2 text-muted-foreground">Publish only a quote and attribution the member explicitly approved. Keep the permission record here so you can find and withdraw a story later. A member’s removal request hides their story immediately. Review the claim privately; even an unsubstantiated claim does not restore the story. Only publish a new story after obtaining fresh, explicit permission for its exact quote and attribution.</p>
+        <p className="mt-2 text-muted-foreground">Publish only a quote and attribution the member explicitly approved. Keep the permission record here so you can find and withdraw a story later. A removal request hides the story immediately, whether or not the requester is linked to its subject. Review the claim privately; even an unsubstantiated claim does not restore the story. Only publish a new story after obtaining fresh, explicit permission for its exact quote and attribution.</p>
       </div>
       <form onSubmit={submit} className="space-y-5 rounded-2xl border border-border bg-card p-6">
         <h2 className="font-serif text-2xl">Publish an approved story</h2>
@@ -90,11 +95,22 @@ export default function MemberStoriesPage() {
         <label className="block text-sm">Permission record (how and when the member authorized this exact quote and attribution)
           <textarea className="mt-2 min-h-24 w-full rounded-lg border border-border bg-background p-3" value={permissionRecord} onChange={e => setPermissionRecord(e.target.value)} required maxLength={2000} />
         </label>
+        <div className="space-y-4 rounded-lg border border-border p-4">
+          <p className="text-sm font-semibold">Optional private subject verification</p>
+          <p className="text-sm text-muted-foreground">Only link an account after independently confirming it belongs to the person quoted. The account and your proof stay in the owner view, never on the public story. Leave both blank if you cannot verify the link.</p>
+          <label className="block text-sm">Verified subject’s account ID
+            <input className="mt-2 w-full rounded-lg border border-border bg-background p-3" value={verifiedSubjectUserId} onChange={e => setVerifiedSubjectUserId(e.target.value)} maxLength={255} />
+          </label>
+          <label className="block text-sm">How you verified the account belongs to the quoted person
+            <textarea className="mt-2 min-h-20 w-full rounded-lg border border-border bg-background p-3" value={subjectVerificationRecord} onChange={e => setSubjectVerificationRecord(e.target.value)} maxLength={2000} />
+          </label>
+          {Boolean(verifiedSubjectUserId.trim()) !== Boolean(subjectVerificationRecord.trim()) && <p role="alert" className="text-sm text-destructive">Provide both the account ID and verification record, or leave both blank.</p>}
+        </div>
         <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" className="mt-1" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} required />
           I confirm the member explicitly gave permission to publish this quote with this attribution.
         </label>
-        <Button type="submit" disabled={!confirmed || publish.isPending}> {publish.isPending ? "Publishing…" : "Publish story"}</Button>
+        <Button type="submit" disabled={!confirmed || publish.isPending || Boolean(verifiedSubjectUserId.trim()) !== Boolean(subjectVerificationRecord.trim())}> {publish.isPending ? "Publishing…" : "Publish story"}</Button>
       </form>
       {message && <p role="status">{message}</p>}
       <section aria-labelledby="removal-requests-title" className="rounded-2xl border border-destructive/50 bg-destructive/10 p-6">
@@ -127,9 +143,17 @@ export default function MemberStoriesPage() {
                   <blockquote className="mt-3 whitespace-pre-wrap break-words">“{story.quote}”</blockquote>
                   <p className="mt-2 break-words text-primary">— {story.attribution}</p>
                   <p className="mt-4 break-words text-xs text-muted-foreground">Permission recorded {new Date(story.permissionRecordedAt).toLocaleString()}: {story.permissionRecord}</p>
+                   <p className="mt-2 break-words text-xs text-muted-foreground">{story.verifiedSubjectUserId
+                     ? <>Subject account verified by {story.subjectVerifiedBy} on {story.subjectVerifiedAt && new Date(story.subjectVerifiedAt).toLocaleString()}: {story.verifiedSubjectUserId}. Private verification: {story.subjectVerificationRecord}</>
+                     : "No verified subject account linked. Review any removal claim manually."}</p>
                   {story.removalRequestedAt && <div className="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm">
                     <p className="font-semibold">Member removal request · Hidden {story.removalReviewOutcome ? "· Reviewed" : "· Review needed"}</p>
                     <p className="mt-2 break-words">Received {new Date(story.removalRequestedAt).toLocaleString()} from {story.removalRequesterEmail || story.removalRequestedBy} (account {story.removalRequestedBy})</p>
+                     <p className="mt-2 font-medium">{story.removalRequesterIsVerifiedSubject === true
+                       ? "Verified subject account matched at the time of the request."
+                       : story.removalRequesterIsVerifiedSubject === false && story.verifiedSubjectUserId
+                         ? "Other account claimed this story; verify manually."
+                         : "No verified subject match recorded; verify manually."}</p>
                     <p className="mt-2 whitespace-pre-wrap break-words">Member’s note: {story.removalRequestNote}</p>
                     {story.reviewHistory.length > 0 && <div className="mt-3 border-t border-border pt-3">
                       <h3 className="font-semibold">Private review history (oldest first)</h3>
