@@ -31,27 +31,44 @@ export function clearAuditDraft(accountId?: string): void {
   window.localStorage.removeItem(key);
 }
 
+function parseAuditDraft(raw: string, now: number): { owner: string; answers: RadiantAuditSubmission } {
+  const record: unknown = JSON.parse(raw);
+  if (!record || typeof record !== "object") throw new Error("Invalid draft");
+  const { owner, expiresAt, answers } = record as Record<string, unknown>;
+  if (typeof owner !== "string" || !owner ||
+      typeof expiresAt !== "number" || !Number.isFinite(expiresAt) ||
+      expiresAt <= now || expiresAt > now + lifetime) throw new Error("Invalid expiry or owner");
+  if (!answers || typeof answers !== "object") throw new Error("Invalid answers");
+  const audit = answers as Record<string, unknown>;
+  if (typeof audit.email !== "string" ||
+      !Array.isArray(audit.routineChecks) || !audit.routineChecks.every(item => typeof item === "string") ||
+      !Array.isArray(audit.valuesChecks) || !audit.valuesChecks.every(item => typeof item === "string") ||
+      typeof audit.beautyTrend !== "string" || typeof audit.masteryGoal !== "string" ||
+      typeof audit.researchTime !== "string") throw new Error("Invalid answers");
+  return { owner, answers: audit as RadiantAuditSubmission };
+}
+
+export function pruneInvalidAuditDraft(): void {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw) parseAuditDraft(raw, Date.now());
+  } catch {
+    // Cleanup does not require knowing the signed-in account; keep valid drafts for their owner.
+    try { clearAuditDraft(); } catch { /* Storage may be disabled. */ }
+  }
+}
+
 export function readAuditDraft(accountId: string): RadiantAuditSubmission | null {
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
-    const record: unknown = JSON.parse(raw);
-    if (!record || typeof record !== "object") throw new Error("Invalid draft");
-    const { owner, expiresAt, answers } = record as Record<string, unknown>;
+    const { owner, answers } = parseAuditDraft(raw, Date.now());
     // A shared browser must never expose one member's answers to another account.
-    if (owner !== accountId || typeof expiresAt !== "number" ||
-        expiresAt <= Date.now() || expiresAt > Date.now() + lifetime) {
+    if (owner !== accountId) {
       clearAuditDraft();
       return null;
     }
-    if (!answers || typeof answers !== "object") throw new Error("Invalid answers");
-    const audit = answers as Record<string, unknown>;
-    if (typeof audit.email !== "string" ||
-        !Array.isArray(audit.routineChecks) || !audit.routineChecks.every(item => typeof item === "string") ||
-        !Array.isArray(audit.valuesChecks) || !audit.valuesChecks.every(item => typeof item === "string") ||
-        typeof audit.beautyTrend !== "string" || typeof audit.masteryGoal !== "string" ||
-        typeof audit.researchTime !== "string") throw new Error("Invalid answers");
-    return audit as RadiantAuditSubmission;
+    return answers;
   } catch {
     // Corrupt drafts cannot be trusted as account-scoped data.
     try { clearAuditDraft(); } catch { /* Storage may be disabled. */ }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ClerkProvider, SignIn, SignUp, Show, useClerk, useUser } from '@clerk/react';
 import { publishableKeyFromHost } from '@clerk/react/internal';
 import { shadcn } from '@clerk/themes';
@@ -147,6 +147,7 @@ import AnnouncementActivityReviewPage from '@/pages/announcement-activity-review
 import PublicStoriesPage from '@/pages/public-stories';
 import RadiantAuditPage, { RadiantAuditCompletePage } from '@/pages/radiant-audit';
 import { readPendingAudit } from '@/lib/radiant-audit-session';
+import { pruneInvalidAuditDraft } from '@/lib/radiant-audit-draft';
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   return (
@@ -230,6 +231,9 @@ function ClerkProviderWithRoutes() {
 }
 
 function App() {
+  useEffect(() => {
+    pruneInvalidAuditDraft();
+  }, []);
   return (
     <WouterRouter base={basePath}>
       <ClerkProviderWithRoutes />

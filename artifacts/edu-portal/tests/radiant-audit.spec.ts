@@ -1233,6 +1233,47 @@ for (const scenario of ["expired", "far-future expiry", "unreadable JSON", "inva
   });
 }
 
+test("returning to the dashboard clears invalid local Audit answers but preserves a current owner's draft", async ({ page }) => {
+  await page.route("**/api/**", route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/dashboard/stats") {
+      return route.fulfill({ json: { totalCourses: 0, totalLessons: 0, totalEnrollments: 0, totalCategories: 0 } });
+    }
+    if (path === "/api/users/me") return route.fulfill({ json: { membershipTier: "Free" } });
+    if (path.endsWith("/radiant-audit/draft") || path.endsWith("/radiant-audit") ||
+        path === "/api/users/me/beauty-method") return route.fulfill({ contentType: "application/json", body: "null" });
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/tests/audit-harness.html?page=/dashboard");
+  await page.evaluate(() => localStorage.setItem("audit-test-account", "member-a"));
+
+  const current = {
+    owner: "member-a",
+    expiresAt: Date.now() + 60_000,
+    answers: { ...fixture("returning"), email: "member-a@example.invalid" },
+  };
+  const cases = [
+    { name: "expired", raw: JSON.stringify({ ...current, expiresAt: Date.now() - 1 }) },
+    { name: "far-future", raw: JSON.stringify({ ...current, expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000 }) },
+    { name: "malformed JSON", raw: '{"owner":"member-a","answers":' },
+    { name: "invalid answers", raw: JSON.stringify({ ...current, answers: { ...current.answers, valuesChecks: "invalid" } }) },
+  ];
+  for (const { name, raw } of cases) {
+    await page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), { key: signedInDraftKey, raw });
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
+    expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey), name).toBeNull();
+  }
+
+  const validRaw = JSON.stringify(current);
+  await page.evaluate(({ key, raw }) => localStorage.setItem(key, raw), { key: signedInDraftKey, raw: validRaw });
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBe(validRaw);
+  await page.goto("/tests/audit-harness.html");
+  await expect(page.locator("#mastery-goal")).toHaveValue(current.answers.masteryGoal);
+});
+
 test("two devices choose which unfinished Audit draft to keep", async ({ page, browser }) => {
   let online: (Answers & { updatedAt: string }) | null = null;
   let sequence = 0;
