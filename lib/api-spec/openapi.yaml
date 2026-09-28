@@ -172,6 +172,22 @@ paths:
           description: Sign-in required
         "403":
           description: Owner access required
+  /membership/checkout-cleanup-alerts:
+    get:
+      operationId: getMembershipCheckoutCleanupAlerts
+      tags: [membership]
+      summary: Owner and admin alerts for checkout expiration retries queued over ten minutes
+      responses:
+        "200":
+          description: Unresolved overdue checkout expirations (no checkout URLs)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipCheckoutCleanupAlerts"
+        "401":
+          description: Sign-in required
+        "403":
+          description: Owner or admin access required
   /membership/checkout:
     post:
       operationId: createMembershipCheckout
@@ -953,6 +969,21 @@ components:
       properties:
         founding: { type: number, minimum: 0, description: Whole count of confirmed founding members }
         standard: { type: number, minimum: 0, description: Whole count of confirmed standard members }
+    MembershipCheckoutCleanupAlert:
+      type: object
+      required: [sessionId, queuedAt]
+      properties:
+        sessionId: { type: string, description: Stripe session ID for manual investigation, not a checkout link }
+        queuedAt: { type: string, format: date-time }
+    MembershipCheckoutCleanupAlerts:
+      type: object
+      required: [total, sessions]
+      properties:
+        total: { type: number, minimum: 0 }
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/MembershipCheckoutCleanupAlert"
     MembershipCheckoutInput:
       type: object
       required: [kind]

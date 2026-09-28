@@ -158,6 +158,22 @@ export const GetConfirmedMembershipCountsResponse = zod.object({
 
 
 /**
+ * @summary Owner and admin alerts for checkout expiration retries queued over ten minutes
+ */
+export const getMembershipCheckoutCleanupAlertsResponseTotalMin = 0;
+
+
+
+export const GetMembershipCheckoutCleanupAlertsResponse = zod.object({
+  "total": zod.number().min(getMembershipCheckoutCleanupAlertsResponseTotalMin),
+  "sessions": zod.array(zod.object({
+  "sessionId": zod.string().describe('Stripe session ID for manual investigation'),
+  "queuedAt": zod.coerce.date()
+}))
+})
+
+
+/**
  * @summary Start a monthly membership checkout
  */
 export const CreateMembershipCheckoutBody = zod.object({

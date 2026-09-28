@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useUser } from "@clerk/react";
 import { Link } from "wouter";
-import { useGetMembershipOffer, useGetMyMembership, useGetConfirmedMembershipCounts, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey, getGetConfirmedMembershipCountsQueryKey } from "@workspace/api-client-react";
+import { useGetMembershipOffer, useGetMyMembership, useGetConfirmedMembershipCounts, useGetMembershipCheckoutCleanupAlerts, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey, getGetConfirmedMembershipCountsQueryKey, getGetMembershipCheckoutCleanupAlertsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ export default function MembershipPage() {
   const isOwner = user?.publicMetadata.role === "owner" || user?.publicMetadata.role === "admin";
   const queryClient = useQueryClient();
   const counts = useGetConfirmedMembershipCounts({ query: { queryKey: getGetConfirmedMembershipCountsQueryKey(), enabled: isOwner, staleTime: 30000, refetchInterval: 60000 } });
+  const cleanupAlerts = useGetMembershipCheckoutCleanupAlerts({ query: { queryKey: getGetMembershipCheckoutCleanupAlertsQueryKey(), enabled: isOwner, refetchInterval: 60000, refetchOnWindowFocus: "always" } });
   const { data: offer, isLoading, isError } = useGetMembershipOffer({
     query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 15000, staleTime: 5000 },
   });
@@ -79,6 +80,16 @@ export default function MembershipPage() {
     <div className="mx-auto max-w-2xl space-y-6 py-10">
       <h1 className="font-serif text-4xl">The Elevated Method</h1>
       <p className="text-muted-foreground">Monthly membership is $48/month. During the October 1–7 founding window, $24/month is available only while one of the first 50 places can still be reserved at checkout.</p>
+      {isOwner && (cleanupAlerts.isError
+        ? <p role="alert" className="rounded-2xl border border-destructive p-4 text-destructive">Checkout cleanup alerts are unavailable. Check server logs for failed expiration retries.</p>
+        : cleanupAlerts.data?.total ? <section role="alert" className="rounded-2xl border border-destructive bg-card p-6">
+          <h2 className="font-serif text-2xl">Checkout cleanup needs attention</h2>
+          <p className="mt-2">{cleanupAlerts.data.total} unpaid checkout {cleanupAlerts.data.total === 1 ? "session has" : "sessions have"} remained queued for over 10 minutes. Check the session status in Stripe; the server will keep retrying. Do not manually expire a paid checkout.</p>
+          <ul className="mt-3 space-y-1 text-sm">
+            {cleanupAlerts.data.sessions.map(session => <li key={session.sessionId}><code>{session.sessionId}</code> · queued {new Date(session.queuedAt).toLocaleString()}</li>)}
+          </ul>
+          {cleanupAlerts.data.total > cleanupAlerts.data.sessions.length && <p className="mt-2 text-sm">Showing the oldest 100 sessions. Check server logs for the remaining failures.</p>}
+        </section> : null)}
       {isOwner && <section aria-label="Paid enrollment counts" className="rounded-2xl border border-border bg-card p-6">
         <h2 className="font-serif text-2xl">Paid enrollments · owner view</h2>
         <p className="mt-2 text-sm text-muted-foreground">Currently confirmed membership records, including buyers who never returned from Stripe checkout. Pending and forfeited memberships are not included.</p>

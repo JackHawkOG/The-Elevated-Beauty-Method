@@ -14,6 +14,8 @@ const state = vi.hoisted(() => ({
   },
   effects: [] as Array<EffectCallback>,
   invalidateQueries: vi.fn(),
+  role: "member",
+  cleanup: { total: 0, sessions: [] as Array<{ sessionId: string; queuedAt: string }> },
 }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
@@ -23,14 +25,16 @@ vi.mock("@workspace/api-client-react", () => ({
   useGetMembershipOffer: () => ({ data: state.offer, isLoading: state.isLoading, isError: state.isError }),
   useGetMyMembership: () => ({ data: { membership: state.membership }, isPending: false, isError: false }),
   useGetConfirmedMembershipCounts: () => ({ data: { founding: 0, standard: 0 } }),
+  useGetMembershipCheckoutCleanupAlerts: () => ({ data: state.cleanup }),
   useCreateMembershipCheckout: () => ({ isPending: false }),
   useCreateMembershipPortal: () => ({ isPending: false }),
   getGetMembershipOfferQueryKey: () => ["membership", "offer"],
   getGetMyMembershipQueryKey: () => ["membership", "me"],
   getGetConfirmedMembershipCountsQueryKey: () => ["membership", "confirmed-counts"],
+  getGetMembershipCheckoutCleanupAlertsQueryKey: () => ["membership", "checkout-cleanup-alerts"],
 }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: state.invalidateQueries }) }));
-vi.mock("@clerk/react", () => ({ useUser: () => ({ user: null }) }));
+vi.mock("@clerk/react", () => ({ useUser: () => ({ user: { publicMetadata: { role: state.role } } }) }));
 vi.mock("@/components/layout", () => ({ AppLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
 
 import MembershipPage from "./membership";
@@ -65,6 +69,21 @@ test("founding enrollment is shown only while open and places remain", () => {
   expect(closed).toContain("founding enrollment window has closed");
   expect(closed).not.toContain("Continue to secure checkout");
   expect(closed).toContain("Join at the standard rate");
+});
+
+test("staff see overdue cleanup alerts without checkout links, which clear with the queue", () => {
+  state.role = "owner";
+  state.cleanup = { total: 1, sessions: [{ sessionId: "cs_test_overdue", queuedAt: "2026-10-01T14:00:00Z" }] };
+  const alert = page("open", true);
+  expect(alert).toContain("Checkout cleanup needs attention");
+  expect(alert).toContain("cs_test_overdue");
+  expect(alert).not.toContain("checkout.stripe.com/");
+  state.cleanup = { total: 0, sessions: [] };
+  expect(page("open", true)).not.toContain("Checkout cleanup needs attention");
+  state.cleanup = { total: 1, sessions: [{ sessionId: "cs_test_overdue", queuedAt: "2026-10-01T14:00:00Z" }] };
+  state.role = "member";
+  expect(page("open", true)).not.toContain("cs_test_overdue");
+  state.cleanup = { total: 0, sessions: [] };
 });
 
 test("billing return refreshes scheduled cancellation to resumed or ended wording", () => {

@@ -22,4 +22,5 @@ export async function ensureMembershipSchema(): Promise<void> {
     stripe_session_id text PRIMARY KEY,
     created_at timestamptz NOT NULL DEFAULT now()
   )`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS membership_checkout_expirations_age_idx ON membership_checkout_expirations(created_at)`);
 }

@@ -95,6 +95,18 @@ export interface ConfirmedMembershipCounts {
   standard: number;
 }
 
+export interface MembershipCheckoutCleanupAlert {
+  /** Stripe session ID for manual investigation */
+  sessionId: string;
+  queuedAt: string;
+}
+
+export interface MembershipCheckoutCleanupAlerts {
+  /** @minimum 0 */
+  total: number;
+  sessions: MembershipCheckoutCleanupAlert[];
+}
+
 export type MembershipCheckoutInputKind = typeof MembershipCheckoutInputKind[keyof typeof MembershipCheckoutInputKind];
 
 

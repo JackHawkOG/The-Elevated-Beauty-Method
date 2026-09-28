@@ -38,6 +38,8 @@ export * from './lesson';
 export * from './lessonInput';
 export * from './listAnnouncementsParams';
 export * from './listCoursesParams';
+export * from './membershipCheckoutCleanupAlert';
+export * from './membershipCheckoutCleanupAlerts';
 export * from './membershipCheckoutInput';
 export * from './membershipCheckoutInputKind';
 export * from './membershipOffer';

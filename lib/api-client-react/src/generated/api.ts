@@ -45,6 +45,7 @@ import type {
   MemberStoryInput,
   MemberStoryRemovalInput,
   MemberStoryRemovalReceipt,
+  MembershipCheckoutCleanupAlerts,
   MembershipCheckoutInput,
   MembershipOffer,
   MembershipRedirect,
@@ -677,6 +678,83 @@ export function useGetConfirmedMembershipCounts<TData = Awaited<ReturnType<typeo
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetConfirmedMembershipCountsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMembershipCheckoutCleanupAlertsUrl = () => {
+
+
+
+
+  return `/api/membership/checkout-cleanup-alerts`
+}
+
+/**
+ * @summary Owner and admin alerts for checkout expiration retries queued over ten minutes
+ */
+export const getMembershipCheckoutCleanupAlerts = async ( options?: Parameters<typeof customFetch>[1]): Promise<MembershipCheckoutCleanupAlerts> => {
+
+  return customFetch<MembershipCheckoutCleanupAlerts>(getGetMembershipCheckoutCleanupAlertsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMembershipCheckoutCleanupAlertsQueryKey = () => {
+    return [
+    `/api/membership/checkout-cleanup-alerts`
+    ] as const;
+    }
+
+
+export const getGetMembershipCheckoutCleanupAlertsQueryOptions = <TData = Awaited<ReturnType<typeof getMembershipCheckoutCleanupAlerts>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipCheckoutCleanupAlerts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMembershipCheckoutCleanupAlertsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMembershipCheckoutCleanupAlerts>>> = ({ signal }) => getMembershipCheckoutCleanupAlerts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMembershipCheckoutCleanupAlerts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMembershipCheckoutCleanupAlertsQueryResult = NonNullable<Awaited<ReturnType<typeof getMembershipCheckoutCleanupAlerts>>>
+export type GetMembershipCheckoutCleanupAlertsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Owner and admin alerts for checkout expiration retries queued over ten minutes
+ */
+
+export function useGetMembershipCheckoutCleanupAlerts<TData = Awaited<ReturnType<typeof getMembershipCheckoutCleanupAlerts>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipCheckoutCleanupAlerts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMembershipCheckoutCleanupAlertsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

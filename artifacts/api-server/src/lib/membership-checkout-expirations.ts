@@ -4,6 +4,28 @@ import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
 
 const SWEEP_INTERVAL_MS = 60_000;
+// Checkout sessions normally expire after 30 minutes; warn while intervention can still help.
+export const CHECKOUT_CLEANUP_ALERT_AFTER_MINUTES = 10;
+
+export async function overdueCheckoutExpirations(): Promise<{ total: number; sessions: { sessionId: string; queuedAt: string }[] }> {
+  const result = await pool.query<{ total: number; stripe_session_id: string | null; created_at: Date | null }>(
+    `WITH overdue AS (
+       SELECT stripe_session_id, created_at FROM membership_checkout_expirations
+       WHERE created_at <= now() - ($1::int * interval '1 minute')
+     )
+     SELECT (SELECT count(*)::int FROM overdue) AS total, stripe_session_id, created_at
+     FROM (SELECT stripe_session_id, created_at FROM overdue ORDER BY created_at, stripe_session_id LIMIT 100) oldest
+     RIGHT JOIN (SELECT 1) anchor ON true
+     ORDER BY created_at, stripe_session_id`,
+    [CHECKOUT_CLEANUP_ALERT_AFTER_MINUTES],
+  );
+  return {
+    total: result.rows[0]?.total ?? 0,
+    sessions: result.rows.filter((row): row is typeof row & { stripe_session_id: string; created_at: Date } =>
+      row.stripe_session_id !== null && row.created_at !== null,
+    ).map(row => ({ sessionId: row.stripe_session_id, queuedAt: row.created_at.toISOString() })),
+  };
+}
 
 // A rollback removes the reservation, so the Stripe ID must survive in its own transaction.
 export async function queueCheckoutExpiration(sessionId: string): Promise<void> {
@@ -46,6 +68,14 @@ export async function recoverQueuedCheckoutExpirations(): Promise<void> {
             logger.error({ err, stripeSessionId: stripe_session_id }, "Checkout expiration recovery failed");
           }
         }
+      }
+      const alerts = await overdueCheckoutExpirations();
+      if (alerts.total) {
+        logger.error({
+          unresolvedCount: alerts.total,
+          oldestSessionId: alerts.sessions[0]?.sessionId,
+          oldestQueuedAt: alerts.sessions[0]?.queuedAt,
+        }, "Membership checkout cleanup overdue; inspect Stripe session and retry status");
       }
     } finally {
       await client.query("SELECT pg_advisory_unlock(20261001, 57)");

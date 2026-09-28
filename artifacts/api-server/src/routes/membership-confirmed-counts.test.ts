@@ -6,6 +6,8 @@ import { pool, type PoolClient } from "@workspace/db";
 import { ensureMembershipSchema } from "../lib/ensure-membership-schema";
 import { confirmCheckout } from "../lib/membership-reservations";
 import { requireDevelopmentDatabase } from "./test-development-database";
+import type Stripe from "stripe";
+import { recoverCheckoutExpiration } from "../lib/membership-checkout-expirations";
 
 // Keep the real authentication middleware and route, replacing only Clerk's
 // session and metadata lookups for this isolated HTTP server.
@@ -34,6 +36,13 @@ async function counts(user?: string) {
     headers: user ? { "x-test-user": user } : {},
   });
   return { status: response.status, body: await response.json() as Record<string, unknown> };
+}
+
+async function cleanupAlerts(user?: string) {
+  const response = await fetch(`${baseUrl}/membership/checkout-cleanup-alerts`, {
+    headers: user ? { "x-test-user": user } : {},
+  });
+  return { status: response.status, body: await response.json() as Record<string, any> };
 }
 
 beforeAll(async () => {
@@ -79,6 +88,56 @@ test("only authenticated owners and admins can read confirmed counts", async () 
   expect((await counts(member)).status).toBe(403);
   expect((await counts(owner)).status).toBe(200);
   expect((await counts(admin)).status).toBe(200);
+});
+
+test("overdue checkout cleanup alerts are staff-only and clear after Stripe confirms resolution", async () => {
+  const sessionId = `cs_alert_${randomUUID()}`;
+  const recentId = `cs_alert_${randomUUID()}`;
+  try {
+    await pool.query(
+      `INSERT INTO membership_checkout_expirations (stripe_session_id, created_at)
+       VALUES ($1, now() - interval '11 minutes'), ($2, now())`,
+      [sessionId, recentId],
+    );
+    expect((await cleanupAlerts()).status).toBe(401);
+    expect((await cleanupAlerts(member)).status).toBe(403);
+    for (const staff of [owner, admin]) {
+      const result = await cleanupAlerts(staff);
+      expect(result.status).toBe(200);
+      expect(result.body.sessions).toContainEqual({ sessionId, queuedAt: expect.any(String) });
+      expect(result.body.sessions).not.toEqual(expect.arrayContaining([{ sessionId: recentId, queuedAt: expect.any(String) }]));
+      expect(JSON.stringify(result.body)).not.toContain("https://");
+    }
+    const stripe = { checkout: { sessions: {
+      retrieve: vi.fn().mockResolvedValue({ status: "open", payment_status: "unpaid" }),
+      expire: vi.fn().mockRejectedValueOnce(new Error("Stripe unavailable")).mockResolvedValue({ status: "expired" }),
+    } } } as unknown as Stripe;
+    await expect(recoverCheckoutExpiration(sessionId, stripe)).rejects.toThrow("Stripe unavailable");
+    expect((await cleanupAlerts(owner)).body.sessions).toContainEqual({ sessionId, queuedAt: expect.any(String) });
+    await recoverCheckoutExpiration(sessionId, stripe);
+    expect((await cleanupAlerts(owner)).body.sessions).not.toEqual(expect.arrayContaining([{ sessionId, queuedAt: expect.any(String) }]));
+
+    await pool.query("UPDATE membership_checkout_expirations SET created_at = now() - interval '11 minutes' WHERE stripe_session_id = $1", [recentId]);
+    for (const session of [
+      { status: "expired", payment_status: "unpaid" },
+      { status: "complete", payment_status: "unpaid" },
+      { status: "open", payment_status: "paid" },
+    ]) {
+      const confirmed = { checkout: { sessions: {
+        retrieve: vi.fn().mockResolvedValue(session),
+        expire: vi.fn(),
+      } } } as unknown as Stripe;
+      await recoverCheckoutExpiration(recentId, confirmed);
+      expect(confirmed.checkout.sessions.expire).not.toHaveBeenCalled();
+      expect((await cleanupAlerts(owner)).body.sessions).not.toEqual(expect.arrayContaining([{ sessionId: recentId, queuedAt: expect.any(String) }]));
+      if (session.status !== "open") await pool.query(
+        "INSERT INTO membership_checkout_expirations (stripe_session_id, created_at) VALUES ($1, now() - interval '11 minutes')",
+        [recentId],
+      );
+    }
+  } finally {
+    await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = ANY($1::text[])", [[sessionId, recentId]]);
+  }
 });
 
 test("counts unique confirmed members, not checkout starts or browser returns", async () => {

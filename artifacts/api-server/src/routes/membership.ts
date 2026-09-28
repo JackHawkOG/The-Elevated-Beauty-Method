@@ -3,13 +3,13 @@ import { db, pool, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { clerkClient } from "@clerk/express";
-import { GetConfirmedMembershipCountsResponse } from "@workspace/api-zod";
+import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlertsResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
 import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "../lib/membership-reconciliation";
 import { GetMyMembershipResponse } from "@workspace/api-zod";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
-import { queueCheckoutExpiration, recoverCheckoutExpiration } from "../lib/membership-checkout-expirations";
+import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations } from "../lib/membership-checkout-expirations";
 
 const router = Router();
 const OPENS = Date.parse("2026-10-01T14:00:00Z"); // 9 AM Central (CDT)
@@ -159,6 +159,22 @@ router.get("/membership/confirmed-counts", requireAuth, async (req, res): Promis
      FROM membership_checkouts WHERE status = 'confirmed'`,
   );
   res.json(GetConfirmedMembershipCountsResponse.parse(result.rows[0]));
+});
+
+router.get("/membership/checkout-cleanup-alerts", requireAuth, async (req, res): Promise<void> => {
+  let role: unknown;
+  try {
+    role = (await clerkClient.users.getUser(req.userId!)).publicMetadata.role;
+  } catch (error) {
+    req.log.error({ err: error }, "Could not verify checkout cleanup alert access");
+    res.status(503).json({ error: "Unable to verify staff access" });
+    return;
+  }
+  if (role !== "owner" && role !== "admin") {
+    res.status(403).json({ error: "Staff access required" });
+    return;
+  }
+  res.json(GetMembershipCheckoutCleanupAlertsResponse.parse(await overdueCheckoutExpirations()));
 });
 
 router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
