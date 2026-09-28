@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sparkles, ArrowRight, Crown, Eye, Star, CheckCircle2 } from "lucide-react";
 import heroImage from "@assets/generated_images/hero-beauty.jpg";
@@ -7,10 +8,24 @@ import everydayFaceImage from "@assets/generated_images/everyday-face.jpg";
 import { useGetMembershipOffer, getGetMembershipOfferQueryKey, useListPublishedMemberStories, getListPublishedMemberStoriesQueryKey } from "@workspace/api-client-react";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
+const STORY_FEED_MAX_AGE_MS = 15_000;
 
 export default function LandingPage() {
   const { data: offer } = useGetMembershipOffer({ query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 30000, staleTime: 15000 } });
-  const { data: stories } = useListPublishedMemberStories({ query: { queryKey: getListPublishedMemberStoriesQueryKey(), staleTime: 0, refetchOnMount: "always", refetchOnWindowFocus: "always", refetchInterval: 5000, refetchIntervalInBackground: true } });
+  const { data: stories, dataUpdatedAt: storiesUpdatedAt } = useListPublishedMemberStories({ query: { queryKey: getListPublishedMemberStoriesQueryKey(), staleTime: 0, refetchOnMount: "always", refetchOnWindowFocus: "always", refetchInterval: 5000, refetchIntervalInBackground: true } });
+  const [storyFeedClock, setStoryFeedClock] = useState(Date.now);
+  useEffect(() => {
+    if (!storiesUpdatedAt) return;
+    const refreshClock = () => setStoryFeedClock(Date.now());
+    const timeout = window.setTimeout(refreshClock, Math.max(0, storiesUpdatedAt + STORY_FEED_MAX_AGE_MS - Date.now()));
+    // Background tabs can delay timers. Check again when a visitor returns.
+    document.addEventListener("visibilitychange", refreshClock);
+    return () => {
+      window.clearTimeout(timeout);
+      document.removeEventListener("visibilitychange", refreshClock);
+    };
+  }, [storiesUpdatedAt]);
+  const visibleStories = storiesUpdatedAt && storyFeedClock - storiesUpdatedAt < STORY_FEED_MAX_AGE_MS ? stories : undefined;
   const foundingOpen = offer?.phase === "open" && offer.foundingAvailable;
   const standardOpen = offer?.phase === "closed" || offer?.phase === "open";
   const offerMessage = !offer ? "Enrollment availability is being checked"
@@ -274,11 +289,11 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {!!stories?.length && <section aria-labelledby="member-stories-heading" className="border-t border-border/50 bg-card/30 px-6 py-20 md:px-12 lg:px-24">
+        {!!visibleStories?.length && <section aria-labelledby="member-stories-heading" className="border-t border-border/50 bg-card/30 px-6 py-20 md:px-12 lg:px-24">
           <div className="mx-auto max-w-6xl">
             <h2 id="member-stories-heading" className="mb-10 text-center font-serif text-4xl font-bold">Member stories</h2>
             <div className="grid gap-6 md:grid-cols-2">
-              {stories.map(story => <figure key={story.id} className="rounded-2xl border border-primary/20 bg-background/70 p-8">
+              {visibleStories.map(story => <figure key={story.id} className="rounded-2xl border border-primary/20 bg-background/70 p-8">
                 <blockquote className="whitespace-pre-wrap break-words font-serif text-xl leading-relaxed">“{story.quote}”</blockquote>
                 <figcaption className="mt-6 break-words text-sm text-primary">— {story.attribution}</figcaption>
                 <Link href="/sign-in?stories=1" className="mt-5 block text-sm text-muted-foreground underline underline-offset-4 hover:text-primary">Is this your story? Sign in to request removal</Link>

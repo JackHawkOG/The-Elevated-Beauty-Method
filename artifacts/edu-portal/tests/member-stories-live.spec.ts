@@ -11,7 +11,7 @@ async function signIn(page: Page, email: string) {
 }
 
 test("real owner publication and withdrawal update an already-open signed-out landing page", async ({ browser, page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(150_000);
   requireStoryDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
@@ -59,6 +59,19 @@ test("real owner publication and withdrawal update an already-open signed-out la
     const publicStory = visitor.locator("figure").filter({ hasText: quote });
     await expect(publicStory).toContainText(attribution);
     await expect(visitor.locator("body")).not.toContainText(permission);
+
+    // An outage after the quote loaded must not leave an unverified quote visible.
+    let failedRefreshes = 0;
+    const storyFeed = /\/api\/member-stories(?:\?.*)?$/;
+    await visitor.route(storyFeed, async route => {
+      failedRefreshes++;
+      await route.fulfill({ status: 503, body: "Story feed unavailable" });
+    });
+    await expect(publicStory).toHaveCount(0, { timeout: 22_000 });
+    expect(failedRefreshes).toBeGreaterThan(0);
+    await expect(visitor.locator("body")).not.toContainText(attribution);
+    await visitor.unroute(storyFeed);
+    await expect(publicStory).toContainText(attribution, { timeout: 15_000 });
 
     await clerk.signOut({ page });
     await signIn(page, memberEmail);
