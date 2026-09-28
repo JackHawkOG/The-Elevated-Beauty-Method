@@ -66,3 +66,13 @@ export function isCommunityFixtureActivity(
     activity.sourceAnnouncementId === post.id && activity.entityTitle === post.title &&
     activity.actorName === post.authorName;
 }
+
+export function isCommunityFixtureUnlinkedActivity(
+  activity: { type: string; description: string; actorName: string; entityTitle: string; sourceAnnouncementId: number | null; sourceEvidence: string | null; sourceReviewedBy: string | null; sourceReviewedAt: Date | null },
+  tag: string,
+) {
+  return activity.type === "announcement" && activity.description === "posted an announcement" &&
+    activity.actorName === "Community Check" && activity.entityTitle === `Community legacy ${tag}` &&
+    activity.sourceAnnouncementId === null && activity.sourceEvidence === null &&
+    activity.sourceReviewedBy === null && activity.sourceReviewedAt === null;
+}

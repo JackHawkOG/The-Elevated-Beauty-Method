@@ -41,12 +41,13 @@ it("keeps unrelated community rows and refuses malformed rows during database cl
   let ownedPostId: number | undefined;
   let otherPostId: number | undefined;
   let malformedPostId: number | undefined;
+  let legacyId: number | undefined;
 
   async function counts() {
     const [members, posts, activities] = await Promise.all([
       pool.query<{ clerk_id: string }>("SELECT clerk_id FROM users WHERE clerk_id = ANY($1::text[]) ORDER BY clerk_id", [[ownerId, otherId]]),
       pool.query<{ id: number }>("SELECT id FROM announcements WHERE actor_id = ANY($1::text[]) ORDER BY id", [[ownerId, otherId]]),
-      pool.query<{ id: number }>("SELECT id FROM activity WHERE source_announcement_id = ANY($1::int[]) ORDER BY id", [[ownedPostId, otherPostId].filter((id): id is number => id !== undefined)]),
+      pool.query<{ id: number }>("SELECT id FROM activity WHERE source_announcement_id = ANY($1::int[]) OR id = $2 ORDER BY id", [[ownedPostId, otherPostId].filter((id): id is number => id !== undefined), legacyId ?? -1]),
     ]);
     return { members: members.rows.map(row => row.clerk_id), posts: posts.rows.map(row => row.id), activities: activities.rows.map(row => row.id) };
   }
@@ -65,10 +66,14 @@ it("keeps unrelated community rows and refuses malformed rows during database cl
     await pool.query(
       "INSERT INTO activity (type, description, actor_name, entity_title, source_announcement_id) VALUES ('announcement', 'posted an announcement', 'Community Check', $1, $2), ('announcement', 'posted an announcement', 'Unrelated Member', $1, $3)",
       [`Community retry ${tag}`, ownedPostId, otherPostId]);
+    const legacy = await pool.query<{ id: number }>(
+      "INSERT INTO activity (type, description, actor_name, entity_title) VALUES ('announcement', 'posted an announcement', 'Community Check', $1) RETURNING id",
+      [`Community legacy ${tag}`]);
+    legacyId = legacy.rows[0].id;
     const initial = await counts();
     expect(initial.members).toHaveLength(2);
     expect(initial.posts).toHaveLength(2);
-    expect(initial.activities).toHaveLength(2);
+    expect(initial.activities).toHaveLength(3);
 
     await cleanupCommunityFixtures({ client, db, deleteRows: false });
     expect(await counts()).toEqual(initial);
@@ -90,13 +95,19 @@ it("keeps unrelated community rows and refuses malformed rows during database cl
     expect(client.deleteUser).not.toHaveBeenCalled();
     await pool.query("UPDATE activity SET entity_title = $1 WHERE source_announcement_id = $2", [`Community retry ${tag}`, ownedPostId]);
 
+    await pool.query("UPDATE activity SET source_evidence = 'reviewed' WHERE id = $1", [legacyId]);
+    await expect(cleanupCommunityFixtures({ client, db, deleteRows: true })).rejects.toThrow("Non-fixture activity");
+    expect(await counts()).toEqual(initial);
+    await pool.query("UPDATE activity SET source_evidence = NULL WHERE id = $1", [legacyId]);
+
     await cleanupCommunityFixtures({ client, db, deleteRows: true });
-    expect(await counts()).toEqual({ members: [otherId], posts: [otherPostId], activities: initial.activities.slice(1) });
+    expect(await counts()).toEqual({ members: [otherId], posts: [otherPostId], activities: initial.activities.slice(1, 2) });
     expect(client.getUser).toHaveBeenCalledWith(ownerId);
     expect(client.deleteUser).toHaveBeenCalledExactlyOnceWith(ownerId);
   } finally {
     // Exact IDs only: never clean up rows belonging to an existing account or another test.
     const ids = [ownedPostId, otherPostId, malformedPostId].filter((id): id is number => id !== undefined);
+    if (legacyId !== undefined) await pool.query("DELETE FROM activity WHERE id = $1", [legacyId]);
     await pool.query("DELETE FROM activity WHERE source_announcement_id = ANY($1::int[])", [ids]);
     await pool.query("DELETE FROM announcements WHERE id = ANY($1::int[])", [ids]);
     await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[ownerId, otherId]]);

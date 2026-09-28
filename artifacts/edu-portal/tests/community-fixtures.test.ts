@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  communityFixtureEmail, communityFixturePrivateMetadata, isCommunityFixtureActivity,
+  communityFixtureEmail, communityFixturePrivateMetadata, isCommunityFixtureActivity, isCommunityFixtureUnlinkedActivity,
   isCommunityFixturePost, newCommunityFixtureTag, possibleLegacyCommunityIdentity,
   requireCommunityDevelopment, staleCommunityFixtureTag,
 } from "./community-fixtures";
@@ -92,5 +92,13 @@ describe("community fixture cleanup boundaries", () => {
     expect(isCommunityFixtureActivity({ ...activity, sourceAnnouncementId: 43 }, post)).toBe(false);
     expect(isCommunityFixtureActivity({ ...activity, entityTitle: "Real announcement" }, post)).toBe(false);
     expect(isCommunityFixtureActivity({ ...activity, type: "enrollment" }, post)).toBe(false);
+    const unlinked = {
+      ...activity, entityTitle: `Community legacy ${tag}`, sourceAnnouncementId: null,
+      sourceEvidence: null, sourceReviewedBy: null, sourceReviewedAt: null,
+    };
+    expect(isCommunityFixtureUnlinkedActivity(unlinked, tag)).toBe(true);
+    expect(isCommunityFixtureUnlinkedActivity({ ...unlinked, sourceAnnouncementId: 42 }, tag)).toBe(false);
+    expect(isCommunityFixtureUnlinkedActivity({ ...unlinked, sourceReviewedBy: "owner" }, tag)).toBe(false);
+    expect(isCommunityFixtureUnlinkedActivity({ ...unlinked, entityTitle: "Real announcement" }, tag)).toBe(false);
   });
 });

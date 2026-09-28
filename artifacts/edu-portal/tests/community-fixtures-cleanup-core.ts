@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { db as database } from "../../../lib/db/src/index";
 import { activityTable, announcementsTable, usersTable } from "../../../lib/db/src/schema";
 import {
-  isCommunityFixtureActivity, isCommunityFixturePost, requireCommunityDevelopment,
+  isCommunityFixtureActivity, isCommunityFixturePost, isCommunityFixtureUnlinkedActivity, requireCommunityDevelopment,
   staleCommunityFixtureTag,
 } from "./community-fixtures";
 
@@ -60,13 +60,17 @@ export async function cleanupCommunityFixtures({
       const activities = posts.length
         ? await tx.select().from(activityTable).where(inArray(activityTable.sourceAnnouncementId, posts.map(post => post.id)))
         : [];
+      const unlinked = await tx.select().from(activityTable)
+        .where(eq(activityTable.entityTitle, `Community legacy ${tag}`));
       if (activities.some(activity =>
-        !isCommunityFixtureActivity(activity, posts.find(post => post.id === activity.sourceAnnouncementId)!))) {
+        !isCommunityFixtureActivity(activity, posts.find(post => post.id === activity.sourceAnnouncementId)!)) ||
+          unlinked.some(activity => !isCommunityFixtureUnlinkedActivity(activity, tag))) {
         throw new Error(`Non-fixture activity; refusing deletion for ${candidate.id}`);
       }
-      console.log(`${deleteRows ? "Removing" : "Would remove"} ${candidate.id}: ${posts.length} posts, ${activities.length} activity rows, ${members.length} member rows`);
+      console.log(`${deleteRows ? "Removing" : "Would remove"} ${candidate.id}: ${posts.length} posts, ${activities.length + unlinked.length} activity rows, ${members.length} member rows`);
       if (!deleteRows) return;
-      if (activities.length) await tx.delete(activityTable).where(inArray(activityTable.id, activities.map(row => row.id)));
+      const activityIds = [...activities, ...unlinked].map(row => row.id);
+      if (activityIds.length) await tx.delete(activityTable).where(inArray(activityTable.id, activityIds));
       if (posts.length) await tx.delete(announcementsTable).where(inArray(announcementsTable.id, posts.map(post => post.id)));
       await tx.delete(usersTable).where(and(eq(usersTable.clerkId, user.id), eq(usersTable.email, candidate.email)));
     });
