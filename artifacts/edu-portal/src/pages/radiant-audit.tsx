@@ -23,7 +23,7 @@ import {
   clearAuditVerification, rememberAuditVerification, trackAuditResumptionIfRequested,
   trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
 } from "@/lib/analytics";
-import { clearPendingAudit, isAuditReadyToSave, readPendingAudit, stageAudit } from "@/lib/radiant-audit-session";
+import { canAutoRetryPendingAudit, clearPendingAudit, isAuditReadyToSave, readPendingAudit, restartPendingAudit, stageAudit, type PendingAudit } from "@/lib/radiant-audit-session";
 import { auditDraftWrittenAt, clearAuditDraft, getAuditSubmissionId, readAuditDraft, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
@@ -453,6 +453,10 @@ export function RadiantAuditCompletePage() {
   const { signOut, openUserProfile } = useClerk();
   const { user, isLoaded } = useUser();
   const [pending, setPending] = useState(readPendingAudit);
+  const [needsReview, setNeedsReview] = useState(() => {
+    const pending = readPendingAudit();
+    return !!pending && !canAutoRetryPendingAudit(pending);
+  });
   const [error, setError] = useState<string | null>(null);
   const [confirmedEmail, setConfirmedEmail] = useState<string | null>(null);
   const [confirmDeleteCurrent, setConfirmDeleteCurrent] = useState(false);
@@ -461,17 +465,18 @@ export function RadiantAuditCompletePage() {
   const queryClient = useQueryClient();
   const save = useSaveRadiantAudit();
   const deleteCurrent = useDeleteRadiantAudit();
-  const { data: saved, isLoading, isError } = useGetRadiantAudit({
-    query: { queryKey: getGetRadiantAuditQueryKey(), enabled: !pending },
+  const reviewRequired = !!pending && (needsReview || !canAutoRetryPendingAudit(pending));
+  const email = user?.primaryEmailAddress?.emailAddress;
+  const verifiedEmail = user?.primaryEmailAddress?.verification.status === "verified" ? email : undefined;
+  const mismatch = !!pending && !!isLoaded &&
+    (!verifiedEmail || verifiedEmail.toLowerCase() !== pending.email.toLowerCase());
+  const { data: saved, isLoading, isFetching, isError, refetch } = useGetRadiantAudit({
+    query: { queryKey: getGetRadiantAuditQueryKey(), enabled: !pending || (reviewRequired && !!user && !mismatch) },
     request: { responseType: "json" },
   });
   const { data: history, isLoading: historyLoading, isError: historyError } = useGetRadiantAuditHistory({
     query: { queryKey: getGetRadiantAuditHistoryQueryKey(), enabled: !pending && !isLoading && !isError },
   });
-  const email = user?.primaryEmailAddress?.emailAddress;
-  const verifiedEmail = user?.primaryEmailAddress?.verification.status === "verified" ? email : undefined;
-  const mismatch = !!pending && !!isLoaded &&
-    (!verifiedEmail || verifiedEmail.toLowerCase() !== pending.email.toLowerCase());
 
   async function confirmCurrentDeletion() {
     setDeleteError(null);
@@ -499,8 +504,12 @@ export function RadiantAuditCompletePage() {
     }
   }
 
-  async function submitPending(audit: RadiantAuditSubmission) {
+  async function submitPending(audit: PendingAudit) {
     setError(null);
+    if (!canAutoRetryPendingAudit(audit)) {
+      setNeedsReview(true);
+      return;
+    }
     // Check again on retries; never rely on an earlier render's account identity.
     const currentEmail = user?.primaryEmailAddress;
     if (!user || currentEmail?.verification.status !== "verified" ||
@@ -525,6 +534,21 @@ export function RadiantAuditCompletePage() {
     }
   }
 
+  function confirmNewSave() {
+    if (!pending || !reviewRequired || mismatch || !user || isLoading || isFetching || isError ||
+        saved === undefined || save.isPending) return;
+    try {
+      // The old receipt may still exist until the next purge. Consent starts a new attempt.
+      const fresh = restartPendingAudit(pending);
+      started.current = true;
+      setPending(fresh);
+      setNeedsReview(false);
+      void submitPending(fresh);
+    } catch {
+      setError("We couldn't keep your new attempt in this browser. Please try again.");
+    }
+  }
+
   function confirmEmailCorrection() {
     if (!pending || !verifiedEmail || confirmedEmail !== verifiedEmail ||
         pending.email.toLowerCase() === verifiedEmail.toLowerCase()) return;
@@ -540,10 +564,11 @@ export function RadiantAuditCompletePage() {
   }
 
   useEffect(() => {
-    if (!pending || !isAuditReadyToSave(pending) || !isLoaded || !user || mismatch || started.current) return;
+    if (!pending || !isAuditReadyToSave(pending) || !isLoaded || !user || mismatch ||
+        reviewRequired || started.current) return;
     started.current = true;
     void submitPending(pending);
-  }, [pending, isLoaded, user, mismatch]);
+  }, [pending, isLoaded, user, mismatch, reviewRequired]);
 
   return (
     <div className="min-h-screen bg-background px-4 py-12 text-foreground sm:py-20">
@@ -600,15 +625,41 @@ export function RadiantAuditCompletePage() {
           </>
         ) : pending ? (
           <>
-            <h1 className="font-serif text-4xl">{isAuditReadyToSave(pending) ? "Saving your Radiant Audit" : "Finish your Radiant Audit"}</h1>
+            <h1 className="font-serif text-4xl">{reviewRequired ? "Review your pending Audit" : isAuditReadyToSave(pending) ? "Saving your Radiant Audit" : "Finish your Radiant Audit"}</h1>
             <p className="mt-4 text-muted-foreground">
-              {isAuditReadyToSave(pending) ? "Your free account is ready. We’re attaching your answers to it now." : "Your answers are still in this browser. Finish the form before saving."}
+              {reviewRequired
+                ? "This attempt is older than the safe retry window, or its age is unknown. It has not been sent again. Check your current Audit before choosing to save these answers as a new attempt."
+                : isAuditReadyToSave(pending) ? "Your free account is ready. We’re attaching your answers to it now." : "Your answers are still in this browser. Finish the form before saving."}
             </p>
+            {reviewRequired && (
+              <div className="mt-6 rounded-2xl border border-primary/25 p-5">
+                {isLoading || isFetching ? (
+                  <p role="status">Loading your current Audit…</p>
+                ) : isError ? (
+                  <>
+                    <p role="alert">We couldn't load your current Audit. Nothing has been saved again.</p>
+                    <Button className="mt-4" variant="outline" onClick={() => void refetch()}>Try loading again</Button>
+                  </>
+                ) : saved === undefined ? (
+                  <p role="status">Loading your current Audit…</p>
+                ) : (
+                  <>
+                    <p>{saved ? `Your current Audit was saved on ${new Date(saved.completedAt).toLocaleDateString()}. Saving these pending answers will create a new retake.` :
+                      "There is no current Audit on this account. Saving these pending answers will create a new Audit."}</p>
+                    {isAuditReadyToSave(pending) ? (
+                      <Button className="mt-4" disabled={save.isPending} onClick={confirmNewSave}>
+                        {saved ? "Save as a new retake" : "Save as a new Audit"}
+                      </Button>
+                    ) : <Button asChild className="mt-4"><Link href="/radiant-audit">Finish my Audit</Link></Button>}
+                  </>
+                )}
+              </div>
+            )}
             {!isAuditReadyToSave(pending) && <Button asChild className="mt-4"><Link href="/radiant-audit">Continue my Audit</Link></Button>}
             {error && (
               <div className="mt-6" role="alert">
                 <p className="text-destructive">{error}</p>
-                {isAuditReadyToSave(pending) && (
+                {isAuditReadyToSave(pending) && !reviewRequired && (
                   <Button className="mt-4" onClick={() => void submitPending(pending)} disabled={save.isPending}>Try saving again</Button>
                 )}
               </div>

@@ -1,7 +1,14 @@
 import type { RadiantAuditSubmission } from "@/components/radiant-audit-form";
 
 const key = "tebm:radiant-audit:pending";
-type PendingAudit = RadiantAuditSubmission & { submissionId?: string };
+export type PendingAudit = RadiantAuditSubmission & { submissionId?: string; stagedAt?: number };
+const receiptWindowMs = 7 * 24 * 60 * 60 * 1000;
+
+export function canAutoRetryPendingAudit(audit: PendingAudit, now = Date.now()): boolean {
+  return typeof audit.stagedAt === "number" && Number.isFinite(audit.stagedAt) &&
+    audit.stagedAt > 0 && audit.stagedAt <= now &&
+    now - audit.stagedAt < receiptWindowMs;
+}
 
 export function readPendingAudit(): PendingAudit | null {
   try {
@@ -22,9 +29,18 @@ export function readPendingAudit(): PendingAudit | null {
 }
 
 export function stageAudit(audit: PendingAudit): PendingAudit {
-  const staged = { ...audit, submissionId: audit.submissionId ?? crypto.randomUUID() };
+  const staged = {
+    ...audit,
+    submissionId: audit.submissionId ?? crypto.randomUUID(),
+    // An older entry without a timestamp must remain unconfirmed, not gain a new window.
+    stagedAt: audit.submissionId ? audit.stagedAt : Date.now(),
+  };
   window.sessionStorage.setItem(key, JSON.stringify(staged));
   return staged;
+}
+
+export function restartPendingAudit(audit: PendingAudit): PendingAudit {
+  return stageAudit({ ...audit, submissionId: undefined, stagedAt: undefined });
 }
 
 export function clearPendingAudit(): void {
