@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { activityTable, db } from "@workspace/db";
 import { expect, test } from "vitest";
 import { activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate } from "./member-progress-leftovers";
-import { inspectProgressLeftovers } from "./member-progress-leftovers-cli";
+import { inspectProgressLeftovers, progressLeftoverArgs, runProgressLeftovers } from "./member-progress-leftovers-cli";
 import { requireDevelopmentDatabase } from "./test-development-database";
 
 const run = "12345678-1234-1234-1234-123456789abc";
@@ -68,6 +68,11 @@ test("deletion requires the same exact run ID twice", () => {
   expect(confirmedRun(["--delete", run, run])).toBe(run);
   expect(() => confirmedRun(["--delete", run])).toThrow();
   expect(() => confirmedRun(["--delete", run, "87654321-1234-1234-1234-123456789abc"])).toThrow();
+  expect(progressLeftoverArgs(["--activity-only"])).toEqual({ run: undefined, mode: "activity-only" });
+  expect(progressLeftoverArgs(["--activity-only", "--delete", run, run])).toEqual({ run, mode: "activity-only" });
+  expect(() => progressLeftoverArgs(["--activity-only", "--delete", run])).toThrow();
+  expect(() => progressLeftoverArgs(["--activity-only", "--delete", run, `${run}-other`])).toThrow();
+  expect(() => progressLeftoverArgs(["--unknown"])).toThrow();
 });
 
 test("database dry run and confirmed cleanup isolate stale activity-only progress entries", async () => {
@@ -96,8 +101,13 @@ test("database dry run and confirmed cleanup isolate stale activity-only progres
       createdIds.push(row.id);
     }
     const output: string[] = [];
-    const noClerkDelete = async () => { throw new Error("Activity-only cleanup must not delete a Clerk identity"); };
-    await inspectProgressLeftovers(undefined, [], noClerkDelete, message => output.push(message));
+    const noClerk = async (): Promise<never> => { throw new Error("Clerk is unavailable"); };
+    const withoutClerkConfig = {
+      ...process.env, CLERK_SECRET_KEY: undefined, CLERK_PUBLISHABLE_KEY: undefined,
+      VITE_CLERK_PUBLISHABLE_KEY: undefined, REPLIT_DEV_DOMAIN: undefined,
+      CHROMIUM_PATH: "/nonexistent/chromium",
+    };
+    await runProgressLeftovers(["--activity-only"], noClerk, message => output.push(message), withoutClerkConfig);
     const report = JSON.parse(output[0]) as { candidates: Array<{ kind: string; id: string; run: string }> };
     expect(report.candidates.filter(entry => createdIds.includes(Number(entry.id))))
       .toEqual([
@@ -106,16 +116,28 @@ test("database dry run and confirmed cleanup isolate stale activity-only progres
         { kind: "activity", id: String(createdIds[6]), run: otherRun,
           createdAt: old.toISOString(), marker: `Progress Elevated ${otherRun}`, type: "enrollment", description },
       ]);
-    expect(output.at(-1)).toMatch(/Dry run only; nothing deleted/);
+    expect(output.at(-2)).toMatch(/Dry run only; nothing deleted/);
+    expect(output.at(-1)).toMatch(/Clerk identities and curriculum were not checked/);
     expect((await db.select({ id: activityTable.id }).from(activityTable)
       .where(inArray(activityTable.id, createdIds))).map(row => row.id)).toEqual(createdIds);
 
-    await inspectProgressLeftovers(confirmedRun(["--delete", fixtureRun, fixtureRun]), [], noClerkDelete, () => {});
+    await runProgressLeftovers(
+      ["--activity-only", "--delete", fixtureRun, fixtureRun], noClerk, () => {}, withoutClerkConfig,
+    );
     expect((await db.select({ id: activityTable.id }).from(activityTable)
       .where(inArray(activityTable.id, createdIds))).map(row => row.id))
       .toEqual(createdIds.slice(1));
     // A second attempt cannot remove the recent exact match.
-    await expect(inspectProgressLeftovers(fixtureRun, [], noClerkDelete, () => {})).rejects.toThrow(/fully stale/);
+    await expect(runProgressLeftovers(
+      ["--activity-only", "--delete", fixtureRun, fixtureRun], noClerk, () => {}, withoutClerkConfig,
+    )).rejects.toThrow(/fully stale/);
+    await expect(runProgressLeftovers(
+      [], noClerk, () => {}, {
+        ...process.env, CLERK_SECRET_KEY: "sk_test_mock", CLERK_PUBLISHABLE_KEY: "pk_test_mock",
+        VITE_CLERK_PUBLISHABLE_KEY: "pk_test_mock", REPLIT_DEV_DOMAIN: "example.replit.dev",
+        CHROMIUM_PATH: process.execPath,
+      },
+    )).rejects.toThrow(/Clerk is unavailable/);
   } finally {
     if (createdIds.length) {
       await db.delete(activityTable).where(inArray(activityTable.id, createdIds));

@@ -191,6 +191,12 @@ test("maintenance commands accept guarded cleanup and dry-run commands", () => {
       progressBrowserEnvironment();
       await inspect();
     }`), []);
+  assert.deepEqual(checkMaintenanceCommand(`import { progressLeftoversEnvironment } from "./member-progress-browser-environment";
+    async function main() {
+      progressLeftoversEnvironment();
+      const { db } = await import("@workspace/db");
+      await db.delete(activityTable);
+    }`), []);
   assert.deepEqual(checkMaintenanceCommand(`async function main() { console.log("No database"); }`), []);
 });
 

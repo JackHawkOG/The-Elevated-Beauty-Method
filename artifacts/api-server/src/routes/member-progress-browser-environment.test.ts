@@ -22,6 +22,24 @@ test("accepts only a matched development workspace target", () => {
   }).base).toBe("https://example.replit.dev");
 });
 
+test("activity-only checks the development database without requiring Clerk or a browser", () => {
+  const withoutClerk = {
+    ...development,
+    CLERK_SECRET_KEY: undefined,
+    CLERK_PUBLISHABLE_KEY: undefined,
+    VITE_CLERK_PUBLISHABLE_KEY: undefined,
+    REPLIT_DEV_DOMAIN: undefined,
+    CHROMIUM_PATH: "/missing/browser",
+  };
+  expect(() => progressBrowserEnvironment(withoutClerk, true)).not.toThrow();
+  expect(() => progressBrowserEnvironment(withoutClerk)).toThrow(/development Clerk/);
+  expect(() => progressBrowserEnvironment({ ...withoutClerk, NODE_ENV: "production" }, true))
+    .toThrow(/development workspace/);
+  expect(() => progressBrowserEnvironment({
+    ...withoutClerk, DATABASE_URL: `${development.DATABASE_URL}?host=another-db`,
+  }, true)).toThrow(/connection options/);
+});
+
 test.each([
   [{ NODE_ENV: "production" }, /development workspace/],
   [{ REPLIT_DEPLOYMENT: "1" }, /development workspace/],

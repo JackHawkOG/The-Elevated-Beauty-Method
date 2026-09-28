@@ -1,13 +1,40 @@
 // Run from the workspace root with pnpm run inspect:progress-leftovers.
+// For feed-only inspection during a Clerk outage: pnpm run inspect:progress-leftovers --activity-only
+// After inspecting, delete only feed rows with --activity-only --delete <run-uuid> <same-run-uuid>.
 // Import the clients only after validating the development environment.
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { progressBrowserEnvironment } from "./member-progress-browser-environment";
+import { progressBrowserEnvironment, progressLeftoversEnvironment } from "./member-progress-browser-environment";
 import {
   activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate,
 } from "./member-progress-leftovers";
 
 type Identity = { id: string; email: string; name: string; createdAt: Date };
+type Mode = "full" | "activity-only";
+
+export function progressLeftoverArgs(args: string[]): { run: string | undefined; mode: Mode } {
+  const mode = args[0] === "--activity-only" ? "activity-only" : "full";
+  return { mode, run: confirmedRun(mode === "activity-only" ? args.slice(1) : args) };
+}
+
+async function deleteActivities(
+  tx: Pick<typeof import("@workspace/db")["db"], "delete">,
+  activities: Candidate[],
+  cutoff: number,
+) {
+  const { and, eq, lte } = await import("drizzle-orm");
+  const { activityTable } = await import("@workspace/db");
+  for (const activity of activities) {
+    const removed = await tx.delete(activityTable).where(and(
+      eq(activityTable.id, Number(activity.id)),
+      eq(activityTable.actorName, activity.marker),
+      eq(activityTable.entityTitle, activity.name!),
+      eq(activityTable.type, activity.type!),
+      eq(activityTable.description, activity.description!),
+      lte(activityTable.createdAt, new Date(cutoff)))).returning({ id: activityTable.id });
+    if (removed.length !== 1) throw new Error("Activity changed during cleanup; refusing partial deletion");
+  }
+}
 
 // The same SQL path is used by the CLI and the guarded development DB test.
 export async function inspectProgressLeftovers(
@@ -17,15 +44,16 @@ export async function inspectProgressLeftovers(
   log: (message: string) => void = console.log,
   // Test seam for a database change after selection but before the guarded delete.
   beforeDelete?: () => Promise<void>,
+  mode: Mode = "full",
 ) {
-  const { and, eq, like, lte } = await import("drizzle-orm");
+  const { and, eq, like } = await import("drizzle-orm");
   const {
     db, categoriesTable, coursesTable, lessonsTable, usersTable,
     enrollmentsTable, lessonCompletionsTable, activityTable,
   } = await import("@workspace/db");
     const now = new Date();
-    const categories = await db.select().from(categoriesTable);
-    const members = await db.select().from(usersTable);
+    const categories = mode === "full" ? await db.select().from(categoriesTable) : [];
+    const members = mode === "full" ? await db.select().from(usersTable) : [];
     const activities = await db.select().from(activityTable)
       .where(like(activityTable.actorName, "Progress Elevated %"))
       .orderBy(activityTable.id);
@@ -70,9 +98,17 @@ export async function inspectProgressLeftovers(
         curriculum,
       }, null, 2));
       log(`${stale.length} stale disposable record(s). Dry run only; nothing deleted.`);
+      if (mode === "activity-only") log("Activity-only mode: Clerk identities and curriculum were not checked.");
       return;
     }
     const selected = eligibleRun(candidates, now, run);
+    const cutoff = now.getTime() - 60 * 60 * 1000;
+    if (mode === "activity-only") {
+      await beforeDelete?.();
+      await db.transaction(async tx => deleteActivities(tx, selected, cutoff));
+      log(`Removed confirmed disposable activity rows for ${run}. Clerk identities and curriculum were not checked.`);
+      return;
+    }
     const categoriesForRun = selected.filter(c => c.kind === "category");
     const identitiesForRun = selected.filter(c => c.kind === "clerk");
     const membersForRun = selected.filter(c => c.kind === "member");
@@ -98,7 +134,6 @@ export async function inspectProgressLeftovers(
     }
     const course = courseRows[0];
     const lessons = course ? await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id)) : [];
-    const cutoff = now.getTime() - 60 * 60 * 1000;
     if (course && course.createdAt.getTime() > cutoff ||
         lessons.some(lesson => lesson.createdAt.getTime() > cutoff)) {
       throw new Error("Curriculum includes recent records; refusing deletion");
@@ -139,39 +174,47 @@ export async function inspectProgressLeftovers(
         await tx.delete(coursesTable).where(eq(coursesTable.id, course.id));
       }
       if (category) await tx.delete(categoriesTable).where(eq(categoriesTable.id, Number(category.id)));
-      for (const activity of activitiesForRun) {
-        const removed = await tx.delete(activityTable).where(and(
-          eq(activityTable.id, Number(activity.id)),
-          eq(activityTable.actorName, activity.marker),
-          eq(activityTable.entityTitle, activity.name!),
-          eq(activityTable.type, activity.type!),
-          eq(activityTable.description, activity.description!),
-          lte(activityTable.createdAt, new Date(cutoff)))).returning({ id: activityTable.id });
-        if (removed.length !== 1) throw new Error("Activity changed during cleanup; refusing partial deletion");
-      }
+      await deleteActivities(tx, activitiesForRun, cutoff);
     });
     for (const identity of identitiesForRun) await deleteIdentity(identity.id);
     log(`Removed confirmed disposable records for ${run}. Re-run dry run to check for remaining Clerk users.`);
 }
 
+export async function runProgressLeftovers(
+  args: string[],
+  loadClerk: () => Promise<typeof import("@clerk/express")["clerkClient"]> =
+    async () => (await import("@clerk/express")).clerkClient,
+  log: (message: string) => void = console.log,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const { run, mode } = progressLeftoverArgs(args);
+  progressBrowserEnvironment(env, mode === "activity-only");
+  if (mode === "activity-only") {
+    await inspectProgressLeftovers(run, [], async () => {
+      throw new Error("Activity-only mode cannot delete Clerk identities");
+    }, log, undefined, mode);
+    return;
+  }
+  const clerkClient = await loadClerk();
+  const identities: Identity[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await clerkClient.users.getUserList({ limit: 100, offset });
+    for (const user of page.data) {
+      identities.push({
+        id: user.id, email: user.emailAddresses[0]?.emailAddress || "",
+        name: user.firstName || "", createdAt: new Date(user.createdAt),
+      });
+    }
+    if (offset + page.data.length >= page.totalCount || !page.data.length) break;
+  }
+  await inspectProgressLeftovers(run, identities, id => clerkClient.users.deleteUser(id), log);
+}
+
 async function main() {
-  const run = confirmedRun(process.argv.slice(2));
-  progressBrowserEnvironment();
-  const { clerkClient } = await import("@clerk/express");
+  progressLeftoversEnvironment();
   const { pool } = await import("@workspace/db");
   try {
-    const identities: Identity[] = [];
-    for (let offset = 0; ; offset += 100) {
-      const page = await clerkClient.users.getUserList({ limit: 100, offset });
-      for (const user of page.data) {
-        identities.push({
-          id: user.id, email: user.emailAddresses[0]?.emailAddress || "",
-          name: user.firstName || "", createdAt: new Date(user.createdAt),
-        });
-      }
-      if (offset + page.data.length >= page.totalCount || !page.data.length) break;
-    }
-    await inspectProgressLeftovers(run, identities, id => clerkClient.users.deleteUser(id));
+    await runProgressLeftovers(process.argv.slice(2));
   } finally {
     await pool.end();
   }

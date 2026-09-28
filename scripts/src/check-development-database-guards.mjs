@@ -18,7 +18,7 @@ const maintenanceGuards = new Map([
   ["./radiant-audit-fixtures", "requireAuditDevelopment"],
   ["./community-fixtures", "requireCommunityDevelopment"],
   ["./member-stories-fixtures", "requireStoryDevelopment"],
-  ["./member-progress-browser-environment", "progressBrowserEnvironment"],
+  ["./member-progress-browser-environment", new Set(["progressBrowserEnvironment", "progressLeftoversEnvironment"])],
   ["./membership-counts-leftovers", "requirePaidTotalDevelopment"],
 ]);
 
@@ -332,7 +332,9 @@ export function checkMaintenanceCommand(source, filename = "fixture-cleanup.ts")
     if (allowed && statement.importClause?.namedBindings &&
         ts.isNamedImports(statement.importClause.namedBindings) && !statement.importClause.isTypeOnly) {
       for (const binding of statement.importClause.namedBindings.elements) {
-        if (!binding.isTypeOnly && (binding.propertyName?.text ?? binding.name.text) === allowed) {
+        if (!binding.isTypeOnly && (allowed instanceof Set
+          ? allowed.has(binding.propertyName?.text ?? binding.name.text)
+          : (binding.propertyName?.text ?? binding.name.text) === allowed)) {
           guards.add(binding.name.text);
         }
       }

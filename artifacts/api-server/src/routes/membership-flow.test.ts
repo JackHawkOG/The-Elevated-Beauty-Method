@@ -283,11 +283,12 @@ test("failed Stripe cleanup is queued and retried without returning a checkout U
 
 test("recovery clears a checkout already expired by Stripe without expiring it again", async () => {
   const id = `cs_${randomUUID()}`;
-  const session: TestSession = { id, status: "open", url: `https://checkout.stripe.test/${id}`, created: Math.floor(Date.now() / 1000) };
+  const session: TestSession = { id, status: "open",
+    url: `https://checkout.stripe.test/${id}`, created: Math.floor(Date.now() / 1000) };
   sessions.set(id, session);
   await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
   const queued = async () => (await pool.query(
-    "SELECT 1 FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
+    "SELECT stripe_session_id FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
   )).rows;
   try {
     expect(await queued()).toHaveLength(1);
@@ -314,7 +315,7 @@ test("recovery does not expire a checkout that completed while cleanup was unava
   const id = `cs_${randomUUID()}`;
   sessions.set(id, { id, status: "complete", payment_status: "paid", url: "", created: Math.floor(Date.now() / 1000) });
   await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
-  const before = createSession.mock.calls.length;
+  const before = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
   await recoverQueuedCheckoutExpirations();
   expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(before);
   expect(sessions.get(id)?.status).toBe("complete");
@@ -324,11 +325,12 @@ test("recovery does not expire a checkout that completed while cleanup was unava
 
 test("recovery clears a paid checkout retry even when Stripe still marks it open", async () => {
   const id = `cs_${randomUUID()}`;
-  const session: TestSession = { id, status: "open", payment_status: "paid", url: "", created: Math.floor(Date.now() / 1000) };
+  const session: TestSession = { id, status: "open", payment_status: "paid",
+    url: `https://checkout.stripe.test/${id}`, created: Math.floor(Date.now() / 1000) };
   sessions.set(id, session);
   await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
   try {
-  const expirationsBefore = expireSession.mock.calls.length;
+    const expirationsBefore = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
     await recoverQueuedCheckoutExpirations();
     expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirationsBefore);
     expect(session).toMatchObject({ id, status: "open", payment_status: "paid" });
@@ -345,10 +347,11 @@ test.each(["open", "complete"] as const)(
   "recovery retries a failed Stripe lookup and uses the live %s session status",
   async (status) => {
     const id = `cs_${randomUUID()}`;
-    const session: TestSession = { id, status: "open", url: "", created: Math.floor(Date.now() / 1000) };
+    const session: TestSession = { id, status: "open",
+      url: `https://checkout.stripe.test/${id}`, created: Math.floor(Date.now() / 1000) };
     sessions.set(id, session);
     await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
-  const originalRetrieve = retrieveSession.getMockImplementation()!;
+    const originalRetrieve = retrieveSession.getMockImplementation()!;
 
     let failLookup = true;
     retrieveSession.mockImplementation(async (sessionId: string) => {
@@ -358,11 +361,11 @@ test.each(["open", "complete"] as const)(
       }
       return originalRetrieve(sessionId);
     });
-  const queued = async () => (await pool.query(
-    "SELECT stripe_session_id FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
-  )).rows;
+    const queued = async () => (await pool.query(
+      "SELECT stripe_session_id FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
+    )).rows;
     const retrievesBefore = retrieveSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
-  const expirationsBefore = expireSession.mock.calls.length;
+    const expirationsBefore = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
 
     try {
       await recoverQueuedCheckoutExpirations();
@@ -395,7 +398,8 @@ test.each(["open", "complete"] as const)(
 
 test("recovery keeps a checkout paid between lookup and expiration, then clears its retry", async () => {
   const id = `cs_${randomUUID()}`;
-  const session: TestSession = { id, status: "open", url: "", created: Math.floor(Date.now() / 1000) };
+  const session: TestSession = { id, status: "open",
+    url: `https://checkout.stripe.test/${id}`, created: Math.floor(Date.now() / 1000) };
   sessions.set(id, session);
   await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
   const queued = async () => (await pool.query(
@@ -436,17 +440,18 @@ test("lost Stripe responses leave recoverable sessions; recovery expires only un
   clock(opens);
   const [openBuyer, paidBuyer, trackedBuyer] = await Promise.all([addUser(210), addUser(211), addUser(212)]);
   const originalCreate = createSession.getMockImplementation()!;
+
+  const lostSessions: TestSession[] = [];
   const loseResponse = async (...args: Parameters<typeof originalCreate>) => {
-    await originalCreate(...args); // Stripe created it, but its response never reached the server.
+    lostSessions.push(await originalCreate(...args)); // Stripe created it, but its response never reached the server.
     throw new Error("Connection lost after Stripe accepted checkout");
   };
-  const before = sessions.size;
   createSession.mockImplementationOnce(loseResponse).mockImplementationOnce(loseResponse);
   expect((await request("/membership/checkout", "POST", openBuyer, { kind: "standard" })).status).toBe(503);
   expect((await request("/membership/checkout", "POST", paidBuyer, { kind: "standard" })).status).toBe(503);
   expect(await row(openBuyer)).toBeUndefined();
   expect(await row(paidBuyer)).toBeUndefined();
-  const [orphan, completed] = [...sessions.values()].slice(before);
+  const [orphan, completed] = lostSessions;
   expect(orphan.metadata).toMatchObject({ membershipCheckout: "true", reservationId: expect.any(String) });
   expect(createSession.mock.calls.some(([, options]) => options?.idempotencyKey === `membership-${orphan.metadata?.reservationId}`)).toBe(true);
   expect(expireSession).not.toHaveBeenCalledWith(orphan.id);
@@ -665,6 +670,7 @@ test("paid founding recovery via later reconciliation counts once and rejects mi
   )).rows[0].count);
   const foundingBefore = await count();
   const originalCreate = createSession.getMockImplementation()!;
+
   let session!: TestSession;
   createSession.mockImplementationOnce(async (...args: Parameters<typeof originalCreate>) => {
     session = await originalCreate(...args);
@@ -701,6 +707,7 @@ test("webhook and paid-session reconciliation cannot restore the same missing fo
   )).rows[0].count);
   const foundingBefore = await count();
   const originalCreate = createSession.getMockImplementation()!;
+
   let session!: TestSession;
   createSession.mockImplementationOnce(async (...args: Parameters<typeof originalCreate>) => {
     session = await originalCreate(...args);
