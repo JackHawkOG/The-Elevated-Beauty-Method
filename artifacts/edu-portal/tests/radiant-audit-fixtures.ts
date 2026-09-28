@@ -18,13 +18,17 @@ export function requireAuditDevelopment(env: NodeJS.ProcessEnv = process.env) {
     throw new Error("Audit fixtures require the workspace development preview and database.");
   }
   const target = new URL(env.DATABASE_URL);
+  const connectionOptions = new Set([
+    "sslmode", "sslcert", "sslkey", "sslrootcert", "application_name",
+    "connect_timeout", "keepalives", "keepalives_idle", "keepalives_interval",
+    "keepalives_count",
+  ]);
   if (!["postgres:", "postgresql:"].includes(target.protocol) ||
       target.hostname !== env.PGHOST ||
       decodeURIComponent(target.pathname.slice(1)) !== env.PGDATABASE ||
       decodeURIComponent(target.username) !== env.PGUSER ||
       (target.port || "5432") !== env.PGPORT ||
-      [...target.searchParams.keys()].some(key =>
-        ["host", "hostaddr", "port", "database", "dbname", "user", "service", "options"].includes(key.toLowerCase()))) {
+       [...target.searchParams.keys()].some(key => !connectionOptions.has(key.toLowerCase()))) {
     throw new Error("DATABASE_URL does not match the workspace development database.");
   }
 }

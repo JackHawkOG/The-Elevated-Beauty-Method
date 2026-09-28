@@ -14,6 +14,13 @@ const liveGuards = new Map([
   ["./community-fixtures", new Set(["requireCommunityDevelopment"])],
   ["./member-stories-fixtures", new Set(["requireStoryDevelopment"])],
 ]);
+const maintenanceGuards = new Map([
+  ["./radiant-audit-fixtures", "requireAuditDevelopment"],
+  ["./community-fixtures", "requireCommunityDevelopment"],
+  ["./member-stories-fixtures", "requireStoryDevelopment"],
+  ["./member-progress-browser-environment", "progressBrowserEnvironment"],
+  ["./membership-counts-leftovers", "requirePaidTotalDevelopment"],
+]);
 
 function visit(node, predicate) {
   if (predicate(node)) return true;
@@ -305,6 +312,110 @@ export function checkLiveSuite(source, filename = "browser-live.spec.ts") {
   return issues;
 }
 
+// Maintenance commands are executed directly, without a Vitest/Playwright setup
+// hook. Only a known imported guard called in main can protect a live DB import.
+export function checkMaintenanceCommand(source, filename = "fixture-cleanup.ts") {
+  const ast = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const guards = new Set();
+  let usesDatabase = false;
+  let staticDatabaseImport = false;
+  for (const statement of ast.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const module = statement.moduleSpecifier.text;
+    if (isLiveDatabaseModule(module) || module === "pg") {
+      if (!statement.importClause?.isTypeOnly) {
+        usesDatabase = true;
+        staticDatabaseImport = true;
+      }
+    }
+    const allowed = maintenanceGuards.get(module);
+    if (allowed && statement.importClause?.namedBindings &&
+        ts.isNamedImports(statement.importClause.namedBindings) && !statement.importClause.isTypeOnly) {
+      for (const binding of statement.importClause.namedBindings.elements) {
+        if (!binding.isTypeOnly && (binding.propertyName?.text ?? binding.name.text) === allowed) {
+          guards.add(binding.name.text);
+        }
+      }
+    }
+  }
+  const databaseImports = [];
+  const clerkDeletions = [];
+  visit(ast, node => {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments[0] && ts.isStringLiteral(node.arguments[0]) &&
+        (isLiveDatabaseModule(node.arguments[0].text) || node.arguments[0].text === "pg")) {
+      usesDatabase = true;
+      databaseImports.push(node);
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "deleteUser" &&
+        ts.isPropertyAccessExpression(node.expression.expression) &&
+        node.expression.expression.name.text === "users") {
+      clerkDeletions.push(node);
+    }
+    return false;
+  });
+  if (!usesDatabase && !clerkDeletions.length) return [];
+  const issues = [];
+  if (staticDatabaseImport) issues.push("import the live database dynamically after the development guard");
+  const main = ast.statements.find(statement =>
+    ts.isFunctionDeclaration(statement) && statement.name?.text === "main");
+  if (!main?.body) return [...issues, "put a workspace development database guard in main before connecting"];
+  const guardStatement = main.body.statements.find(statement =>
+    ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression) &&
+    ts.isIdentifier(statement.expression.expression) &&
+    guards.has(statement.expression.expression.text) &&
+    statement.expression.arguments.length === 0);
+  if (!guardStatement) return [...issues, "call an imported workspace development database guard in main"];
+  // Before the guard, only argument parsing and a usage check may run.
+  for (const statement of main.body.statements) {
+    if (statement === guardStatement) break;
+    const isArgs = ts.isVariableStatement(statement) &&
+      statement.declarationList.declarations.every(declaration =>
+        !!declaration.initializer &&
+        (ts.isCallExpression(declaration.initializer) &&
+          (calleeName(declaration.initializer.expression) === "slice" ||
+           calleeName(declaration.initializer.expression) === "confirmedRun")));
+    const isUsage = ts.isIfStatement(statement) && !statement.elseStatement &&
+      ts.isBlock(statement.thenStatement) &&
+      statement.thenStatement.statements.length === 1 &&
+      ts.isThrowStatement(statement.thenStatement.statements[0]);
+    if (!isArgs && !isUsage) {
+      issues.push("call the development guard before client or database work in main");
+      break;
+    }
+  }
+  if (databaseImports.some(node => {
+    let parent = node.parent;
+    while (parent && parent !== ast && parent !== main) {
+      if (ts.isFunctionLike(parent)) return false;
+      parent = parent.parent;
+    }
+    return parent === main && node.getStart(ast) < guardStatement.getStart(ast);
+  })) {
+    issues.push("open the live database only after the development guard");
+  }
+  // A helper can be called from main after its guard, but module-scope connection
+  // work runs before main; never permit a live import at module scope.
+  if (databaseImports.some(node => {
+    let parent = node.parent;
+    while (parent && parent !== ast) {
+      if (ts.isFunctionLike(parent)) return false;
+      parent = parent.parent;
+    }
+    return true;
+  })) issues.push("do not open the live database at module scope");
+  if (clerkDeletions.some(node => {
+    let parent = node.parent;
+    while (parent && parent !== ast) {
+      if (ts.isFunctionLike(parent)) return false;
+      parent = parent.parent;
+    }
+    return true;
+  })) issues.push("do not delete Clerk users at module scope");
+  return issues;
+}
+
 async function main() {
   const failures = [];
   for (const directory of suiteDirectories) {
@@ -320,11 +431,19 @@ async function main() {
     const issues = checkLiveSuite(await readFile(filename, "utf8"), filename);
     for (const issue of issues) failures.push(`${path.relative(process.cwd(), filename)}: ${issue}`);
   }
+  for (const folder of [path.join(apiSource, "routes"), browserTests, path.dirname(fileURLToPath(import.meta.url))]) {
+    for (const name of (await readdir(folder)).filter(name =>
+      /(?:cleanup|maintenance|(?:^|-)cli)\.tsx?$/.test(name) && !/\.(?:test|spec)\.tsx?$/.test(name))) {
+      const filename = path.join(folder, name);
+      const issues = checkMaintenanceCommand(await readFile(filename, "utf8"), filename);
+      for (const issue of issues) failures.push(`${path.relative(process.cwd(), filename)}: ${issue}`);
+    }
+  }
   if (failures.length) {
     console.error(`Database safety check failed:\n${failures.join("\n")}`);
     process.exitCode = 1;
   } else {
-    console.log("API and live browser test database safety check passed");
+    console.log("API, live browser test, and maintenance command database safety check passed");
   }
 }
 

@@ -34,6 +34,8 @@ test.each([
   [{ DATABASE_URL: `${development.DATABASE_URL}?port=5434` }, /connection options/],
   [{ DATABASE_URL: `${development.DATABASE_URL}?database=production` }, /connection options/],
   [{ DATABASE_URL: `${development.DATABASE_URL}?hostaddr=192.0.2.1` }, /connection options/],
+   [{ PGHOSTADDR: "192.0.2.1" }, /development PG\* target/],
+   [{ PGSERVICE: "production" }, /development PG\* target/],
   [{ PGDATABASE: "other" }, /development PG\* target/],
   [{ DATABASE_URL: "not-a-url" }, /development DATABASE_URL/],
   [{ CHROMIUM_PATH: "/missing/progress-check-browser" }, /executable Chromium/],

@@ -36,6 +36,8 @@ describe("Audit fixture cleanup boundaries", () => {
     expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: "postgresql://dev@production.db/development" })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: "postgresql://dev@development.db/production" })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: `${env.DATABASE_URL}&host=production.db` })).toThrow();
+    expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: `${env.DATABASE_URL}&options=-c%20search_path%3Dpublic` })).toThrow();
+    expect(() => requireAuditDevelopment({ ...env, DATABASE_URL: `${env.DATABASE_URL}&unknown=override` })).toThrow();
     expect(() => requireAuditDevelopment({ ...env, PGHOSTADDR: "127.0.0.1" })).toThrow();
   });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkLiveSuite, checkSuite } from "./check-development-database-guards.mjs";
+import { checkLiveSuite, checkMaintenanceCommand, checkSuite } from "./check-development-database-guards.mjs";
 
 const imports = `import { db, pool } from "@workspace/db";
 import { requireDevelopmentDatabase } from "./test-development-database";`;
@@ -153,4 +153,57 @@ test("mock-only browser checks do not need database guards", () => {
     import { db } from "@workspace/db";
     vi.mock("@workspace/db", () => ({ db: { delete: vi.fn() } }));
     test("mock", async () => { await db.delete(usersTable); });`), []);
+});
+
+test("maintenance commands reject missing, fake, late, and module-scope guards", () => {
+  const dbImport = `const { db } = await import("@workspace/db"); await db.delete(usersTable);`;
+  const guard = `import { requireAuditDevelopment } from "./radiant-audit-fixtures";`;
+  assert.match(checkMaintenanceCommand(`async function main() { ${dbImport} }`)[0], /guard/);
+  assert.match(checkMaintenanceCommand(`function requireAuditDevelopment() {}
+    async function main() { requireAuditDevelopment(); ${dbImport} }`)[0], /imported.*guard/);
+  assert.match(checkMaintenanceCommand(`import { requireAuditDevelopment } from "./fake-fixtures";
+    async function main() { requireAuditDevelopment(); ${dbImport} }`)[0], /imported.*guard/);
+  assert.match(checkMaintenanceCommand(`${guard}
+    async function main() { await loadClient(); requireAuditDevelopment(); ${dbImport} }`)[0], /before client/);
+  assert.ok(checkMaintenanceCommand(`${guard}
+    import { db } from "@workspace/db";
+    async function main() { requireAuditDevelopment(); await db.delete(usersTable); }`)
+    .some(issue => /dynamically/.test(issue)));
+  assert.ok(checkMaintenanceCommand(`${guard}
+    const connection = import("@workspace/db");
+    async function main() { requireAuditDevelopment(); await connection; }`)
+    .some(issue => /module scope/.test(issue)));
+});
+
+test("maintenance commands accept guarded cleanup and dry-run commands", () => {
+  assert.deepEqual(checkMaintenanceCommand(`import { requireAuditDevelopment } from "./radiant-audit-fixtures";
+    async function main() {
+      const args = process.argv.slice(2);
+      if (args.length > 1) { throw new Error("Usage"); }
+      requireAuditDevelopment();
+      const { db } = await import("@workspace/db");
+      await db.transaction(async tx => { await tx.delete(usersTable); });
+    }`), []);
+  assert.deepEqual(checkMaintenanceCommand(`import { progressBrowserEnvironment } from "./member-progress-browser-environment";
+    async function inspect() { const { db } = await import("@workspace/db"); await db.delete(usersTable); }
+    async function main() {
+      const run = confirmedRun(process.argv.slice(2));
+      progressBrowserEnvironment();
+      await inspect();
+    }`), []);
+  assert.deepEqual(checkMaintenanceCommand(`async function main() { console.log("No database"); }`), []);
+});
+
+test("Clerk-only maintenance cleanup still requires an early development guard", () => {
+  const deletion = `await client.users.deleteUser(id);`;
+  assert.match(checkMaintenanceCommand(`async function main() { ${deletion} }`)[0], /guard/);
+  assert.ok(checkMaintenanceCommand(`import { requireAuditDevelopment } from "./radiant-audit-fixtures";
+    async function main() { await client.users.deleteUser(id); requireAuditDevelopment(); }`)
+    .some(issue => /before client/.test(issue)));
+  assert.deepEqual(checkMaintenanceCommand(`import { requireAuditDevelopment } from "./radiant-audit-fixtures";
+    async function main() { requireAuditDevelopment(); ${deletion} }`), []);
+  assert.ok(checkMaintenanceCommand(`import { requireAuditDevelopment } from "./radiant-audit-fixtures";
+    const pending = client.users.deleteUser(id);
+    async function main() { requireAuditDevelopment(); await pending; }`)
+    .some(issue => /module scope/.test(issue)));
 });

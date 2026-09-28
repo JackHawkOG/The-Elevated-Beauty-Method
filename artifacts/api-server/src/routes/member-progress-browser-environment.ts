@@ -22,7 +22,8 @@ export function progressBrowserEnvironment(env: NodeJS.ProcessEnv = process.env)
     throw new Error("Progress browser check requires the workspace development DATABASE_URL");
   }
   if (!["postgres:", "postgresql:"].includes(target.protocol) ||
-      !env.PGHOST || !env.PGPORT || !env.PGDATABASE || !env.PGUSER ||
+       !env.PGHOST || !env.PGPORT || !env.PGDATABASE || !env.PGUSER ||
+       env.PGHOSTADDR || env.PGSERVICE ||
       target.hostname !== env.PGHOST ||
       (target.port || "5432") !== env.PGPORT ||
       decodeURIComponent(target.pathname.slice(1)) !== env.PGDATABASE ||
