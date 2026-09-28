@@ -20,6 +20,7 @@
     "test:membership-live": "playwright test --config playwright.membership-live.config.ts",
     "test:audit-live": "playwright test --config playwright.audit-live.config.ts",
     "cleanup:audit-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/radiant-audit-fixtures-cleanup.ts",
+    "cleanup:course-switch-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/course-switch-fixtures-cleanup.ts",
     "cleanup:community-fixtures": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/community-fixtures-cleanup.ts",
     "inspect:community-legacy": "pnpm --filter @workspace/scripts exec tsx ../artifacts/edu-portal/tests/community-legacy-review-cli.ts",
     "test:community-live": "playwright test --config playwright.community-live.config.ts",

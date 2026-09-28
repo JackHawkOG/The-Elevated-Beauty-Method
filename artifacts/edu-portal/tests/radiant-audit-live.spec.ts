@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { auditFixtureEmail, auditFixturePrivateMetadata, requireAuditDevelopment } from "./radiant-audit-fixtures";
+import { auditFixtureEmail, auditFixturePrivateMetadata, courseSwitchEmail, courseSwitchPrivateMetadata, courseSwitchTitle, newCourseSwitchTag, requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 const reflections = (marker: string) => ({
   beautyTrend: `trend ${marker}`,
@@ -565,10 +565,10 @@ test("a delayed enrollment response cannot show the former member's learning pro
   requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-  const tag = randomUUID().slice(0, 12);
-  const aEmail = auditFixtureEmail("dashboard-late-a", tag);
-  const bEmail = auditFixtureEmail("dashboard-late-b", tag);
-  const title = `Private learning ${tag}`;
+  const tag = newCourseSwitchTag();
+  const aEmail = courseSwitchEmail("a", tag);
+  const bEmail = courseSwitchEmail("b", tag);
+  const title = courseSwitchTitle(tag);
   const created: string[] = [];
   let categoryId: number | undefined;
   let courseId: number | undefined;
@@ -587,7 +587,7 @@ test("a delayed enrollment response cannot show the former member's learning pro
       const user = await client.users.createUser({
         emailAddress: [email],
         skipPasswordRequirement: true,
-        privateMetadata: auditFixturePrivateMetadata,
+        privateMetadata: courseSwitchPrivateMetadata,
       });
       created.push(user.id);
     }
@@ -595,7 +595,7 @@ test("a delayed enrollment response cannot show the former member's learning pro
     await signIn(page, aEmail);
     // Create a published, test-owned course rather than depending on shared
     // editorial content. The completion makes the leaked progress observable.
-    const [category] = await db.insert(categoriesTable).values({ name: title, slug: `learning-${tag}` }).returning();
+    const [category] = await db.insert(categoriesTable).values({ name: title, slug: `course-switch-${tag}` }).returning();
     categoryId = category.id;
     const [course] = await db.insert(coursesTable).values({
       title, description: title, categoryId, instructorName: "Test learner",

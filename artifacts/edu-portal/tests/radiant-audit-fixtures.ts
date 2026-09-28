@@ -1,4 +1,5 @@
 import type { User } from "@clerk/backend";
+import { randomBytes } from "node:crypto";
 
 const fixtureMarker = "radiant-audit-live-v1";
 const fixtureEmail = /^audit-fixture-(?:a|b|late-a|late-b|wrong|staged|signup|signin|delete-failure)-[0-9a-f]{12}\+clerk_test@example\.com$/;
@@ -38,6 +39,40 @@ export function auditFixtureEmail(role: "a" | "b" | "late-a" | "late-b" | "wrong
 }
 
 export const auditFixturePrivateMetadata = { auditLiveFixture: fixtureMarker };
+
+const courseSwitchMarker = "course-switch-live-v1";
+const courseSwitchEmailPattern = /^course-switch-([ab])-([0-9a-f]{12})\+clerk_test@example\.com$/;
+export const courseSwitchPrivateMetadata = { courseSwitchLiveFixture: courseSwitchMarker };
+export const courseSwitchTitle = (tag: string) => `Course-switch check ${tag}`;
+export const courseSwitchEmail = (role: "a" | "b", tag: string) =>
+  `course-switch-${role}-${tag}+clerk_test@example.com`;
+export const newCourseSwitchTag = () => randomBytes(6).toString("hex");
+
+export type CourseSwitchIdentity = {
+  emailAddresses: readonly { emailAddress: string }[];
+  privateMetadata: { courseSwitchLiveFixture?: unknown; [key: string]: unknown };
+  publicMetadata: object;
+  createdAt: number;
+  firstName: string | null;
+  lastName: string | null;
+};
+
+export function staleCourseSwitchIdentity(
+  user: CourseSwitchIdentity,
+  now = Date.now(),
+) {
+  const email = user.emailAddresses.length === 1 && user.emailAddresses[0].emailAddress;
+  const match = email && courseSwitchEmailPattern.exec(email);
+  if (!match || user.privateMetadata.courseSwitchLiveFixture !== courseSwitchMarker ||
+      Object.keys(user.privateMetadata).length !== 1 || Object.keys(user.publicMetadata).length !== 0 ||
+      user.firstName !== null || user.lastName !== null ||
+      !Number.isFinite(user.createdAt) || user.createdAt > now - minimumAgeMs) return;
+  return { role: match[1] as "a" | "b", tag: match[2], email };
+}
+
+export function isOldCourseSwitchDate(date: Date, now = Date.now()) {
+  return date instanceof Date && Number.isFinite(date.getTime()) && date.getTime() <= now - minimumAgeMs;
+}
 
 export function isStaleAuditFixture(user: Pick<User, "emailAddresses" | "privateMetadata" | "createdAt">, now = Date.now()) {
   return user.privateMetadata.auditLiveFixture === fixtureMarker &&
