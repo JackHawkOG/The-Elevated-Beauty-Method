@@ -23,7 +23,10 @@ import MembershipPage from "./membership";
 
 afterEach(() => vi.unstubAllGlobals());
 
-test("window focus refetches membership and updates cancellation, resumed, and ended wording in place", async () => {
+test.each([
+  { trigger: "window focus", event: "visibilitychange" },
+  { trigger: "history restore", event: "pageshow" },
+])("$trigger refetches membership and updates cancellation, resumed, and ended wording in place", async ({ event }) => {
   const cancellationDate = "2030-06-15T12:00:00.000Z";
   let latest = { kind: "founding", status: "confirmed", cancellationDate: cancellationDate as string | null };
   const requests = vi.fn(async (input: RequestInfo | URL) => {
@@ -64,16 +67,26 @@ test("window focus refetches membership and updates cancellation, resumed, and e
 
     latest = { kind: "founding", status: "confirmed", cancellationDate: null };
     expect(container.textContent).toContain("scheduled cancellation");
-    await act(async () => { window.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => {
+      window.dispatchEvent(event === "pageshow"
+        ? new PageTransitionEvent("pageshow", { persisted: true })
+        : new Event("visibilitychange"));
+    });
     await expectWording("membership is active.");
     expect(requests).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("scheduled cancellation");
     expect(container.textContent).not.toContain("Your cancellation takes effect on");
 
     latest = { kind: "founding", status: "forfeited", cancellationDate: null };
-    await act(async () => { window.dispatchEvent(new Event("visibilitychange")); });
+    await act(async () => {
+      window.dispatchEvent(event === "pageshow"
+        ? new PageTransitionEvent("pageshow", { persisted: true })
+        : new Event("visibilitychange"));
+    });
     await expectWording("membership has ended.");
     expect(requests).toHaveBeenCalledTimes(3);
     expect(container.textContent).not.toContain("membership is active");
+    expect(container.textContent).not.toContain("scheduled cancellation");
     expect(container.textContent).not.toContain("Your cancellation takes effect on");
     expect(window.location.pathname).toBe("/membership");
   } finally {

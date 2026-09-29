@@ -27,4 +27,10 @@ If an unrelated merged fixture has extensive structural corruption rather than a
 
 **How to apply:** Identify the introducing merge and report the blocking check and the needed reconciliation separately when restoring the fixture exceeds the assigned scope.
 
+When a shared branch has repaired a fixture while an isolated task is still open, compare against that latest shared version before submitting a local repair. A repair copied from an older known-good revision can merge with the newer fixture and reintroduce broken test setup even if local checks passed.
+
+**Why:** Completion merges may combine overlapping fixture edits; a passing local check describes the pre-merge tree, not necessarily the submitted tree.
+
+**How to apply:** Compare the whole touched fixture against the current shared branch, preserve new tests and their setup, and validate the reconciled version before retrying completion.
+
 When the user authorizes a broader repair of a malformed fixture, compare it with its last known-good revision before replacing scattered invalid values. **Why:** Type errors can be only the visible part of a merge that also changed valid-looking counters or test setup, leaving runtime assertions wrong after typecheck passes. **How to apply:** Restore the intended fixtures and run the affected test file before relying on the full workspace check.
