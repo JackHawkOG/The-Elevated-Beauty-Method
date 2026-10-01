@@ -46,6 +46,10 @@ export async function inspectProgressLeftovers(
   beforeDelete?: () => Promise<void>,
   mode: Mode = "full",
 ) {
+  // Direct callers must verify the actual environment used by @workspace/db,
+  // not a caller-supplied test environment. Only DB prerequisites apply here;
+  // runProgressLeftovers checks Clerk/browser prerequisites for full mode.
+  progressBrowserEnvironment(process.env, true);
   const { and, eq, like } = await import("drizzle-orm");
   const {
     db, categoriesTable, coursesTable, lessonsTable, usersTable,
