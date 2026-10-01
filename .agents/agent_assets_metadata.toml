@@ -112,3 +112,31 @@ mtime_ms = 1790509096097
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/1eb27b91-9ba6-4a2d-bb5f-44a8b1850fe2/80e11150-183b-42aa-954a-862a114f033c"
 storage_version_token = "1790509099362770"
 content_type = "text/csv"
+
+[[outputs]]
+id = "-swphiKn1VbDionXRle3e"
+uri = "file://exports/suggested-next-tasks.xlsx"
+type = "table"
+title = "Suggested Next Tasks — Prioritization Workbook"
+description = "80 current suggestions with editable rank, decision, and notes columns; separate tabs for 3 active tasks and instructions. Snapshot: October 1, 2026."
+logical_id = "927cec9e-5eff-491e-a492-30079c9dff7f"
+content_hash = "sha256:44b7681fcb6add82f5f356ca3cdb3de26cb0e8a34c0da0a26d1619edbcc3839f"
+size = 28222
+mtime_ms = 1790875706325
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/927cec9e-5eff-491e-a492-30079c9dff7f/533cca76-a291-4c42-8186-fc142a17b532"
+storage_version_token = "1790875718724748"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "K8G4CYHpzph7lxqImDXk_"
+uri = "file://exports/suggested-next-tasks.csv"
+type = "table"
+title = "Suggested Next Tasks — CSV"
+description = "The same 80 suggestions, ready to import into Excel, Google Sheets, or another planning tool."
+logical_id = "d9f43428-cd10-42ab-9f75-10aff6896d28"
+content_hash = "sha256:5fa6416919a3abe7a40a319cfbf5b403b5a308c3bc7fcb9a939b832cfb42206f"
+size = 52103
+mtime_ms = 1790875706319
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/d9f43428-cd10-42ab-9f75-10aff6896d28/2738449b-7a88-4c3d-9aab-96fbb34aae42"
+storage_version_token = "1790875719274501"
+content_type = "text/csv"
