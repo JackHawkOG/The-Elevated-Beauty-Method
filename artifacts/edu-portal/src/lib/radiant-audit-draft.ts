@@ -133,27 +133,38 @@ export function markAuditDraftOnline(accountId: string, answers: RadiantAuditSub
   }
 }
 
-export function getAuditSubmissionId(accountId: string, answers: RadiantAuditSubmission): { id: string; startedAt: number } | null {
+export function getAuditSubmissionId(accountId: string, answers: RadiantAuditSubmission): { id: string; startedAt: number; persisted: boolean } | null {
   const existing = readAuditDraft(accountId);
   const raw = existing ? JSON.parse(window.localStorage.getItem(key)!) as { submissionId?: unknown; submissionStartedAt?: unknown } : null;
   // Missing timestamps on older attempts are unknown, not new attempts.
   if (raw && (raw.submissionId || raw.submissionStartedAt !== undefined) &&
       !safeAttempt(raw.submissionStartedAt)) return null;
   if (existing && signature(existing) === signature(answers) && typeof raw?.submissionId === "string") {
-    return { id: raw.submissionId, startedAt: raw.submissionStartedAt as number };
+    return { id: raw.submissionId, startedAt: raw.submissionStartedAt as number, persisted: true };
   }
   const startedAt = typeof raw?.submissionStartedAt === "number" ? raw.submissionStartedAt : Date.now();
-  return { id: startAuditSubmission(accountId, answers, startedAt), startedAt };
+  return startAuditSubmission(accountId, answers, startedAt);
 }
 
-export function startAuditSubmission(accountId: string, answers: RadiantAuditSubmission, startedAt = Date.now()): string {
-  const submissionId = crypto.randomUUID();
-  window.localStorage.setItem(key, JSON.stringify({
-    owner: accountId,
-    expiresAt: Date.now() + lifetime,
-    answers,
-    submissionId,
-    submissionStartedAt: startedAt,
-  }));
-  return submissionId;
+export function persistAuditSubmission(accountId: string, answers: RadiantAuditSubmission, id: string, startedAt: number): boolean {
+  try {
+    const record = JSON.stringify({
+      owner: accountId,
+      expiresAt: Date.now() + lifetime,
+      answers,
+      submissionId: id,
+      submissionStartedAt: startedAt,
+    });
+    window.localStorage.setItem(key, record);
+    // Some restricted browsers ignore writes instead of throwing.
+    return window.localStorage.getItem(key) === record;
+  } catch {
+    return false;
+  }
+}
+
+export function startAuditSubmission(accountId: string, answers: RadiantAuditSubmission, startedAt = Date.now()): { id: string; startedAt: number; persisted: boolean } {
+  // Generate once, before storage: a failed write must not replace the attempt ID.
+  const id = crypto.randomUUID();
+  return { id, startedAt, persisted: persistAuditSubmission(accountId, answers, id, startedAt) };
 }

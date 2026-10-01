@@ -11,6 +11,7 @@
 - [Stripe checkout test fixtures](stripe-checkout-test-fixtures.md) — keep session identity intact when changing mocked Stripe status; incomplete fixtures can hide failed reservation release.
 - [Membership capacity test isolation](membership-capacity-test-isolation.md) — test runs share one development inventory; serialize full fixture lifetimes, not just individual reservations.
 - [Audit retry receipts and privacy](audit-retry-receipts.md) — retry receipts retain answer snapshots; erase them when Audit data is explicitly deleted.
+- [Audit storage retry protection](audit-storage-retry-protection.md) — memory-only attempts need explicit review before a fresh ID is sent; unchanged in-page retries retain their original ID.
 - [Development DB URL guard](development-db-url-guard.md) — workspace DB URLs can include SSL options; reject target-changing URL options without rejecting legitimate connection settings.
 - [Audit draft privacy tradeoff](audit-draft-privacy.md) — local recovery favors one short-lived account draft over retaining drafts for multiple users of a shared browser.
 - [Delayed Clerk response tests](delayed-clerk-response-tests.md) — browser interception can lose session auth on replay; capture an authenticated response before holding the route.

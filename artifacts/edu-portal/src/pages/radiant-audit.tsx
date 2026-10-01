@@ -26,7 +26,7 @@ import {
   trackAuditVerificationAction, trackEvent, trackRadiantAuditSaved,
 } from "@/lib/analytics";
 import { canAutoRetryPendingAudit, clearPendingAudit, isAuditReadyToSave, readPendingAudit, restartPendingAudit, stageAudit, type PendingAudit } from "@/lib/radiant-audit-session";
-import { auditDraftWrittenAt, clearAuditDraft, clearAuditDraftOnSignOut, getAuditSubmissionId, markAuditDraftOnline, readAuditDraft, startAuditSubmission, writeAuditDraft } from "@/lib/radiant-audit-draft";
+import { auditDraftWrittenAt, clearAuditDraft, clearAuditDraftOnSignOut, getAuditSubmissionId, markAuditDraftOnline, persistAuditSubmission, readAuditDraft, startAuditSubmission, writeAuditDraft } from "@/lib/radiant-audit-draft";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -52,9 +52,10 @@ export default function RadiantAuditPage() {
   const [error, setError] = useState<string | null>(null);
   const [retryReview, setRetryReview] = useState<{
     owner: string; audit: RadiantAuditSubmission; current?: Awaited<ReturnType<typeof getRadiantAudit>>;
-    loading: boolean; error: boolean;
+    loading: boolean; error: boolean; reason?: "storage" | "changed";
   } | null>(null);
   const [draftWarning, setDraftWarning] = useState<string | null>(null);
+  const [retryProtectionUnavailable, setRetryProtectionUnavailable] = useState(false);
   const [draftConflict, setDraftConflict] = useState<{ draft: RadiantAuditStoredDraft | null; discarded: boolean } | null>(null);
   const [completedConflict, setCompletedConflict] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
@@ -87,6 +88,7 @@ export default function RadiantAuditPage() {
     retryReadVersion.current++;
     retrySaving.current = false;
     attempt.current = null;
+    setRetryProtectionUnavailable(false);
     setDraftConflict(null);
     setCompletedConflict(false);
     draftBlocked.current = false;
@@ -420,7 +422,7 @@ export default function RadiantAuditPage() {
         if (accountId) queueDraft(accountId, audit);
       }
       setRetryReview(null);
-      setError("We couldn't save your Audit. Your answers are still here; please try again.");
+      setError("We couldn't save your Audit with confirmation. It may already be saved. Keep this page open and retry unchanged answers safely here.");
     } finally {
       retrySaving.current = false;
     }
@@ -437,14 +439,10 @@ export default function RadiantAuditPage() {
     if (!retryReview || retryReview.owner !== accountId || retryReview.loading ||
         retryReview.error || retryReview.current === undefined || retrySaving.current || save.isPending) return;
     retrySaving.current = true;
-    let id: string;
-    try {
-      id = startAuditSubmission(retryReview.owner, retryReview.audit);
-    } catch {
-      id = crypto.randomUUID();
-    }
-    attempt.current = { accountId: retryReview.owner, answers: JSON.stringify(auditAnswers(retryReview.audit)), id, startedAt: Date.now() };
-    void saveSignedInAudit(retryReview.audit, id);
+    const started = startAuditSubmission(retryReview.owner, retryReview.audit);
+    if (!started.persisted) setRetryProtectionUnavailable(true);
+    attempt.current = { accountId: retryReview.owner, answers: JSON.stringify(auditAnswers(retryReview.audit)), ...started };
+    void saveSignedInAudit(retryReview.audit, started.id);
   }
 
   async function handleSubmit(audit: RadiantAuditSubmission) {
@@ -474,36 +472,43 @@ export default function RadiantAuditPage() {
         const answers = auditAnswers(audit);
         const signature = JSON.stringify(answers);
         let id: string | null;
-        try {
-          // A draft may expire while the form stays open. The in-memory attempt still
-          // remembers its original age even if storage has since removed the draft.
-          const previous = attempt.current;
-          if (previous?.accountId === user!.id &&
-              (previous.startedAt > Date.now() ||
-               Date.now() - previous.startedAt >= 7 * 24 * 60 * 60 * 1000)) {
-            id = null;
-          } else if (previous?.accountId === user!.id && previous.answers === signature) {
-            // A one-day draft expiry must not change the ID of an open retry.
+        let reviewReason: "storage" | "changed" | undefined;
+        const previous = attempt.current;
+        if (previous?.accountId === user!.id) {
+          // An unconfirmed save may already exist. Edits and aged attempts require
+          // explicit review, regardless of whether browser storage later recovers.
+          if (previous.answers === signature && previous.startedAt > 0 &&
+              previous.startedAt <= Date.now() &&
+              Date.now() - previous.startedAt < 7 * 24 * 60 * 60 * 1000) {
             id = previous.id;
+            if (!persistAuditSubmission(user!.id, audit, id, previous.startedAt))
+              setRetryProtectionUnavailable(true);
           } else {
-            const stored = getAuditSubmissionId(user!.id, audit);
-            id = stored?.id ?? null;
-            if (stored) attempt.current = { accountId: user!.id, answers: signature, ...stored };
+            id = null;
+            if (previous.answers !== signature) reviewReason = "changed";
           }
-        } catch {
-          // Storage can fail. Keep the in-memory attempt's original age too.
-          const previous = attempt.current;
-          if (previous?.accountId === user!.id) {
-            id = previous.answers === signature && previous.startedAt > 0 &&
-              Date.now() - previous.startedAt < 7 * 24 * 60 * 60 * 1000 &&
-              previous.startedAt <= Date.now() ? previous.id : null;
-          } else {
-            id = crypto.randomUUID();
-            attempt.current = { accountId: user!.id, answers: signature, id, startedAt: Date.now() };
+        } else {
+          let stored: ReturnType<typeof getAuditSubmissionId>;
+          try {
+            stored = getAuditSubmissionId(user!.id, audit);
+          } catch {
+            stored = startAuditSubmission(user!.id, audit);
+          }
+          id = stored?.id ?? null;
+          if (stored) {
+            if (!stored.persisted) {
+              // After a reload there is no way to tell whether a memory-only save
+              // already committed. Never submit a fresh ID without reviewing first.
+              setRetryProtectionUnavailable(true);
+              reviewReason = "storage";
+              id = null;
+            } else {
+              attempt.current = { accountId: user!.id, answers: signature, ...stored };
+            }
           }
         }
         if (!id) {
-          setRetryReview({ owner: user!.id, audit, loading: true, error: false });
+          setRetryReview({ owner: user!.id, audit, loading: true, error: false, reason: reviewReason });
           void loadCurrentForRetry(user!.id);
           return;
         }
@@ -542,6 +547,12 @@ export default function RadiantAuditPage() {
 
   return (
     <>
+    {accountId && retryProtectionUnavailable && (
+      <section role="alert" className="mx-auto mb-6 max-w-3xl rounded-xl border border-primary/50 bg-card p-5">
+        <h2 className="font-serif text-xl">Keep this page open to retry safely</h2>
+        <p className="mt-2 text-sm">This browser couldn't keep your Audit retry protection across reloads. If a save isn't confirmed, retry unchanged answers on this page. Reloading, closing this page, or signing out loses that protection and saving again could create a duplicate retake. If you leave, check your current Audit before saving again.</p>
+      </section>
+    )}
     {completedConflict && (
       <section role="alert" className="mx-auto mb-6 max-w-3xl rounded-xl border border-primary/50 bg-card p-5">
         <h2 className="font-serif text-xl">Your completed Audit changed on another device</h2>
@@ -575,7 +586,11 @@ export default function RadiantAuditPage() {
         <AlertDialogHeader>
           <AlertDialogTitle>Review your Audit before saving again</AlertDialogTitle>
           <AlertDialogDescription>
-            This attempt is older than the safe retry window, or its age is unknown. It has not been sent again.
+            {retryReview?.reason === "storage"
+              ? "This browser can't keep retry protection across reloads. A previous save may already have succeeded. Review your current Audit before choosing to save a new attempt."
+              : retryReview?.reason === "changed"
+                ? "An earlier save wasn't confirmed and these answers changed. It may already be saved. Review your current Audit before choosing to save a new attempt."
+                : "This attempt is older than the safe retry window, or its age is unknown. It has not been sent again."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {retryReview?.loading ? <p role="status">Loading your current Audit…</p> :

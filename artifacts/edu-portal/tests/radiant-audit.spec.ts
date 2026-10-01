@@ -1029,6 +1029,114 @@ test("a committed signed-in save with a lost response retries after reload witho
   expect(history).toEqual([]);
 });
 
+for (const storageFailure of ["read throws", "write throws", "write ignored"] as const) {
+  test(`a lost signed-in response keeps its retry ID when draft storage ${storageFailure}`, async ({ page }) => {
+    const answers = fixture("restricted-storage");
+    const submissionIds: string[] = [];
+    const history: HistoryEntry[] = [];
+    let current: Audit | null = null;
+    await page.addInitScript(({ key, failure }) => {
+      const originalGet = Storage.prototype.getItem;
+      const originalSet = Storage.prototype.setItem;
+      const state = { failing: true };
+      (window as unknown as { __auditStorage: typeof state }).__auditStorage = state;
+      Storage.prototype.getItem = function (name) {
+        if (state.failing && name === key && failure === "read throws") throw new Error("Storage disabled");
+        return originalGet.call(this, name);
+      };
+      Storage.prototype.setItem = function (name, value) {
+        if (state.failing && name === key) {
+          if (failure === "write throws") throw new Error("Quota exceeded");
+          if (failure === "write ignored") return;
+        }
+        originalSet.call(this, name, value);
+      };
+    }, { key: signedInDraftKey, failure: storageFailure });
+    await page.route("**/api/users/me/radiant-audit**", route => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        return route.fulfill({ json: request.url().endsWith("/history") ? history : current });
+      }
+      const { submissionId, ...input } = request.postDataJSON() as Answers & { submissionId: string };
+      submissionIds.push(submissionId);
+      if (!current || submissionId !== submissionIds[0]) {
+        if (current) history.push({ id: history.length + 1, ...current });
+        current = { ...input, routineScore: 1, valuesScore: 2, completedAt: new Date().toISOString() };
+      }
+      if (submissionIds.length === 1 || (storageFailure === "write ignored" && submissionIds.length === 2))
+        return route.abort("failed");
+      return route.fulfill({ json: { audit: current, completionKind: "first_time" } });
+    });
+    // Online drafts do not store retry IDs and cannot substitute for browser protection.
+    await page.route("**/api/users/me/radiant-audit/draft", route => {
+      if (route.request().method() === "GET") return route.fulfill({ json: null });
+      return route.fulfill({ json: { ...route.request().postDataJSON(), updatedAt: new Date().toISOString() } });
+    });
+    await signInAs(page, "member-a");
+    const fillAnswers = async () => {
+      await page.getByLabel("Skincare consistency").check();
+      await page.getByLabel("Quality over price").check();
+      await page.getByLabel("Professional results").check();
+      await page.locator("#beauty-trend").fill(answers.beautyTrend);
+      await page.locator("#mastery-goal").fill(answers.masteryGoal);
+      await page.locator("#research-time").fill(answers.researchTime);
+      await page.getByLabel("Email address").fill("member-a@example.invalid");
+    };
+    await fillAnswers();
+    await page.getByRole("button", { name: "Save my Audit" }).click();
+    // The modal intentionally hides the underlying page from assistive technology.
+    const warning = page.getByRole("alert", { includeHidden: true }).filter({ hasText: "Keep this page open to retry safely" });
+    await expect(warning).toContainText("couldn't keep your Audit retry protection across reloads");
+    await expect(warning).toContainText("could create a duplicate retake");
+    await expect(page.getByRole("alertdialog")).toContainText("There is no current Audit");
+    expect(submissionIds).toEqual([]);
+    await page.getByRole("button", { name: "Save as a new Audit" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "We couldn't save your Audit" })).toContainText("It may already be saved");
+    expect(submissionIds).toHaveLength(1);
+    expect(submissionIds[0]).toBeTruthy();
+    expect(current).toMatchObject(answers);
+    await expect(warning).toBeVisible();
+
+    if (storageFailure === "write throws") {
+      // Recovering storage and editing must not silently rotate an unconfirmed ID.
+      await page.evaluate(() => {
+        (window as unknown as { __auditStorage: { failing: boolean } }).__auditStorage.failing = false;
+      });
+      await page.locator("#mastery-goal").fill("Edited after an uncertain save");
+      await expect(warning).toBeVisible();
+      await page.getByRole("button", { name: "Save my Audit" }).click();
+      await expect(page.getByRole("alertdialog")).toContainText("these answers changed");
+      await expect(page.getByRole("button", { name: "Save as a new retake" })).toBeEnabled();
+      expect(submissionIds).toHaveLength(1);
+      await page.getByRole("button", { name: "Keep editing" }).click();
+      await page.locator("#mastery-goal").fill(answers.masteryGoal);
+    }
+    if (storageFailure === "write ignored") {
+      await page.getByRole("button", { name: "Save my Audit" }).click();
+      await expect(page.getByRole("alert").filter({ hasText: "We couldn't save your Audit" })).toBeVisible();
+      expect(submissionIds).toEqual([submissionIds[0], submissionIds[0]]);
+      // Reload has lost the memory-only ID. Even re-entering identical answers
+      // must review the committed Audit, not automatically create a retake.
+      await page.reload();
+      await fillAnswers();
+      await page.getByRole("button", { name: "Save my Audit" }).click();
+      await expect(page.getByRole("alertdialog")).toContainText("A previous save may already have succeeded");
+      await expect(page.getByRole("button", { name: "Save as a new retake" })).toBeEnabled();
+      expect(submissionIds).toHaveLength(2);
+      expect(history).toEqual([]);
+      await page.getByRole("button", { name: "Keep editing" }).click();
+      expect(submissionIds).toHaveLength(2);
+      return;
+    }
+
+    await page.getByRole("button", { name: "Save my Audit" }).click();
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    expect(submissionIds).toEqual([submissionIds[0], submissionIds[0]]);
+    expect(history).toEqual([]);
+    await expect(page.getByText(answers.masteryGoal).first()).toBeVisible();
+  });
+}
+
 for (const scenario of ["expired", "unknown-age"] as const) {
   test(`a signed-in ${scenario} retry waits for current Audit review and explicit new save`, async ({ page }) => {
     const answers = fixture(scenario);
