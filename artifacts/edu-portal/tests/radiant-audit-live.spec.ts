@@ -560,7 +560,10 @@ test("a delayed dashboard membership response cannot show the former member's de
   }
 });
 
-test("a delayed enrollment response cannot show the former member's learning progress after switching accounts", async ({ page }) => {
+for (const secondMemberEnrolled of [false, true]) {
+test(secondMemberEnrolled
+  ? "a delayed enrollment response preserves the new member's own learning progress"
+  : "a delayed enrollment response cannot show the former member's learning progress after switching accounts", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
   await clerkSetup();
@@ -569,9 +572,10 @@ test("a delayed enrollment response cannot show the former member's learning pro
   const aEmail = courseSwitchEmail("a", tag);
   const bEmail = courseSwitchEmail("b", tag);
   const title = courseSwitchTitle(tag);
+  const bTitle = `Course-switch member B check ${tag}`;
   const created: string[] = [];
   let categoryId: number | undefined;
-  let courseId: number | undefined;
+  const courseIds: number[] = [];
   let lessonIds: number[] = [];
   let release!: () => void;
   let captured!: () => void;
@@ -601,7 +605,7 @@ test("a delayed enrollment response cannot show the former member's learning pro
       title, description: title, categoryId, instructorName: "Test learner",
       accessTier: "Free", publishedAt: new Date(),
     }).returning();
-    courseId = course.id;
+    courseIds.push(course.id);
     const lessons = await db.insert(lessonsTable).values([0, 1].map(sortOrder => ({
       courseId: course.id, title: `${title} lesson ${sortOrder + 1}`, sortOrder, publishedAt: new Date(),
     }))).returning();
@@ -610,6 +614,25 @@ test("a delayed enrollment response cannot show the former member's learning pro
       userId: created[0], courseId: course.id, completedLessons: 1, lastLessonId: lessons[0].id,
     });
     await db.insert(lessonCompletionsTable).values({ userId: created[0], lessonId: lessons[0].id });
+    let bCourseId: number | undefined;
+    if (secondMemberEnrolled) {
+      const [bCourse] = await db.insert(coursesTable).values({
+        title: bTitle, description: bTitle, categoryId, instructorName: "Test learner",
+        accessTier: "Free", publishedAt: new Date(),
+      }).returning();
+      bCourseId = bCourse.id;
+      courseIds.push(bCourse.id);
+      const bLessons = await db.insert(lessonsTable).values([0, 1, 2].map(sortOrder => ({
+        courseId: bCourse.id, title: `${bTitle} lesson ${sortOrder + 1}`, sortOrder, publishedAt: new Date(),
+      }))).returning();
+      lessonIds.push(...bLessons.map(lesson => lesson.id));
+      await db.insert(enrollmentsTable).values({
+        userId: created[1], courseId: bCourse.id, completedLessons: 2, lastLessonId: bLessons[1].id,
+      });
+      await db.insert(lessonCompletionsTable).values(bLessons.slice(0, 2).map(lesson => ({
+        userId: created[1], lessonId: lesson.id,
+      })));
+    }
 
     // Capture an authenticated response first; route.fetch can lose Clerk
     // session authentication when its result is replayed after sign-out.
@@ -662,22 +685,66 @@ test("a delayed enrollment response cannot show the former member's learning pro
     await page.evaluate(watchLearning, title);
     await clerk.signIn({ page, emailAddress: bEmail });
     await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No courses yet" })).toBeVisible();
+    const bLearning = page.locator("section").filter({ has: page.getByRole("heading", { name: "My Learning" }) });
+    const bCard = bLearning.locator("a", { has: page.getByRole("heading", { name: bTitle }) });
+    if (secondMemberEnrolled) {
+      await expect(bCard).toContainText("2 / 3 Lessons");
+      await expect(page.getByRole("heading", { name: "No courses yet" })).toHaveCount(0);
+    } else {
+      await expect(page.getByRole("heading", { name: "No courses yet" })).toBeVisible();
+    }
     const bResponse = await page.evaluate(async () => {
       const response = await fetch("/api/enrollments");
       return { status: response.status, body: await response.json() };
     });
-    expect(bResponse).toEqual({ status: 200, body: [] });
+    expect(bResponse.status).toBe(200);
+    if (secondMemberEnrolled) {
+      expect(bResponse.body).toContainEqual(expect.objectContaining({
+        courseId: bCourseId, courseTitle: bTitle, completedLessons: 2, totalLessons: 3,
+      }));
+      expect(bResponse.body).not.toContainEqual(expect.objectContaining({ courseId: course.id }));
+      // After B's correct card appears, record any transient replacement during
+      // the late response, not just the final state seen by an assertion.
+      await page.evaluate(({ title, progress }) => {
+        const check = () => {
+          const learning = [...document.querySelectorAll("section")].find(section =>
+            section.querySelector("h2")?.textContent === "My Learning");
+          if (learning && (!learning.textContent?.includes(title) || !learning.textContent.includes(progress))) {
+            sessionStorage.setItem("learning-switch-lost-own-progress", "true");
+          }
+        };
+        const observer = new MutationObserver(check);
+        observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+        check();
+      }, { title: bTitle, progress: "2 / 3 Lessons" });
+    } else {
+      expect(bResponse.body).toEqual([]);
+    }
     release();
     await delayed;
+    // Allow the fulfilled response to settle and paint before checking the observer.
+    await page.waitForTimeout(250);
     await expect(page.locator("body")).not.toContainText(title);
     expect(await page.evaluate(() => sessionStorage.getItem("learning-switch-leak"))).toBeNull();
+    if (secondMemberEnrolled) {
+      await expect(bCard).toContainText("2 / 3 Lessons");
+      expect(await page.evaluate(() => sessionStorage.getItem("learning-switch-lost-own-progress"))).toBeNull();
+    }
 
     await page.getByRole("link", { name: "View All" }).click();
     await expect(page).toHaveURL(/\/profile$/);
     await expect(page.locator("body")).not.toContainText(title);
+    if (secondMemberEnrolled) {
+      const profileTitle = page.getByRole("heading", { name: bTitle });
+      await expect(profileTitle).toBeVisible();
+      await expect(profileTitle.locator("xpath=ancestor::div[contains(@class,'flex-1')][1]")).toContainText("2 / 3 Lessons");
+    }
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: "No courses yet" })).toBeVisible();
+    if (secondMemberEnrolled) {
+      await expect(bCard).toContainText("2 / 3 Lessons");
+    } else {
+      await expect(page.getByRole("heading", { name: "No courses yet" })).toBeVisible();
+    }
     await expect(page.locator("body")).not.toContainText(title);
     expect(await page.evaluate(() => sessionStorage.getItem("learning-switch-leak"))).toBeNull();
   } finally {
@@ -686,19 +753,20 @@ test("a delayed enrollment response cannot show the former member's learning pro
     requireAuditDevelopment();
     try {
       if (lessonIds.length && created.length) await db.delete(lessonCompletionsTable).where(
-        and(eq(lessonCompletionsTable.userId, created[0]), inArray(lessonCompletionsTable.lessonId, lessonIds)),
+        and(inArray(lessonCompletionsTable.userId, created), inArray(lessonCompletionsTable.lessonId, lessonIds)),
       );
-      if (courseId !== undefined && created.length) await db.delete(enrollmentsTable).where(
-        and(eq(enrollmentsTable.userId, created[0]), eq(enrollmentsTable.courseId, courseId)),
+      if (courseIds.length && created.length) await db.delete(enrollmentsTable).where(
+        and(inArray(enrollmentsTable.userId, created), inArray(enrollmentsTable.courseId, courseIds)),
       );
       if (lessonIds.length) await db.delete(lessonsTable).where(inArray(lessonsTable.id, lessonIds));
-      if (courseId !== undefined) await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
+      if (courseIds.length) await db.delete(coursesTable).where(inArray(coursesTable.id, courseIds));
       if (categoryId !== undefined) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
     } finally {
       await cleanUpAccounts(client, created);
     }
   }
 });
+}
 
 test("staged answers survive real sign-out and sign-in without saving to the wrong verified account", async ({ page }) => {
   test.setTimeout(120_000);

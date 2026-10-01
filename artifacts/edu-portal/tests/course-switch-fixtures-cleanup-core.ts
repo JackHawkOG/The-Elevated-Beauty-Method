@@ -56,6 +56,7 @@ export async function cleanupCourseSwitchFixtures({
     }
     await db.transaction(async tx => {
       const title = courseSwitchTitle(tag);
+      const bTitle = `Course-switch member B check ${tag}`;
       const categories = await tx.select().from(categoriesTable).where(eq(categoriesTable.slug, `course-switch-${tag}`));
       if (categories.some(row => row.name !== title || row.icon !== "BookOpen" ||
           row.description !== null || !isOldCourseSwitchDate(row.createdAt, now))) {
@@ -63,40 +64,54 @@ export async function cleanupCourseSwitchFixtures({
       }
       const category = categories[0];
       const courses = category ? await tx.select().from(coursesTable).where(eq(coursesTable.categoryId, category.id)) : [];
-      if (courses.length > 1 || courses.some(row =>
-        row.title !== title || row.description !== title || row.instructorName !== "Test learner" ||
+      if (courses.length > 2 || new Set(courses.map(row => row.title)).size !== courses.length || courses.some(row =>
+        ![title, bTitle].includes(row.title) || row.description !== row.title || row.instructorName !== "Test learner" ||
         row.difficulty !== "Beginner" || row.thumbnailUrl !== null || row.isFeatured !== false ||
         row.accessTier !== "Free" || row.transformationStory !== null ||
         !row.publishedAt || !isOldCourseSwitchDate(row.createdAt, now) ||
         !isOldCourseSwitchDate(row.publishedAt, now))) {
         throw new Error(`Ambiguous course-switch course for ${tag}`);
       }
-      const course = courses[0];
-      const courseActivity = await tx.select().from(activityTable).where(eq(activityTable.entityTitle, title));
+      const courseIds = courses.map(row => row.id);
+      const courseActivity = await tx.select().from(activityTable).where(inArray(activityTable.entityTitle, [title, bTitle]));
       if (courseActivity.length) throw new Error(`Ambiguous course-switch activity for ${tag}`);
-      const lessons = course ? await tx.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id)) : [];
-      if (lessons.length > 2 || new Set(lessons.map(row => row.sortOrder)).size !== lessons.length ||
-          lessons.some(row => ![0, 1].includes(row.sortOrder) ||
-            row.title !== `${title} lesson ${row.sortOrder + 1}` || row.content !== null ||
-            row.videoUrl !== null || row.durationMinutes !== 10 || !row.publishedAt ||
-            !isOldCourseSwitchDate(row.createdAt, now) || !isOldCourseSwitchDate(row.publishedAt, now))) {
+      const lessons = courseIds.length ? await tx.select().from(lessonsTable).where(inArray(lessonsTable.courseId, courseIds)) : [];
+      if (new Set(lessons.map(row => `${row.courseId}:${row.sortOrder}`)).size !== lessons.length ||
+          lessons.some(row => {
+            const course = courses.find(course => course.id === row.courseId)!;
+            const orders = course.title === title ? [0, 1] : [0, 1, 2];
+            return !orders.includes(row.sortOrder) ||
+              row.title !== `${course.title} lesson ${row.sortOrder + 1}` || row.content !== null ||
+              row.videoUrl !== null || row.durationMinutes !== 10 || !row.publishedAt ||
+              !isOldCourseSwitchDate(row.createdAt, now) || !isOldCourseSwitchDate(row.publishedAt, now);
+          })) {
         throw new Error(`Ambiguous course-switch lesson for ${tag}`);
       }
       const ids = candidates.map(candidate => candidate.id);
-      const a = candidates.find(candidate => candidate.role === "a");
-      const enrollments = course ? await tx.select().from(enrollmentsTable).where(eq(enrollmentsTable.courseId, course.id)) : [];
+      const enrollments = courseIds.length ? await tx.select().from(enrollmentsTable).where(inArray(enrollmentsTable.courseId, courseIds)) : [];
       const otherEnrollments = await tx.select().from(enrollmentsTable).where(inArray(enrollmentsTable.userId, ids));
       const completions = lessons.length
         ? await tx.select().from(lessonCompletionsTable).where(inArray(lessonCompletionsTable.lessonId, lessons.map(row => row.id)))
         : [];
       const otherCompletions = await tx.select().from(lessonCompletionsTable).where(inArray(lessonCompletionsTable.userId, ids));
-      if (enrollments.length > 1 || enrollments.some(row =>
-        !a || row.userId !== a.id || row.completedLessons !== 1 || row.lastLessonId !== lessons.find(lesson => lesson.sortOrder === 0)?.id ||
-        !isOldCourseSwitchDate(row.enrolledAt, now)) ||
-        otherEnrollments.some(row => row.courseId !== course?.id) ||
-        completions.length > 1 || completions.some(row =>
-          !a || row.userId !== a.id || row.lessonId !== lessons.find(lesson => lesson.sortOrder === 0)?.id ||
-          !isOldCourseSwitchDate(row.completedAt, now)) ||
+      if (new Set(enrollments.map(row => row.courseId)).size !== enrollments.length || enrollments.some(row => {
+        const course = courses.find(course => course.id === row.courseId)!;
+        const role = course.title === title ? "a" : "b";
+        const owner = candidates.find(candidate => candidate.role === role);
+        const completedLessons = role === "a" ? 1 : 2;
+        return !owner || row.userId !== owner.id || row.completedLessons !== completedLessons ||
+          row.lastLessonId !== lessons.find(lesson => lesson.courseId === course.id && lesson.sortOrder === completedLessons - 1)?.id ||
+          !isOldCourseSwitchDate(row.enrolledAt, now);
+      }) ||
+        otherEnrollments.some(row => !courseIds.includes(row.courseId)) ||
+        completions.some(row => {
+          const lesson = lessons.find(lesson => lesson.id === row.lessonId)!;
+          const course = courses.find(course => course.id === lesson.courseId)!;
+          const role = course.title === title ? "a" : "b";
+          const owner = candidates.find(candidate => candidate.role === role);
+          return !owner || row.userId !== owner.id || lesson.sortOrder >= (role === "a" ? 1 : 2) ||
+            !isOldCourseSwitchDate(row.completedAt, now);
+        }) ||
         otherCompletions.some(row => !lessons.some(lesson => lesson.id === row.lessonId))) {
         throw new Error(`Ambiguous course-switch learning progress for ${tag}`);
       }
@@ -131,7 +146,7 @@ export async function cleanupCourseSwitchFixtures({
       if (completions.length) await tx.delete(lessonCompletionsTable).where(inArray(lessonCompletionsTable.lessonId, completions.map(row => row.lessonId)));
       if (enrollments.length) await tx.delete(enrollmentsTable).where(inArray(enrollmentsTable.id, enrollments.map(row => row.id)));
       if (lessons.length) await tx.delete(lessonsTable).where(inArray(lessonsTable.id, lessons.map(row => row.id)));
-      if (course) await tx.delete(coursesTable).where(eq(coursesTable.id, course.id));
+      if (courseIds.length) await tx.delete(coursesTable).where(inArray(coursesTable.id, courseIds));
       if (category) await tx.delete(categoriesTable).where(eq(categoriesTable.id, category.id));
       if (members.length) await tx.delete(usersTable).where(inArray(usersTable.id, members.map(row => row.id)));
     });

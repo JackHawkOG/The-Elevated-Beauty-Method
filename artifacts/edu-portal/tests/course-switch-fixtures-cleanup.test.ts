@@ -50,13 +50,15 @@ describe("course-switch fixture ownership", () => {
   });
 });
 
-it("reports only old owned rows, rejects changed ownership and deletes in dependency order", async () => {
+for (const secondMemberEnrolled of [false, true]) {
+it(`reports only old owned rows, rejects changed ownership and deletes in dependency order (second member enrolled: ${secondMemberEnrolled})`, async () => {
   requireAuditDevelopment();
   const { db, pool, categoriesTable, coursesTable, lessonsTable, enrollmentsTable, lessonCompletionsTable, usersTable } =
     await import("../../../lib/db/src/index");
   const { eq } = await import("drizzle-orm");
   const tag = newCourseSwitchTag();
   const title = courseSwitchTitle(tag);
+  const bTitle = `Course-switch member B check ${tag}`;
   const ids = [`course-switch-a-${randomUUID()}`, `course-switch-b-${randomUUID()}`];
   const identities = ids.map((id, index) => ({
     id, emailAddresses: [{ emailAddress: courseSwitchEmail(index ? "b" : "a", tag) }],
@@ -77,6 +79,7 @@ it("reports only old owned rows, rejects changed ownership and deletes in depend
   };
   let categoryId: number | undefined;
   let courseId: number | undefined;
+  const courseIds: number[] = [];
   const lessonIds: number[] = [];
   try {
     await db.insert(usersTable).values(identities.map(identity => ({
@@ -92,6 +95,7 @@ it("reports only old owned rows, rejects changed ownership and deletes in depend
       accessTier: "Free", publishedAt: old, createdAt: old,
     }).returning();
     courseId = course.id;
+    courseIds.push(course.id);
     const lessons = await db.insert(lessonsTable).values([0, 1].map(sortOrder => ({
       courseId: course.id, title: `${title} lesson ${sortOrder + 1}`,
       sortOrder, publishedAt: old, createdAt: old,
@@ -102,6 +106,32 @@ it("reports only old owned rows, rejects changed ownership and deletes in depend
       lastLessonId: lessons[0].id, enrolledAt: old,
     });
     await db.insert(lessonCompletionsTable).values({ userId: ids[0], lessonId: lessons[0].id, completedAt: old });
+    if (secondMemberEnrolled) {
+      const [bCourse] = await db.insert(coursesTable).values({
+        categoryId, title: bTitle, description: bTitle, instructorName: "Test learner",
+        accessTier: "Free", publishedAt: old, createdAt: old,
+      }).returning();
+      courseIds.push(bCourse.id);
+      const bLessons = await db.insert(lessonsTable).values([0, 1, 2].map(sortOrder => ({
+        courseId: bCourse.id, title: `${bTitle} lesson ${sortOrder + 1}`,
+        sortOrder, publishedAt: old, createdAt: old,
+      }))).returning();
+      lessonIds.push(...bLessons.map(row => row.id));
+      const [bEnrollment] = await db.insert(enrollmentsTable).values({
+        userId: ids[1], courseId: bCourse.id, completedLessons: 2,
+        lastLessonId: bLessons[1].id, enrolledAt: old,
+      }).returning();
+      await db.insert(lessonCompletionsTable).values(bLessons.slice(0, 2).map(lesson => ({
+        userId: ids[1], lessonId: lesson.id, completedAt: old,
+      })));
+      // A recognizable title alone cannot authorize deleting unexpected progress.
+      listed = [...identities];
+      await db.update(enrollmentsTable).set({ completedLessons: 3 }).where(eq(enrollmentsTable.id, bEnrollment.id));
+      await expect(cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now })).rejects.toThrow("Ambiguous course-switch learning progress");
+      expect(client.deleteUser).not.toHaveBeenCalled();
+      await db.update(enrollmentsTable).set({ completedLessons: 2 }).where(eq(enrollmentsTable.id, bEnrollment.id));
+      listed = [...identities, young];
+    }
 
     // A same-tag young identity makes the group ambiguous; no deletion is permitted.
     await expect(cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now })).rejects.toThrow("Ambiguous course-switch identities");
@@ -127,13 +157,17 @@ it("reports only old owned rows, rejects changed ownership and deletes in depend
     expect(client.deleteUser).toHaveBeenCalledTimes(2);
     expect(await db.select().from(categoriesTable).where(eq(categoriesTable.id, categoryId))).toEqual([]);
     expect(await db.select().from(coursesTable).where(eq(coursesTable.id, courseId))).toEqual([]);
+    for (const id of courseIds) {
+      expect(await db.select().from(coursesTable).where(eq(coursesTable.id, id))).toEqual([]);
+    }
     expect(await db.select().from(usersTable).where(eq(usersTable.clerkId, ids[0]))).toEqual([]);
   } finally {
     await pool.query("DELETE FROM lesson_completions WHERE lesson_id = ANY($1::int[])", [lessonIds]);
-    await pool.query("DELETE FROM enrollments WHERE course_id = $1", [courseId ?? -1]);
-    await pool.query("DELETE FROM lessons WHERE course_id = $1", [courseId ?? -1]);
-    await pool.query("DELETE FROM courses WHERE id = $1", [courseId ?? -1]);
+    await pool.query("DELETE FROM enrollments WHERE course_id = ANY($1::int[])", [courseIds]);
+    await pool.query("DELETE FROM lessons WHERE course_id = ANY($1::int[])", [courseIds]);
+    await pool.query("DELETE FROM courses WHERE id = ANY($1::int[])", [courseIds]);
     await pool.query("DELETE FROM categories WHERE id = $1", [categoryId ?? -1]);
     await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [ids]);
   }
 }, 30_000);
+}

@@ -14,6 +14,7 @@
 - [Development DB URL guard](development-db-url-guard.md) — workspace DB URLs can include SSL options; reject target-changing URL options without rejecting legitimate connection settings.
 - [Audit draft privacy tradeoff](audit-draft-privacy.md) — local recovery favors one short-lived account draft over retaining drafts for multiple users of a shared browser.
 - [Delayed Clerk response tests](delayed-clerk-response-tests.md) — browser interception can lose session auth on replay; capture an authenticated response before holding the route.
+- [Privacy test markers](privacy-test-markers.md) — account markers must not overlap when leak observers use substring matching; suffix-only differences produce false leaks.
 - [Workspace CLI dependency boundary](workspace-cli-dependency-boundary.md) — a root script may not see package-local executables or imports; invoke tools from their owning workspace.
 - [Workspace command shims](workspace-command-shims.md) — generated package binaries can lack executable bits; distinguish launcher permissions from failing tests.
 - [Pooled PostgreSQL temp fixtures](pooled-postgres-temp-fixtures.md) — session-local tables and functions survive pool release; clean both before the next test borrows the client.
