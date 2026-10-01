@@ -39,14 +39,18 @@ function calleeName(expression) {
 }
 
 function bodyOf(callback, declarations) {
-  if (ts.isIdentifier(callback)) return bodyOf(declarations.get(callback.text) ?? callback, declarations);
+  if (!callback) return undefined;
+  if (ts.isIdentifier(callback)) {
+    const declaration = declarations.get(callback.text);
+    return declaration && declaration !== callback ? bodyOf(declaration, declarations) : undefined;
+  }
   if (ts.isFunctionDeclaration(callback) || ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) {
-    return callback.body && ts.isBlock(callback.body) ? callback.body : undefined;
+    return callback.body;
   }
 }
 
 function firstGuard(body) {
-  if (!body?.statements.length) return false;
+  if (!body?.statements?.length) return false;
   const first = body.statements[0];
   const expression = ts.isExpressionStatement(first) ? first.expression : undefined;
   const call = expression && ts.isAwaitExpression(expression) ? expression.expression : expression;
@@ -197,6 +201,11 @@ function isFixtureCall(node) {
 
 function isTestRegistration(call) {
   if (ts.isIdentifier(call.expression) && call.expression.text === "test") return true;
+  if (ts.isPropertyAccessExpression(call.expression) &&
+      ts.isIdentifier(call.expression.expression) && call.expression.expression.text === "test" &&
+      ["only", "skip", "fixme"].includes(call.expression.name.text) && call.arguments[1] &&
+      (ts.isArrowFunction(call.arguments[1]) || ts.isFunctionExpression(call.arguments[1]) ||
+        ts.isIdentifier(call.arguments[1]))) return true;
   return ts.isCallExpression(call.expression) &&
     ts.isPropertyAccessExpression(call.expression.expression) &&
     ["each", "skipIf", "runIf"].includes(call.expression.expression.name.text) &&
@@ -204,7 +213,7 @@ function isTestRegistration(call) {
 }
 
 function firstLiveGuard(body, guards) {
-  if (!body) return false;
+  if (!body?.statements) return false;
   const statements = body.statements.filter(statement =>
     !(ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression) &&
       ts.isPropertyAccessExpression(statement.expression.expression) &&
@@ -216,6 +225,112 @@ function firstLiveGuard(body, guards) {
   const call = expression && ts.isAwaitExpression(expression) ? expression.expression : expression;
   return !!call && ts.isCallExpression(call) && ts.isIdentifier(call.expression) &&
     guards.has(call.expression.text) && call.arguments.length === 0;
+}
+
+const browserActions = new Set([
+  "click", "dblclick", "fill", "check", "uncheck", "setChecked", "selectOption",
+  "press", "pressSequentially", "type", "tap", "dragTo", "dispatchEvent",
+  "evaluate", "evaluateHandle",
+]);
+const writeMethods = new Set(["post", "put", "patch", "delete"]);
+
+function isHttpWrite(node) {
+  if (!ts.isCallExpression(node)) return false;
+  if (writeMethods.has(calleeName(node.expression)) && ts.isPropertyAccessExpression(node.expression) &&
+      /^(?:request|api|apiContext|apiRequest|requestContext)$/.test(calleeName(node.expression.expression))) return true;
+  if (calleeName(node.expression) !== "fetch") return false;
+  // A dynamic fetch method cannot be proven read-only.
+  const options = node.arguments[1];
+  if (!options) return false;
+  if (!ts.isObjectLiteralExpression(options)) return true;
+  return options.properties.some(property =>
+    ts.isSpreadAssignment(property) ||
+    property.name && ts.isComputedPropertyName(property.name) ||
+    property.name && (calleeName(property.name) === "method" ||
+      ts.isStringLiteral(property.name) && property.name.text === "method") &&
+      !ts.isPropertyAssignment(property) ||
+    ts.isPropertyAssignment(property) &&
+      (calleeName(property.name) === "method" || ts.isStringLiteral(property.name) && property.name.text === "method") &&
+      (!ts.isStringLiteral(property.initializer) ||
+        !["GET", "HEAD", "OPTIONS"].includes(property.initializer.text.toUpperCase())));
+}
+
+function isBrowserAction(node) {
+  return ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+    browserActions.has(node.expression.name.text);
+}
+
+// Only a complete, non-forwarding API interception is evidence of mock-only UI
+// work. A single endpoint mock (or a route.fetch/continue fallback) is not.
+function isBlockingApiMock(statement, declarations) {
+  const expression = ts.isExpressionStatement(statement) ? statement.expression : undefined;
+  const call = expression && ts.isAwaitExpression(expression) ? expression.expression : undefined;
+  if (!call || !ts.isCallExpression(call) || !ts.isPropertyAccessExpression(call.expression) ||
+      call.expression.name.text !== "route" || !ts.isIdentifier(call.expression.expression) ||
+      !["page", "context"].includes(call.expression.expression.text) ||
+      call.arguments.length !== 2) return false;
+  const pattern = call.arguments[0];
+  if (!pattern || !ts.isStringLiteral(pattern) ||
+      !["**/api/**", "**/*"].includes(pattern.text)) return false;
+  const callback = ts.isIdentifier(call.arguments[1])
+    ? declarations.get(call.arguments[1].text) : call.arguments[1];
+  if (!callback || !(ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) return false;
+  const parameter = callback.parameters[0]?.name;
+  if (!parameter || !ts.isIdentifier(parameter)) return false;
+  const body = callback.body;
+  const terminal = node => ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) && node.expression.expression.text === parameter.text &&
+    ["fulfill", "abort"].includes(node.expression.name.text) &&
+    !node.arguments.some(argument => visit(argument, child => ts.isCallExpression(child)));
+  // Require a direct terminal call, not one hidden in a conditional branch.
+  const unwrap = node => ts.isAwaitExpression(node) ? node.expression : node;
+  const blocking = !ts.isBlock(body) ? terminal(unwrap(body)) : body.statements.length === 1 &&
+    (ts.isExpressionStatement(body.statements[0]) && terminal(unwrap(body.statements[0].expression)) ||
+      ts.isReturnStatement(body.statements[0]) && !!body.statements[0].expression &&
+      terminal(unwrap(body.statements[0].expression)));
+  return blocking ? call.expression.expression.text : false;
+}
+
+function actionRoot(node) {
+  let expression = node.expression;
+  while (ts.isCallExpression(expression) || ts.isPropertyAccessExpression(expression) ||
+      ts.isElementAccessExpression(expression) || ts.isParenthesizedExpression(expression)) {
+    expression = expression.expression;
+  }
+  return ts.isIdentifier(expression) ? expression.text : "";
+}
+
+function hasBrowserWrites(body, declarations, seen = new Set()) {
+  if (!body || seen.has(body)) return false;
+  seen.add(body);
+  const mockedReceivers = new Set();
+  for (const statement of ts.isBlock(body) ? body.statements : [body]) {
+    const mockReceiver = isBlockingApiMock(statement, declarations);
+    if (mockReceiver) {
+      mockedReceivers.add(mockReceiver);
+      // A context mock also covers its standard Playwright page fixture. Other
+      // pages/locators are uncertain without data-flow analysis: require a guard.
+      if (mockReceiver === "context") mockedReceivers.add("page");
+      continue;
+    }
+    // A local helper may change routing. Do not let an isolation assumption
+    // survive a helper invocation without proving its effects on every path.
+    if (visit(statement, node => ts.isCallExpression(node) &&
+        (["route", "unroute", "unrouteAll"].includes(calleeName(node.expression)) ||
+          ts.isIdentifier(node.expression) && !!bodyOf(declarations.get(node.expression.text), declarations)))) {
+      mockedReceivers.clear();
+    }
+    if (visit(statement, node => {
+      if (isHttpWrite(node)) return true; // APIRequestContext bypasses page.route.
+      if (isBrowserAction(node) && !mockedReceivers.has(actionRoot(node))) return true;
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+        const helper = bodyOf(declarations.get(node.expression.text), declarations);
+        if (helper && hasBrowserWrites(helper, declarations, seen)) return true;
+      }
+      return false;
+    })) return true;
+  }
+  return false;
 }
 
 export function checkLiveSuite(source, filename = "browser-live.spec.ts") {
@@ -271,7 +386,20 @@ export function checkLiveSuite(source, filename = "browser-live.spec.ts") {
   // The Clerk fixture path also writes app users through the API, even when a
   // browser spec never imports the database directly.
   const createsUser = visit(ast, isFixtureCall);
-  if ((!usesDatabase || dbMocked) && !usesPg && !createsUser) return [];
+  const browserWrites = visit(ast, node => {
+    if (!ts.isCallExpression(node)) return false;
+    if (isTestRegistration(node)) return hasBrowserWrites(bodyOf(node.arguments[1], declarations), declarations);
+    if (ts.isPropertyAccessExpression(node.expression) &&
+        calleeName(node.expression.expression) === "test" &&
+        ["beforeAll", "beforeEach", "afterAll", "afterEach"].includes(node.expression.name.text)) {
+      return hasBrowserWrites(bodyOf(node.arguments[0], declarations), declarations);
+    }
+    return false;
+  });
+  const moduleWrites = ast.statements.some(statement =>
+    (ts.isVariableStatement(statement) || ts.isExpressionStatement(statement)) &&
+    visitOutsideFunctions(statement, node => isHttpWrite(node) || isBrowserAction(node)));
+  if ((!usesDatabase || dbMocked) && !usesPg && !createsUser && !browserWrites && !moduleWrites) return [];
 
   const issues = [];
   let registeredTests = 0;
@@ -280,7 +408,7 @@ export function checkLiveSuite(source, filename = "browser-live.spec.ts") {
     const call = node;
     const hook = ts.isPropertyAccessExpression(call.expression) &&
       ts.isIdentifier(call.expression.expression) && call.expression.expression.text === "test" &&
-      ["beforeAll", "beforeEach"].includes(call.expression.name.text);
+      ["beforeAll", "beforeEach", "afterAll", "afterEach"].includes(call.expression.name.text);
     if (hook) {
       if (!firstLiveGuard(bodyOf(call.arguments[0], declarations), guards)) {
         issues.push(`${call.expression.name.text} must begin with a workspace development database guard`);
@@ -295,7 +423,7 @@ export function checkLiveSuite(source, filename = "browser-live.spec.ts") {
   });
   if (!registeredTests) issues.push("database fixture work has no guarded live test");
   // A setup hook cannot protect work executed while loading the spec.
-  const isModuleFixtureWork = node => isFixtureCall(node) ||
+  const isModuleFixtureWork = node => isFixtureCall(node) || isHttpWrite(node) || isBrowserAction(node) ||
     ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
     ts.isIdentifier(node.expression.expression) && dbNames.has(node.expression.expression.text) &&
     ["insert", "update", "delete", "execute", "transaction", "query", "connect"].includes(node.expression.name.text);

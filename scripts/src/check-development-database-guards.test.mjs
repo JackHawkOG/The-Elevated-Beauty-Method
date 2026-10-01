@@ -155,6 +155,180 @@ test("mock-only browser checks do not need database guards", () => {
     test("mock", async () => { await db.delete(usersTable); });`), []);
 });
 
+test("browser-only UI writes require a real guard before any interaction", () => {
+  const write = `await page.goto("/profile");
+    await page.getByLabel("Name").fill("Fixture");
+    await page.getByRole("button", { name: "Save" }).click();`;
+  assert.match(checkLiveSuite(`${liveImports}
+    test("save", async ({ page }) => { ${write} });`)[0], /guard/);
+  assert.deepEqual(checkLiveSuite(`${liveImports}
+    test("save", async ({ page }) => { requireAuditDevelopment(); ${write} });`), []);
+  assert.match(checkLiveSuite(`${liveImports}
+    test("save", async ({ page }) => { ${write} requireAuditDevelopment(); });`)[0], /guard/);
+  assert.ok(checkLiveSuite(`import { test } from "@playwright/test";
+    function requireAuditDevelopment() {}
+    test("save", async ({ page }) => { requireAuditDevelopment(); ${write} });`).length);
+});
+
+test("browser-only HTTP writes and helper callbacks cannot escape classification", () => {
+  for (const write of [
+    `await request.post("/api/posts", { data: {} });`,
+    `await page.request.put("/api/profile", { data: {} });`,
+    `await context.request.patch("/api/profile", { data: {} });`,
+    `await request.delete("/api/posts/1");`,
+    `await fetch("/api/posts", { method: "POST", body: "{}" });`,
+    `await page.evaluate(() => fetch("/api/profile", { "method": "PATCH" }));`,
+    `await request.fetch("/api/profile", { method: verb });`,
+  ]) {
+    assert.match(checkLiveSuite(`${liveImports}
+      test("write", async ({ page, request, context }) => { ${write} });`)[0], /guard/);
+    assert.deepEqual(checkLiveSuite(`${liveImports}
+      test("write", async ({ page, request, context }) => { requireAuditDevelopment(); ${write} });`), []);
+  }
+  assert.ok(checkLiveSuite(`${liveImports}
+    async function save(page) { await page.getByRole("button", { name: "Save" }).click(); }
+    async function run({ page }) { await save(page); }
+    test.each(["one"])("writes %s", run, 30000);`).length);
+  assert.deepEqual(checkLiveSuite(`${liveImports}
+    async function run({ page }) { requireAuditDevelopment(); await page.locator("button").click(); }
+    test.each(["one"])("writes %s", run, 30000);`), []);
+});
+
+test("only early complete non-forwarding API mocks exempt UI writes", () => {
+  const write = `await page.getByRole("button", { name: "Save" }).click();`;
+  for (const mock of [
+    `await page.route("**/api/**", route => route.fulfill({ json: {} }));`,
+    `await context.route("**/*", async route => { await route.abort(); });`,
+  ]) {
+    assert.deepEqual(checkLiveSuite(`${liveImports}
+      test("mock", async ({ page, context }) => { ${mock} ${write} });`), []);
+    assert.ok(checkLiveSuite(`${liveImports}
+      test("late mock", async ({ page, context }) => { ${write} ${mock} });`).length);
+    // Playwright request calls bypass browser route interception.
+    assert.ok(checkLiveSuite(`${liveImports}
+      test("API", async ({ page, context, request }) => { ${mock} await request.post("/api/posts"); });`).length);
+  }
+  for (const mock of [
+    `await page.route("**/api/posts", route => route.fulfill({ json: {} }));`,
+    `await page.route("**/api/**", route => route.continue());`,
+    `await page.route("**/api/**", async route => { await route.fulfill({ response: await route.fetch() }); });`,
+    `await page.route("**/api/**", route => { if (route.request().method() === "GET") return route.fulfill({ json: {} }); });`,
+    `await page.route("**/api/**", route => route.fulfill({ json: {} }));
+      await page.unrouteAll();`,
+  ]) {
+    assert.ok(checkLiveSuite(`${liveImports}
+      test("not mock-only", async ({ page }) => { ${mock} ${write} });`).length);
+  }
+  // A mock in an unrelated test is not evidence that the writing test is mocked.
+  assert.ok(checkLiveSuite(`${liveImports}
+    test("mock", async ({ page }) => { await page.route("**/api/**", route => route.fulfill({ json: {} })); });
+    test("live", async ({ page }) => { ${write} });`).length);
+});
+
+test("browser-only setup, cleanup and module writes require guards too", () => {
+  for (const hook of ["beforeAll", "beforeEach", "afterAll", "afterEach"]) {
+    assert.ok(checkLiveSuite(`${liveImports}
+      test.${hook}(async ({ request }) => { await request.delete("/api/posts/1"); });
+      test("read", async () => { requireAuditDevelopment(); });`).some(issue => issue.includes(hook)));
+    assert.deepEqual(checkLiveSuite(`${liveImports}
+      test.${hook}(async ({ request }) => { requireAuditDevelopment(); await request.delete("/api/posts/1"); });
+      test("read", async () => { requireAuditDevelopment(); });`), []);
+  }
+  assert.ok(checkLiveSuite(`${liveImports}
+    const pending = fetch("/api/posts", { method: "POST" });
+    test("write", async () => { requireAuditDevelopment(); await pending; });`)
+    .some(issue => /module scope/.test(issue)));
+  assert.deepEqual(checkLiveSuite(`${liveImports}
+    test("read", async ({ page, request }) => {
+      await page.goto("/profile"); await request.get("/api/profile");
+    });`), []);
+});
+
+test("expression-bodied callbacks and focused or skipped registrations are classified", () => {
+  for (const registration of ["test", "test.only", "test.skip", "test.fixme"]) {
+    for (const callback of [
+      `async ({ request }) => request.post("/api/posts", { data: {} })`,
+      `async ({ page }) => page.getByRole("button", { name: "Save" }).click()`,
+      `async ({ page }) => { await page.getByRole("button", { name: "Save" }).click(); }`,
+      `save`,
+    ]) {
+      assert.ok(checkLiveSuite(`${liveImports}
+        const save = async ({ request }) => request.post("/api/posts");
+        ${registration}("write", ${callback});`).some(issue => /guard/.test(issue)));
+    }
+    assert.deepEqual(checkLiveSuite(`${liveImports}
+      ${registration}("write", async ({ page }) => {
+        requireAuditDevelopment();
+        await page.getByRole("button", { name: "Save" }).click();
+      });`), []);
+  }
+  assert.ok(checkLiveSuite(`${liveImports}
+    test.beforeEach(async ({ request }) => request.post("/api/posts"));
+    test("read", async () => { requireAuditDevelopment(); });`)
+    .some(issue => /beforeEach/.test(issue)));
+  assert.deepEqual(checkLiveSuite(`${liveImports}
+    test("write", async ({ request }) => {
+      requireAuditDevelopment();
+      test.skip(false, "conditional skip is not a test registration");
+      await request.post("/api/posts");
+    });`), []);
+});
+
+test("finite route mocks and mocks on a different page cannot exempt writes", () => {
+  for (const body of [
+    `await page.route("**/api/**", route => route.fulfill({ json: {} }), { times: 1 });
+      await page.getByRole("button", { name: "Save" }).click();
+      await page.getByRole("button", { name: "Save" }).click();`,
+    `await page.route("**/api/**", route => route.fulfill({ json: {} }), options);
+      await page.getByRole("button", { name: "Save" }).click();`,
+    `await page.route("**/api/**", route => route.fulfill({ json: {} }));
+      const otherPage = await context.newPage();
+      await otherPage.getByRole("button", { name: "Save" }).click();`,
+    `await page.route("**/api/**", route => route.fulfill({ json: {} }));
+      await popup.getByRole("button", { name: "Save" }).click();`,
+    `await page.route("**/api/**", route => route.fulfill({ json: {} }));
+      await saveButton.click();`,
+  ]) {
+    assert.ok(checkLiveSuite(`${liveImports}
+      test("write", async ({ page, context }) => { ${body} });`).some(issue => /guard/.test(issue)));
+    assert.deepEqual(checkLiveSuite(`${liveImports}
+      test("write", async ({ page, context }) => { requireAuditDevelopment(); ${body} });`), []);
+  }
+});
+
+test("helper routing changes invalidate a caller's mock exemption", () => {
+  for (const helper of [
+    `async function removeMocks(page) { await page.unrouteAll(); }`,
+    `async function removeMocks(page) { await reset(page); }
+      async function reset(page) { await page.unroute("**/api/**"); }`,
+    `const removeMocks = async page => page.unrouteAll();`,
+  ]) {
+    const body = `await page.route("**/api/**", route => route.fulfill({ json: {} }));
+      await removeMocks(page);
+      await page.getByRole("button", { name: "Save" }).click();`;
+    assert.ok(checkLiveSuite(`${liveImports} ${helper}
+      test("write", async ({ page }) => { ${body} });`).some(issue => /guard/.test(issue)));
+    assert.deepEqual(checkLiveSuite(`${liveImports} ${helper}
+      test("write", async ({ page }) => { requireAuditDevelopment(); ${body} });`), []);
+  }
+});
+
+test("unresolved fetch method properties are potentially mutating", () => {
+  for (const options of [
+    `{ method }`,
+    `{ ["method"]: "POST" }`,
+    `{ [key]: verb }`,
+    `{ get method() { return "POST"; } }`,
+    `{ ...options }`,
+  ]) {
+    const body = `const method = "POST"; await fetch("/api/posts", ${options});`;
+    assert.ok(checkLiveSuite(`${liveImports}
+      test("write", async () => { ${body} });`).some(issue => /guard/.test(issue)));
+    assert.deepEqual(checkLiveSuite(`${liveImports}
+      test("write", async () => { requireAuditDevelopment(); ${body} });`), []);
+  }
+});
+
 test("maintenance commands reject missing, fake, late, and module-scope guards", () => {
   const dbImport = `const { db } = await import("@workspace/db"); await db.delete(usersTable);`;
   const guard = `import { requireAuditDevelopment } from "./radiant-audit-fixtures";`;
