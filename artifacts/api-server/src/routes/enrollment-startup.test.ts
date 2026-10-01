@@ -4,6 +4,11 @@ import type { NextFunction, Request, Response } from "express";
 
 const repair = vi.hoisted(() => vi.fn<() => Promise<void>>());
 const backfill = vi.hoisted(() => vi.fn<(needsPublicationBackfill: boolean) => Promise<void>>());
+const stripeStages = vi.hoisted(() => ({
+  migrations: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  webhook: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  synchronization: vi.fn<(...args: unknown[]) => Promise<void>>(),
+}));
 
 // Mount the real enrollment route with test authentication. An invalid body
 // exercises the route without writing to the development database.
@@ -40,11 +45,11 @@ vi.mock("../lib/membership-orphan-recovery", () => ({ startMembershipOrphanRecov
 vi.mock("../lib/membership-paid-recovery", () => ({ startUntrackedPaidCheckoutRecovery: vi.fn() }));
 vi.mock("../lib/stripeClient", () => ({
   getStripeSync: vi.fn(async () => ({
-    findOrCreateManagedWebhook: vi.fn(),
-    syncBackfill: vi.fn(),
+    findOrCreateManagedWebhook: stripeStages.webhook,
+    syncBackfill: stripeStages.synchronization,
   })),
 }));
-vi.mock("stripe-replit-sync", () => ({ runMigrations: vi.fn() }));
+vi.mock("stripe-replit-sync", () => ({ runMigrations: stripeStages.migrations }));
 vi.mock("../lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
 
 let server: Server | undefined;
@@ -117,6 +122,115 @@ test("failed enrollment repair keeps enrollment requests offline; removing fault
     else process.env.REPLIT_DOMAINS = oldDomains;
   }
 }, 30000);
+
+test.each(["migrations", "webhook", "synchronization"] as const)(
+  "Stripe %s blocks enrollment while pending and after failure; a clean retry starts normally",
+  async (stage) => {
+    const oldPort = process.env.PORT;
+    const oldDatabaseUrl = process.env.DATABASE_URL;
+    const oldDomains = process.env.REPLIT_DOMAINS;
+    const reservation = createServer();
+    await new Promise<void>(resolve => reservation.listen(0, "127.0.0.1", resolve));
+    const address = reservation.address();
+    if (!address || typeof address === "string") throw new Error("No test port");
+    const port = address.port;
+    await new Promise<void>(resolve => reservation.close(() => resolve()));
+
+    process.env.PORT = String(port);
+    process.env.DATABASE_URL = "postgres://unused.invalid/test";
+    process.env.REPLIT_DOMAINS = "example.invalid";
+    const listenSpies: ReturnType<typeof vi.spyOn>[] = [];
+    let rejectStage: ((error: Error) => void) | undefined;
+    let failedStartup: Promise<unknown> | undefined;
+    const expectEnrollmentOffline = async () => {
+      await expect(fetch(`http://127.0.0.1:${port}/api/enrollments`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(1000),
+      })).rejects.toThrow();
+    };
+    try {
+      repair.mockClear();
+      backfill.mockClear();
+      for (const mock of Object.values(stripeStages)) mock.mockReset().mockResolvedValue(undefined);
+      vi.resetModules();
+      const { default: failedApp } = await import("../app");
+      const failedListen = vi.spyOn(failedApp, "listen");
+      listenSpies.push(failedListen);
+      stripeStages[stage].mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+        rejectStage = reject;
+      }));
+      failedStartup = import("../index");
+      // Attach a handler immediately so even an unexpectedly early failure is handled.
+      void failedStartup.catch(() => {});
+      await vi.waitFor(() => expect(stripeStages[stage]).toHaveBeenCalledOnce());
+      expect(repair).toHaveBeenCalledOnce();
+      expect(backfill).toHaveBeenCalledOnce();
+      expect(failedListen).not.toHaveBeenCalled();
+      await expectEnrollmentOffline();
+      const laterStages = Object.keys(stripeStages).slice(
+        Object.keys(stripeStages).indexOf(stage) + 1,
+      ) as (keyof typeof stripeStages)[];
+      for (const later of laterStages) expect(stripeStages[later]).not.toHaveBeenCalled();
+
+      const failureMessage = `Injected Stripe ${stage} failure`;
+      rejectStage!(new Error(failureMessage));
+      await expect(failedStartup).rejects.toThrow(failureMessage);
+      expect(failedListen).not.toHaveBeenCalled();
+      await expectEnrollmentOffline();
+      for (const later of laterStages) expect(stripeStages[later]).not.toHaveBeenCalled();
+
+      vi.resetModules();
+      const { default: recoveredApp } = await import("../app");
+      const recoveredListen = vi.spyOn(recoveredApp, "listen");
+      listenSpies.push(recoveredListen);
+      await import("../index");
+      expect(repair).toHaveBeenCalledTimes(2);
+      expect(backfill).toHaveBeenCalledTimes(2);
+      expect(recoveredListen).toHaveBeenCalledOnce();
+      const recoveredServer = recoveredListen.mock.results[0]?.value as Server;
+      expect(recoveredServer.listening).toBe(true);
+      for (const [name, mock] of Object.entries(stripeStages)) {
+        expect(mock).toHaveBeenCalledTimes(laterStages.includes(name as keyof typeof stripeStages) ? 1 : 2);
+        expect(mock.mock.invocationCallOrder.at(-1)).toBeLessThan(
+          recoveredListen.mock.invocationCallOrder[0],
+        );
+      }
+      expect(stripeStages.migrations).toHaveBeenLastCalledWith({ databaseUrl: "postgres://unused.invalid/test" });
+      expect(stripeStages.webhook).toHaveBeenLastCalledWith("https://example.invalid/api/stripe/webhook");
+      expect(stripeStages.synchronization).toHaveBeenLastCalledWith({ object: "all" });
+      const response = await fetch(`http://127.0.0.1:${port}/api/enrollments`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(1000),
+      });
+      expect(response.status).toBe(400);
+    } finally {
+      // Also release a pending stage or an early-bound server if an ordering regression fails the test.
+      rejectStage?.(new Error("Startup test cleanup"));
+      await failedStartup?.catch(() => {});
+      for (const spy of listenSpies) {
+        for (const result of spy.mock.results) {
+          const listeningServer = result.value as Server | undefined;
+          if (listeningServer?.listening) await new Promise<void>((resolve, reject) => {
+            listeningServer.close((error) => error ? reject(error) : resolve());
+          });
+        }
+        spy.mockRestore();
+      }
+      for (const mock of Object.values(stripeStages)) mock.mockReset();
+      if (oldPort === undefined) delete process.env.PORT;
+      else process.env.PORT = oldPort;
+      if (oldDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = oldDatabaseUrl;
+      if (oldDomains === undefined) delete process.env.REPLIT_DOMAINS;
+      else process.env.REPLIT_DOMAINS = oldDomains;
+    }
+  },
+  30000,
+);
 
 test("failed content backfill after enrollment repair keeps enrollment offline; retry starts normally", async () => {
   const oldPort = process.env.PORT;
