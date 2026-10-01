@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   GetMeResponse,
   UpdateMeBody,
@@ -37,11 +37,22 @@ router.patch("/users/me", requireAuth, async (req, res): Promise<void> => {
   if (parsed.data.bio !== undefined) updateData.bio = parsed.data.bio;
 
   const [updated] = await db.update(usersTable)
-    .set(updateData)
-    .where(eq(usersTable.clerkId, req.userId!))
+    .set({ ...updateData, profileVersion: sql`gen_random_uuid()::text` })
+    .where(and(
+      eq(usersTable.clerkId, req.userId!),
+      eq(usersTable.profileVersion, parsed.data.profileVersion),
+    ))
     .returning();
 
-  if (!updated) { res.status(404).json({ error: "User not found" }); return; }
+  if (!updated) {
+    const [current] = await db.select().from(usersTable).where(eq(usersTable.clerkId, req.userId!)).limit(1);
+    if (!current) { res.status(404).json({ error: "User not found" }); return; }
+    res.status(409).json({
+      error: "Your profile has changed since you started editing. Review the latest saved details before trying again.",
+      currentProfile: GetMeResponse.parse({ ...current, createdAt: current.createdAt.toISOString() }),
+    });
+    return;
+  }
 
   res.json(UpdateMeResponse.parse({ ...updated, createdAt: updated.createdAt?.toISOString() }));
 });

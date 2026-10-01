@@ -77,6 +77,7 @@ export * from './myMembershipMembershipKind';
 export * from './myMembershipMembershipStatus';
 export * from './ownerMemberStory';
 export * from './ownerMemberStoryRemovalReviewOutcome';
+export * from './profileConflict';
 export * from './progressUpdate';
 export * from './publicMemberStory';
 export * from './radiantAudit';

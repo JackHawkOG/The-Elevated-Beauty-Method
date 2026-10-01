@@ -1077,12 +1077,16 @@ export const CorrectAnnouncementActivityResponse = zod.object({
 /**
  * @summary Get the current user's profile
  */
+export const getMeResponseProfileVersionRegExp = new RegExp('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+
+
 export const GetMeResponse = zod.object({
   "id": zod.number(),
   "clerkId": zod.string(),
   "displayName": zod.string(),
   "email": zod.string(),
   "bio": zod.string().nullish(),
+  "profileVersion": zod.string().regex(getMeResponseProfileVersionRegExp),
   "avatarUrl": zod.string().nullish(),
   "membershipTier": zod.enum(['Free', 'Elevated', 'Premium']),
   "createdAt": zod.string()
@@ -1090,12 +1094,20 @@ export const GetMeResponse = zod.object({
 
 
 /**
+ * Send profileVersion from the profile being edited. The write is atomic and returns 409 if another edit has already changed that version. Review the current profile before retrying.
  * @summary Update the current user's profile
  */
+export const updateMeBodyProfileVersionRegExp = new RegExp('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+
+
 export const UpdateMeBody = zod.object({
+  "profileVersion": zod.string().regex(updateMeBodyProfileVersionRegExp),
   "displayName": zod.string().optional(),
   "bio": zod.string().optional()
 })
+
+export const updateMeResponseProfileVersionRegExp = new RegExp('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+
 
 export const UpdateMeResponse = zod.object({
   "id": zod.number(),
@@ -1103,6 +1115,7 @@ export const UpdateMeResponse = zod.object({
   "displayName": zod.string(),
   "email": zod.string(),
   "bio": zod.string().nullish(),
+  "profileVersion": zod.string().regex(updateMeResponseProfileVersionRegExp),
   "avatarUrl": zod.string().nullish(),
   "membershipTier": zod.enum(['Free', 'Elevated', 'Premium']),
   "createdAt": zod.string()

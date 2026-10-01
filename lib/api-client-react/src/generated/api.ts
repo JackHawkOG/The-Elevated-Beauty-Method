@@ -63,6 +63,7 @@ import type {
   MembershipReviewNotification,
   MyMembership,
   OwnerMemberStory,
+  ProfileConflict,
   ProgressUpdate,
   PublicMemberStory,
   RadiantAudit,
@@ -3336,6 +3337,7 @@ export const getUpdateMeUrl = () => {
 }
 
 /**
+ * Send profileVersion from the profile being edited. The write is atomic and returns 409 if another edit has already changed that version. Review the current profile before retrying.
  * @summary Update the current user's profile
  */
 export const updateMe = async (userProfileUpdate: UserProfileUpdate, options?: Parameters<typeof customFetch>[1]): Promise<UserProfile> => {
@@ -3353,7 +3355,7 @@ export const updateMe = async (userProfileUpdate: UserProfileUpdate, options?: P
 
 
 
-export const getUpdateMeMutationOptions = <TError = ErrorType<unknown>,
+export const getUpdateMeMutationOptions = <TError = ErrorType<void | ProfileConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,{data: BodyType<UserProfileUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,{data: BodyType<UserProfileUpdate>}, TContext> => {
 
@@ -3382,12 +3384,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateMeMutationResult = NonNullable<Awaited<ReturnType<typeof updateMe>>>
     export type UpdateMeMutationBody = BodyType<UserProfileUpdate>
-    export type UpdateMeMutationError = ErrorType<unknown>
+    export type UpdateMeMutationError = ErrorType<void | ProfileConflict>
 
     /**
  * @summary Update the current user's profile
  */
-export const useUpdateMe = <TError = ErrorType<unknown>,
+export const useUpdateMe = <TError = ErrorType<void | ProfileConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMe>>, TError,{data: BodyType<UserProfileUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateMe>>,

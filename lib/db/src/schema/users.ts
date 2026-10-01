@@ -1,4 +1,5 @@
 import { pgTable, serial, text, timestamp } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -8,6 +9,7 @@ export const usersTable = pgTable("users", {
   displayName: text("display_name").notNull(),
   email: text("email").notNull(),
   bio: text("bio"),
+  profileVersion: text("profile_version").default(sql`gen_random_uuid()::text`).notNull(),
   avatarUrl: text("avatar_url"),
   membershipTier: text("membership_tier").default("Free").notNull(),
   skinType: text("skin_type"),

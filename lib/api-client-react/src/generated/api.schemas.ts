@@ -620,6 +620,8 @@ export interface UserProfile {
   email: string;
   /** @nullable */
   bio?: string | null;
+  /** @pattern ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ */
+  profileVersion: string;
   /** @nullable */
   avatarUrl?: string | null;
   membershipTier: UserProfileMembershipTier;
@@ -627,8 +629,15 @@ export interface UserProfile {
 }
 
 export interface UserProfileUpdate {
+  /** @pattern ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ */
+  profileVersion: string;
   displayName?: string;
   bio?: string;
+}
+
+export interface ProfileConflict {
+  error: string;
+  currentProfile: UserProfile;
 }
 
 export interface RadiantAuditDraftDiscarded {

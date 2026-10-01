@@ -14,6 +14,8 @@ export interface UserProfile {
   email: string;
   /** @nullable */
   bio?: string | null;
+  /** @pattern ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ */
+  profileVersion: string;
   /** @nullable */
   avatarUrl?: string | null;
   membershipTier: UserProfileMembershipTier;

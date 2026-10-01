@@ -21,6 +21,7 @@ vi.mock("../app", async () => {
   return { default: app };
 });
 vi.mock("../lib/ensure-enrollment-schema", () => ({ ensureEnrollmentSchema: repair }));
+vi.mock("../lib/ensure-profile-schema", () => ({ ensureProfileSchema: vi.fn() }));
 vi.mock("../lib/ensure-announcement-schema", () => ({ ensureAnnouncementSchema: vi.fn() }));
 vi.mock("../lib/ensure-member-stories-schema", () => ({ ensureMemberStoriesSchema: vi.fn() }));
 vi.mock("../lib/ensure-progress-schema", () => ({ ensureProgressSchema: vi.fn() }));

@@ -10,6 +10,7 @@ import { ensureAnnouncementSchema } from "./lib/ensure-announcement-schema";
 import { reconcileAnnouncementActivity } from "./lib/reconcile-announcement-activity";
 import { reportAfterFirstHealthcheck } from "./routes/health";
 import { ensureMemberStoriesSchema } from "./lib/ensure-member-stories-schema";
+import { ensureProfileSchema } from "./lib/ensure-profile-schema";
 import { getStripeSync } from "./lib/stripeClient";
 import { startMembershipReconciliation } from "./lib/membership-reconciliation";
 import { runMigrations } from "stripe-replit-sync";
@@ -31,6 +32,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+await ensureProfileSchema();
 await ensureEnrollmentSchema();
 await ensureAnnouncementSchema();
 await ensureMemberStoriesSchema();

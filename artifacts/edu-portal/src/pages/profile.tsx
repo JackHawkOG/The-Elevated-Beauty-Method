@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Link } from "wouter";
 import { AppLayout } from "@/components/layout";
 import { 
@@ -7,6 +7,7 @@ import {
   useListEnrollments,
   getGetMeQueryKey
 } from "@workspace/api-client-react";
+import type { UserProfile } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +25,7 @@ import { format } from "date-fns";
 const latestProfileSave = new WeakMap<QueryClient, number>();
 
 export default function ProfilePage() {
-  const { data: profile, isLoading: profileLoading } = useGetMe();
+  const { data: profile, isLoading: profileLoading, refetch: refetchProfile } = useGetMe();
   const { data: enrollments, isLoading: enrollmentsLoading } = useListEnrollments();
   const [isEditing, setIsEditing] = useState(false);
   
@@ -105,6 +106,7 @@ export default function ProfilePage() {
                   size="sm" 
                   className="text-muted-foreground hover:text-foreground"
                   onClick={() => setIsEditing(!isEditing)}
+                  disabled={!profile || profileLoading}
                 >
                   <Settings className="w-4 h-4 mr-2" />
                   {isEditing ? "Cancel" : "Edit Profile"}
@@ -117,10 +119,14 @@ export default function ProfilePage() {
                     <Skeleton className="h-4 w-full" />
                     <Skeleton className="h-4 w-3/4" />
                   </div>
+                ) : !profile ? (
+                  <div role="alert" className="space-y-3">
+                    <p>We couldn't load your saved profile. Try again before editing.</p>
+                    <Button variant="outline" onClick={() => void refetchProfile()}>Retry loading profile</Button>
+                  </div>
                 ) : isEditing ? (
                   <ProfileEditForm 
-                    initialName={profile?.displayName || ""} 
-                    initialBio={profile?.bio || ""} 
+                    initialProfile={profile}
                     onSuccess={() => setIsEditing(false)} 
                   />
                 ) : (
@@ -211,17 +217,13 @@ export default function ProfilePage() {
   );
 }
 
-function ProfileEditForm({ initialName, initialBio, onSuccess }: { initialName: string, initialBio: string, onSuccess: () => void }) {
-  const [name, setName] = useState(initialName);
-  const [bio, setBio] = useState(initialBio);
+export function ProfileEditForm({ initialProfile, onSuccess }: { initialProfile: UserProfile, onSuccess: () => void }) {
+  const [name, setName] = useState(initialProfile.displayName);
+  const [bio, setBio] = useState(initialProfile.bio || "");
+  const [version, setVersion] = useState(initialProfile.profileVersion);
+  const [conflict, setConflict] = useState<UserProfile | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
-
-  // Handle initialization if props change
-  useEffect(() => {
-    setName(initialName);
-    setBio(initialBio);
-  }, [initialName, initialBio]);
 
   const updateMutation = useUpdateMe({
     mutation: {
@@ -233,14 +235,18 @@ function ProfileEditForm({ initialName, initialBio, onSuccess }: { initialName: 
       onSuccess: (data, _variables, sequence) => {
         if (sequence !== latestProfileSave.get(queryClient)) return;
         // Update cache manually instead of invalidate to avoid layout shift
-        queryClient.setQueryData(getGetMeQueryKey(), (old: any) => 
-          old ? { ...old, displayName: data.displayName, bio: data.bio } : old
+        queryClient.setQueryData<UserProfile>(getGetMeQueryKey(), (old) =>
+          old ? { ...old, displayName: data.displayName, bio: data.bio, profileVersion: data.profileVersion } : old
         );
         toast({ title: "Profile updated", description: "Your changes have been saved." });
         onSuccess();
       },
-      onError: (_error, _variables, sequence) => {
+      onError: (error, _variables, sequence) => {
         if (sequence !== latestProfileSave.get(queryClient)) return;
+        if (error.status === 409 && error.data?.currentProfile) {
+          setConflict(error.data.currentProfile);
+          return;
+        }
         toast({ title: "Error", description: "Could not update profile.", variant: "destructive" });
       }
     }
@@ -248,12 +254,36 @@ function ProfileEditForm({ initialName, initialBio, onSuccess }: { initialName: 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    updateMutation.mutate({ data: { displayName: name, bio: bio || undefined } });
+    if (!name.trim() || conflict || updateMutation.isPending) return;
+    updateMutation.mutate({ data: { displayName: name, bio, profileVersion: version } });
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {conflict && (
+        <div role="alert" className="space-y-3 rounded-lg border border-border p-4">
+          <p className="font-medium">Your profile changed while you were editing.</p>
+          <p className="text-sm">Your edits are still in the form. Review the latest saved details below, then choose which to keep. Nothing has been overwritten.</p>
+          <div className="text-sm whitespace-pre-wrap">
+            <p>Saved name: {conflict.displayName}</p>
+            <p>Saved bio: {conflict.bio || "No bio"}</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="outline" onClick={() => {
+              setName(conflict.displayName);
+              setBio(conflict.bio || "");
+              setVersion(conflict.profileVersion);
+              queryClient.setQueryData(getGetMeQueryKey(), conflict);
+              setConflict(null);
+            }}>Use latest saved details</Button>
+            <Button type="button" variant="outline" onClick={() => {
+              setVersion(conflict.profileVersion);
+              queryClient.setQueryData(getGetMeQueryKey(), conflict);
+              setConflict(null);
+            }}>Keep my edits and review before saving</Button>
+          </div>
+        </div>
+      )}
       <div className="space-y-2">
         <label className="text-sm font-medium text-foreground">Display Name</label>
         <Input 
@@ -274,7 +304,7 @@ function ProfileEditForm({ initialName, initialBio, onSuccess }: { initialName: 
       </div>
       <div className="flex justify-end gap-3 pt-2">
         <Button type="button" variant="outline" onClick={onSuccess} className="border-border hover:bg-muted text-foreground">Cancel</Button>
-        <Button type="submit" disabled={updateMutation.isPending || !name.trim()} className="bg-primary text-primary-foreground hover:bg-primary/90 min-w-24">
+        <Button type="submit" disabled={updateMutation.isPending || !name.trim() || !!conflict} className="bg-primary text-primary-foreground hover:bg-primary/90 min-w-24">
           {updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save Changes"}
         </Button>
       </div>

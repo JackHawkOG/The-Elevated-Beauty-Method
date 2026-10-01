@@ -43,3 +43,4 @@
 - [Clerk development API budgets](clerk-development-rate-limits.md) — repeated scoped listing can hit HTTP 429; budget verification and teardown calls without treating outages as absence.
 - [Billing review notice semantics](billing-review-notice-semantics.md) — review outages are private operational alerts, not evidence of member delinquency.
 - [Clerk browser role fixtures](clerk-browser-role-fixtures.md) — programmatic sign-in ignores extra role metadata options; verify the actual role before owner UI assertions.
+- [Profile conflict review](profile-conflict-review.md) — refreshes and blind retries must not silently advance an open draft's baseline.
