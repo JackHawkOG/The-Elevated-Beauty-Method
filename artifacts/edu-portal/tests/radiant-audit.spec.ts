@@ -1223,6 +1223,85 @@ test("failed signed-in save preserves answers and checks until a successful retr
   expect(submissionIds[2]).not.toBe(submissionIds[0]);
 });
 
+test("a form change after confirmed save cannot recreate local or online unfinished answers before navigation", async ({ page }) => {
+  const answers = fixture("transition");
+  let current: Audit = {
+    ...fixture("previous"), routineScore: 1, valuesScore: 2,
+    completedAt: "2026-09-01T12:00:00.000Z",
+  };
+  let onlineDraft: (Answers & { updatedAt: string }) | null = null;
+  const draftWrites: Answers[] = [];
+  let confirmed = false;
+  await page.route("**/api/users/me/radiant-audit**", route => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      return route.fulfill({ json: request.url().endsWith("/history") ? [] : current });
+    }
+    expect(request.method()).toBe("PUT");
+    const { submissionId, ...input } = request.postDataJSON();
+    expect(submissionId).toBeTruthy();
+    expect(input).toEqual(answers);
+    current = { ...input, routineScore: 1, valuesScore: 2, completedAt: "2026-09-02T12:00:00.000Z" };
+    // The completed-Audit endpoint clears the unfinished server draft.
+    onlineDraft = null;
+    confirmed = true;
+    return route.fulfill({ json: { audit: current, completionKind: "retake" } });
+  });
+  await page.route("**/api/users/me/radiant-audit/draft", route => {
+    const request = route.request();
+    if (request.method() === "GET") return route.fulfill({ json: onlineDraft });
+    if (request.method() === "DELETE") {
+      onlineDraft = null;
+      return route.fulfill({ status: 204 });
+    }
+    expect(request.method()).toBe("PUT");
+    const input = request.postDataJSON() as Answers;
+    draftWrites.push(input);
+    onlineDraft = { ...input, updatedAt: new Date().toISOString() };
+    return route.fulfill({ json: onlineDraft });
+  });
+  await signInAs(page, "member-a");
+  await page.goto("/tests/audit-harness.html?holdSaveNavigation=1");
+  await page.getByLabel("Skincare consistency").check();
+  await page.getByLabel("Quality over price").check();
+  await page.getByLabel("Professional results").check();
+  await page.locator("#beauty-trend").fill(answers.beautyTrend);
+  await page.locator("#mastery-goal").fill(answers.masteryGoal);
+  await page.locator("#research-time").fill(answers.researchTime);
+  await page.getByLabel("Email address").fill("member-a@example.invalid");
+  // Prove both persistence paths were active before submission.
+  await expect.poll(() => onlineDraft?.masteryGoal).toBe(answers.masteryGoal);
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toContain(answers.masteryGoal);
+  await page.getByRole("button", { name: "Save my Audit" }).click();
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __auditNavigation: { pending: string | null } }).__auditNavigation.pending,
+  )).toBe("/radiant-audit/complete");
+  expect(confirmed).toBe(true);
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toHaveCount(0);
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  expect(onlineDraft).toBeNull();
+
+  const writeCount = draftWrites.length;
+  await page.clock.install();
+  // Use the actual input and React effect, not a synthetic persistence call.
+  await page.locator("#mastery-goal").fill(`${answers.masteryGoal} late change`);
+  await expect(page.locator("#mastery-goal")).toHaveValue(`${answers.masteryGoal} late change`);
+  await page.clock.runFor(1_000); // Beyond the 600ms online autosave debounce.
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  expect(onlineDraft).toBeNull();
+  expect(draftWrites).toHaveLength(writeCount);
+  await page.evaluate(() =>
+    (window as unknown as { __auditNavigation: { release: () => void } }).__auditNavigation.release(),
+  );
+  await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+  await expect(page.getByText(answers.masteryGoal, { exact: true })).toBeVisible();
+  await page.goto("/tests/audit-harness.html");
+  await expect(page.locator("#mastery-goal")).toHaveValue("");
+  await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+  expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+  expect(onlineDraft).toBeNull();
+});
+
 test("a signed-in draft never appears for another account and can be discarded", async ({ page }) => {
   await signInAs(page, "member-a");
   await page.getByLabel("Skincare consistency").check();

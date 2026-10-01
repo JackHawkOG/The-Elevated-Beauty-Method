@@ -11,7 +11,24 @@ setAuthTokenGetter(async () =>
   window.sessionStorage.getItem("audit-test-tab-account") ?? window.localStorage.getItem("audit-test-account"));
 import { getGetRadiantAuditHistoryQueryKey, setAuthTokenGetter } from "@workspace/api-client-react";
 import { AppLayout } from "../src/components/layout";
-const { hook } = memoryLocation({ path: new URLSearchParams(location.search).get("page") || "/radiant-audit" });
+const params = new URLSearchParams(location.search);
+const { hook, navigate } = memoryLocation({ path: params.get("page") || "/radiant-audit" });
+// Opt-in seam: keep the real form mounted after a confirmed save so tests can
+// exercise its change effect before routing unmounts it.
+const navigation = { pending: null as string | null, release: () => {
+  if (navigation.pending) navigate(navigation.pending);
+} };
+(window as unknown as { __auditNavigation: typeof navigation }).__auditNavigation = navigation;
+const transitionHook: typeof hook = () => {
+  const [path, setPath] = hook();
+  return [path, (next, options) => {
+    if (params.has("holdSaveNavigation") && next === "/radiant-audit/complete") {
+      navigation.pending = next;
+      return;
+    }
+    setPath(next, options);
+  }];
+};
 // Match the app's startup cleanup while exercising non-Audit routes in isolation.
 pruneInvalidAuditDraft();
 
@@ -21,7 +38,7 @@ const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={client}>
-    <Router hook={hook}>
+    <Router hook={transitionHook}>
       <Switch>
         <Route path="/layout"><AppLayout><p>Member area</p></AppLayout></Route>
         <Route path="/dashboard" component={Dashboard} />
