@@ -34,3 +34,9 @@ When a shared branch has repaired a fixture while an isolated task is still open
 **How to apply:** Compare the whole touched fixture against the current shared branch, preserve new tests and their setup, and validate the reconciled version before retrying completion.
 
 When the user authorizes a broader repair of a malformed fixture, compare it with its last known-good revision before replacing scattered invalid values. **Why:** Type errors can be only the visible part of a merge that also changed valid-looking counters or test setup, leaving runtime assertions wrong after typecheck passes. **How to apply:** Restore the intended fixtures and run the affected test file before relying on the full workspace check.
+
+After a rebase adds dependencies, refresh the installed workspace from the merged lockfile before interpreting missing-package test failures as source defects.
+
+**Why:** The Git merge updates package manifests and the lockfile, but the isolated task's installed dependencies can still reflect its earlier checkout.
+
+**How to apply:** If a newly merged test cannot load a package already declared in the merged manifests, restore dependencies with the frozen lockfile rather than adding another declaration or changing the test.
