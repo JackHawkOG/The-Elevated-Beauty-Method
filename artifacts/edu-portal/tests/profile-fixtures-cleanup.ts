@@ -35,7 +35,8 @@ async function main() {
     db, pool, usersTable, enrollmentsTable, lessonCompletionsTable,
     announcementsTable, memberStoriesTable, radiantAuditsTable, radiantAuditDraftsTable,
     radiantAuditHistoryTable, radiantAuditSubmissionsTable,
-  }, { eq, and, or }] = await Promise.all([
+    activityTable, announcementActivityCorrectionsTable, memberStoryReviewCorrectionsTable,
+  }, { eq, and, or, sql }] = await Promise.all([
     import("../../../lib/db/src/index"), import("drizzle-orm"),
   ]);
   try {
@@ -60,7 +61,19 @@ async function main() {
             eq(memberStoriesTable.permissionRecordedBy, candidate.id),
             eq(memberStoriesTable.withdrawnBy, candidate.id),
             eq(memberStoriesTable.removalRequestedBy, candidate.id),
+            eq(memberStoriesTable.verifiedSubjectUserId, candidate.id),
+            eq(memberStoriesTable.subjectVerifiedBy, candidate.id),
+            eq(memberStoriesTable.removalReviewedBy, candidate.id),
           )),
+          tx.select({ id: activityTable.id }).from(activityTable).where(eq(activityTable.sourceReviewedBy, candidate.id)),
+          tx.select({ id: announcementActivityCorrectionsTable.id }).from(announcementActivityCorrectionsTable).where(or(
+            eq(announcementActivityCorrectionsTable.previousReviewedBy, candidate.id),
+            eq(announcementActivityCorrectionsTable.correctedBy, candidate.id),
+          )),
+          tx.select({ id: memberStoryReviewCorrectionsTable.id }).from(memberStoryReviewCorrectionsTable)
+            .where(eq(memberStoryReviewCorrectionsTable.reviewedBy, candidate.id)),
+          tx.execute(sql`SELECT id FROM membership_checkouts WHERE clerk_id = ${candidate.id}`)
+            .then(result => result.rows),
           tx.select().from(radiantAuditDraftsTable).where(eq(radiantAuditDraftsTable.clerkId, candidate.id)),
           tx.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, candidate.id)),
           tx.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, candidate.id)),
