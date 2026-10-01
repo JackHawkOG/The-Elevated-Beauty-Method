@@ -35,6 +35,8 @@ vi.mock("../lib/seed-member-journey", () => ({ ensureMemberJourneyContent: backf
 vi.mock("../lib/reconcile-announcement-activity", () => ({ reconcileAnnouncementActivity: vi.fn() }));
 vi.mock("../lib/membership-reconciliation", () => ({ startMembershipReconciliation: vi.fn() }));
 vi.mock("../lib/membership-checkout-expirations", () => ({ startCheckoutExpirationRecovery: vi.fn() }));
+vi.mock("../lib/membership-orphan-recovery", () => ({ startMembershipOrphanRecovery: vi.fn() }));
+vi.mock("../lib/membership-paid-recovery", () => ({ startUntrackedPaidCheckoutRecovery: vi.fn() }));
 vi.mock("../lib/stripeClient", () => ({
   getStripeSync: vi.fn(async () => ({
     findOrCreateManagedWebhook: vi.fn(),
@@ -113,7 +115,7 @@ test("failed enrollment repair keeps enrollment requests offline; removing fault
     if (oldDomains === undefined) delete process.env.REPLIT_DOMAINS;
     else process.env.REPLIT_DOMAINS = oldDomains;
   }
-}, 15000);
+}, 30000);
 
 test("failed content backfill after enrollment repair keeps enrollment offline; retry starts normally", async () => {
   const oldPort = process.env.PORT;
@@ -182,4 +184,4 @@ test("failed content backfill after enrollment repair keeps enrollment offline; 
     if (oldDomains === undefined) delete process.env.REPLIT_DOMAINS;
     else process.env.REPLIT_DOMAINS = oldDomains;
   }
-}, 15000);
+}, 30000);

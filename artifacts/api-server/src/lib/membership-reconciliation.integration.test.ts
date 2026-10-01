@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import type Stripe from "stripe";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
-import { pool } from "@workspace/db";
+import { pool, type PoolClient } from "@workspace/db";
 import { ensureMembershipSchema } from "./ensure-membership-schema";
 import { requireDevelopmentDatabase } from "../routes/test-development-database";
 
@@ -26,6 +26,7 @@ const paidDuringReviewClerkId = `billing-paid-during-review-${id}`;
 const paidDuringReviewSubscriptionId = `sub_billing_paid_during_review_${id}`;
 const eventIds: string[] = [];
 let seeded = false;
+let fixtureLock: PoolClient | undefined;
 function invoice(name: string, date: string, status: Stripe.Invoice.Status): Stripe.Invoice {
   return {
     id: `in_${name}_${id}`,
@@ -65,6 +66,10 @@ async function deliver(type: string, object: object, eventId = `evt_${randomUUID
 beforeAll(async () => {
   // Check before opening a connection or running even idempotent schema setup.
   requireDevelopmentDatabase();
+  fixtureLock = await pool.connect();
+  // Reconciliation fixtures affect global counts/capacity in other test runs.
+  // Coordinate their entire lifetime with the count and reservation suites.
+  await fixtureLock.query("SELECT pg_advisory_lock(20261001, 55)");
   await ensureMembershipSchema();
   await pool.query("INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
     [clerkId, "Billing race fixture", `${clerkId}@example.invalid`]);
@@ -91,13 +96,20 @@ beforeAll(async () => {
     "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)",
     [paidDuringReviewClerkId, paidDuringReviewSubscriptionId],
   );
-});
+}, 30000);
 
 afterAll(async () => {
-  if (!seeded) return;
-  await pool.query("DELETE FROM membership_webhook_events WHERE id = ANY($1::text[])", [eventIds]);
-  await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId, paidDuringReviewClerkId]]);
-  await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId, paidDuringReviewClerkId]]);
+  try {
+    if (!seeded) return;
+    await pool.query("DELETE FROM membership_webhook_events WHERE id = ANY($1::text[])", [eventIds]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId, paidDuringReviewClerkId]]);
+    await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[clerkId, otherClerkId, paginatedClerkId, paidDuringReviewClerkId]]);
+  } finally {
+    if (fixtureLock) {
+      await fixtureLock.query("SELECT pg_advisory_unlock(20261001, 55)");
+      fixtureLock.release();
+    }
+  }
 });
 
 test("late invoice and subscription notices use current Stripe state; sweeps cannot undo forfeiture", async () => {
@@ -352,6 +364,74 @@ test("a temporary Stripe retrieval failure rolls back the event so redelivery ca
     await pool.query("DELETE FROM membership_webhook_events WHERE id = $1", [eventId]);
     await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [retryClerkId]);
     await pool.query("DELETE FROM users WHERE clerk_id = $1", [retryClerkId]);
+  }
+});
+
+test("a later sweep recovers from a temporary subscription retrieval outage without canceling again", async () => {
+  const sweepClerkId = `billing-status-outage-${id}`;
+  const sweepSubscriptionId = `sub_billing_status_outage_${id}`;
+  const previousFailure = invoice("status-outage-feb", "2026-02-01", "open");
+  const failures = [invoice("status-outage-mar", "2026-03-01", "open"), previousFailure];
+  const retrieve = vi.fn(async (requestedId: string) => {
+    expect(requestedId).toBe(sweepSubscriptionId);
+    if (retrieve.mock.calls.length === 1) throw new Error("Temporary Stripe status outage");
+    return { status: "canceled", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+  });
+  const cancel = vi.fn();
+  const list = vi.fn(async (params: { subscription: string; limit: number }) => {
+    expect(params).toEqual({ subscription: sweepSubscriptionId, limit: 100 });
+    return { data: failures, has_more: false };
+  });
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: { retrieve, cancel },
+    invoices: { list },
+  } as unknown as Stripe);
+
+  await pool.query(
+    "INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [sweepClerkId, "Stripe status outage fixture", `${sweepClerkId}@example.invalid`],
+  );
+  try {
+    await pool.query(
+      "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id, failed_months, last_failed_invoice) VALUES ($1, 'founding', 'confirmed', $2, 1, $3)",
+      [sweepClerkId, sweepSubscriptionId, previousFailure.id],
+    );
+    const recordedFailures = async () => (await pool.query<{ consecutive_failures: number }>(
+      "SELECT consecutive_failures FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1",
+      [sweepSubscriptionId],
+    )).rows;
+
+    // No webhook or cancellation request is involved: only the status read fails.
+    await reconcileMemberships(sweepSubscriptionId);
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(list).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(await state(sweepSubscriptionId)).toEqual({
+      status: "confirmed", failed_months: 1, last_failed_invoice: previousFailure.id, membership_tier: "Elevated",
+    });
+    expect(await recordedFailures()).toEqual([{ consecutive_failures: 1 }]);
+
+    await reconcileMemberships(sweepSubscriptionId);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(await state(sweepSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 2, last_failed_invoice: failures[0].id, membership_tier: "Free",
+    });
+    expect(await recordedFailures()).toEqual([]);
+
+    // Subsequent sweeps leave the forfeiture final without more Stripe calls.
+    await reconcileMemberships(sweepSubscriptionId);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(await state(sweepSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 2, last_failed_invoice: failures[0].id, membership_tier: "Free",
+    });
+  } finally {
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [sweepSubscriptionId]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [sweepClerkId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [sweepClerkId]);
   }
 });
 

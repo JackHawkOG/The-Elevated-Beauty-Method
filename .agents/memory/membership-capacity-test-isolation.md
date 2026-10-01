@@ -9,6 +9,12 @@ Tests that fill the real development database to the founding membership limit m
 
 **How to apply:** Have any future membership capacity integration suite use the shared test-only coordination lock around its fixtures and release it after cleanup; do not confuse it with the application's production reservation lock.
 
+This coordination also applies to reconciliation fixtures, even when their tests only target individual subscriptions.
+
+**Why:** Global confirmed-member counts and capacity checks observe those fixtures too. Parallel runs can change the baseline between HTTP assertions even when each subscription is otherwise isolated.
+
+**How to apply:** Any membership integration suite that inserts, confirms, or forfeits checkout fixtures must coordinate its full fixture lifetime with global count/capacity suites.
+
 Test-only coordination also does not exclude the running API's background billing sweeps. A suite can own the capacity fixture lock while a live sweep owns a separate scanner lock, making a test-triggered recovery return without processing its mocked sessions.
 
 **Why:** A full validation immediately after API startup reported multiple recovery failures with no mocked Stripe lookups; the same unchanged suite passed once the startup sweep had finished.

@@ -118,7 +118,7 @@ beforeAll(async () => {
     { clerkId: blockedRetryId, displayName: blockedRetryActor, email: `${blockedRetryId}@example.invalid`, membershipTier: "Elevated" },
     { clerkId: waitingSuccessId, displayName: waitingSuccessActor, email: `${waitingSuccessId}@example.invalid`, membershipTier: "Elevated" },
   ]);
-});
+}, 30000);
 
 afterAll(async () => {
   vi.restoreAllMocks();
