@@ -12,7 +12,7 @@ vi.mock("./stripeClient", () => ({
 }));
 
 import { getStripeSync, getUncachableStripeClient } from "./stripeClient";
-import { reconcileMemberships } from "./membership-reconciliation";
+import { reconcileMemberships, unresolvedReconciliationAlerts } from "./membership-reconciliation";
 import { handleMembershipWebhook } from "../routes/membership";
 
 const id = randomUUID();
@@ -581,5 +581,128 @@ test("a sweep ends access after a lost cancellation response without webhook red
     await pool.query("DELETE FROM membership_webhook_events WHERE id = $1", [eventId]);
     await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [sweepClerkId]);
     await pool.query("DELETE FROM users WHERE clerk_id = $1", [sweepClerkId]);
+  }
+});
+
+test("three consecutive founding review failures alert staff, and a successful review clears the alert", async () => {
+  const reviewClerkId = `billing-review-alert-${id}`;
+  const reviewSubscriptionId = `sub_billing_review_alert_${id}`;
+  const standardClerkId = `billing-standard-alert-${id}`;
+  const standardSubscriptionId = `sub_billing_standard_alert_${id}`;
+  const failing = new Set([reviewSubscriptionId, standardSubscriptionId]);
+  const stripe = {
+    subscriptions: { retrieve: vi.fn(async (requestedId: string) => {
+      if (failing.has(requestedId)) throw new Error("Stripe temporarily unavailable");
+      return { status: "active", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+    }) },
+    invoices: { list: vi.fn(async () => ({ data: [], has_more: false })) },
+  } as unknown as Stripe;
+  vi.mocked(getUncachableStripeClient).mockResolvedValue(stripe);
+  await pool.query(
+    `INSERT INTO users (clerk_id, display_name, email, membership_tier)
+     VALUES ($1, $1, $2, 'Elevated'), ($3, $3, $4, 'Elevated')`,
+    [reviewClerkId, `${reviewClerkId}@example.invalid`, standardClerkId, `${standardClerkId}@example.invalid`],
+  );
+  try {
+    await pool.query(
+      `INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id)
+       VALUES ($1, 'founding', 'confirmed', $2), ($3, 'standard', 'confirmed', $4)`,
+      [reviewClerkId, reviewSubscriptionId, standardClerkId, standardSubscriptionId],
+    );
+    const failureCount = async () => (await pool.query<{ consecutive_failures: number }>(
+      "SELECT consecutive_failures FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1",
+      [reviewSubscriptionId],
+    )).rows[0]?.consecutive_failures;
+
+    await reconcileMemberships(reviewSubscriptionId);
+    expect(await failureCount()).toBe(1);
+    expect((await unresolvedReconciliationAlerts()).subscriptions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ subscriptionId: reviewSubscriptionId }),
+    ]));
+    await reconcileMemberships(reviewSubscriptionId);
+    expect(await failureCount()).toBe(2);
+    expect((await unresolvedReconciliationAlerts()).subscriptions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ subscriptionId: reviewSubscriptionId }),
+    ]));
+    await reconcileMemberships(reviewSubscriptionId);
+    expect((await unresolvedReconciliationAlerts()).subscriptions).toContainEqual(expect.objectContaining({
+      subscriptionId: reviewSubscriptionId, consecutiveFailures: 3,
+      firstFailedAt: expect.any(String), lastFailedAt: expect.any(String),
+    }));
+    await reconcileMemberships(standardSubscriptionId);
+    await reconcileMemberships(standardSubscriptionId);
+    await reconcileMemberships(standardSubscriptionId);
+    expect((await pool.query("SELECT * FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [standardSubscriptionId])).rows).toEqual([]);
+
+    failing.delete(reviewSubscriptionId);
+    await reconcileMemberships(reviewSubscriptionId);
+    expect(await failureCount()).toBeUndefined();
+    expect((await unresolvedReconciliationAlerts()).subscriptions).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ subscriptionId: reviewSubscriptionId }),
+    ]));
+
+    // A new isolated failure must start from one again.
+    failing.add(reviewSubscriptionId);
+    await reconcileMemberships(reviewSubscriptionId);
+    expect(await failureCount()).toBe(1);
+  } finally {
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = ANY($1::text[])", [[reviewSubscriptionId, standardSubscriptionId]]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[reviewClerkId, standardClerkId]]);
+    await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [[reviewClerkId, standardClerkId]]);
+  }
+});
+
+test("repeated database write failures alert staff without clearing the streak before a successful commit", async () => {
+  const reviewClerkId = `billing-db-review-${id}`;
+  const reviewSubscriptionId = `sub_billing_db_review_${id}`;
+  const stripe = {
+    subscriptions: { retrieve: vi.fn(async () => ({
+      status: "active", cancel_at: null, cancel_at_period_end: false,
+    })) },
+    invoices: { list: vi.fn(async () => ({ data: [], has_more: false })) },
+  } as unknown as Stripe;
+  vi.mocked(getUncachableStripeClient).mockResolvedValue(stripe);
+  await pool.query("INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $1, $2, 'Elevated')",
+    [reviewClerkId, `${reviewClerkId}@example.invalid`]);
+  const originalConnect = pool.connect.bind(pool);
+  const queryRestorers: (() => void)[] = [];
+  const connectSpy = vi.spyOn(pool, "connect");
+  const failNextWrite = () => connectSpy.mockImplementationOnce(async () => {
+    const client = await originalConnect();
+    const originalQuery = client.query.bind(client);
+    const querySpy = vi.spyOn(client, "query").mockImplementation(((...args: unknown[]) => {
+      if (typeof args[0] === "string" &&
+          args[0].startsWith("UPDATE membership_checkouts SET failed_months")) {
+        return Promise.reject(new Error("Simulated membership status write failure"));
+      }
+      return (originalQuery as (...queryArgs: unknown[]) => unknown)(...args);
+    }) as typeof client.query);
+    queryRestorers.push(() => querySpy.mockRestore());
+    return client;
+  });
+  try {
+    await pool.query("INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)",
+      [reviewClerkId, reviewSubscriptionId]);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      failNextWrite();
+      await reconcileMemberships(reviewSubscriptionId);
+      // Restore before pool.query borrows the same connection for assertions.
+      queryRestorers.splice(0).forEach(restore => restore());
+      expect((await pool.query("SELECT consecutive_failures FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1",
+        [reviewSubscriptionId])).rows[0].consecutive_failures).toBe(attempt);
+      const alert = (await unresolvedReconciliationAlerts()).subscriptions.find(item => item.subscriptionId === reviewSubscriptionId);
+      expect(Boolean(alert)).toBe(attempt === 3);
+    }
+    expect(await state(reviewSubscriptionId)).toMatchObject({ status: "confirmed", membership_tier: "Elevated" });
+    await reconcileMemberships(reviewSubscriptionId);
+    expect((await pool.query("SELECT 1 FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1",
+      [reviewSubscriptionId])).rows).toEqual([]);
+    expect((await unresolvedReconciliationAlerts()).subscriptions.some(item => item.subscriptionId === reviewSubscriptionId)).toBe(false);
+  } finally {
+    connectSpy.mockRestore();
+    queryRestorers.splice(0).forEach(restore => restore());
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [reviewSubscriptionId]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [reviewClerkId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [reviewClerkId]);
   }
 });

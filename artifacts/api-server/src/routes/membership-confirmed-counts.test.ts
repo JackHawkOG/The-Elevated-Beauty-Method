@@ -48,6 +48,17 @@ async function cleanupAlerts(user?: string) {
   return { status: response.status, body: await response.json() as Record<string, any> };
 }
 
+async function reconciliationAlerts(user?: string) {
+  const response = await fetch(`${baseUrl}/membership/reconciliation-alerts`, {
+    headers: user ? { "x-test-user": user } : {},
+  });
+  return {
+    status: response.status,
+    cache: response.headers.get("cache-control"),
+    body: await response.json() as Record<string, any>,
+  };
+}
+
 async function retryCleanup(sessionId: string, user?: string) {
   const response = await fetch(`${baseUrl}/membership/checkout-cleanup-alerts/${encodeURIComponent(sessionId)}/retry`, {
     method: "POST",
@@ -148,6 +159,32 @@ test("overdue checkout cleanup alerts are staff-only and clear after Stripe conf
     }
   } finally {
     await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = ANY($1::text[])", [[sessionId, recentId]]);
+  }
+});
+
+test("founding billing review alerts are accessible only to staff and exclude payment details", async () => {
+  const subscriptionId = `sub_review_access_${randomUUID()}`;
+  const clerkId = ids[0];
+  await pool.query("INSERT INTO users (clerk_id, display_name, email) VALUES ($1, $1, $2)", [clerkId, `${clerkId}@example.invalid`]);
+  try {
+    await pool.query("INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)", [clerkId, subscriptionId]);
+    await pool.query("INSERT INTO membership_reconciliation_failures (stripe_subscription_id, consecutive_failures) VALUES ($1, 3)", [subscriptionId]);
+    expect((await reconciliationAlerts()).status).toBe(401);
+    expect((await reconciliationAlerts(member)).status).toBe(403);
+    for (const staff of [owner, admin]) {
+      const result = await reconciliationAlerts(staff);
+      expect(result.status).toBe(200);
+      expect(result.cache).toBe("private, no-store");
+      expect(result.body.subscriptions).toContainEqual({
+        subscriptionId, consecutiveFailures: 3, firstFailedAt: expect.any(String), lastFailedAt: expect.any(String),
+      });
+      expect(JSON.stringify(result.body)).not.toContain(clerkId);
+      expect(JSON.stringify(result.body)).not.toContain("invoice");
+    }
+  } finally {
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [subscriptionId]);
+    await pool.query("DELETE FROM membership_checkouts WHERE stripe_subscription_id = $1", [subscriptionId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [clerkId]);
   }
 });
 

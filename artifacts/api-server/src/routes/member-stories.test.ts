@@ -199,7 +199,7 @@ test("owner can privately review a hidden claim without republishing the story",
     expect((await request("/member-stories/manage", member)).status).toBe(403);
     expect((await request("/member-stories/manage", owner)).data.find((row: { id: number }) => row.id === published.data.id).removalReviewOutcome).toBe(outcome);
     const alertsAfterReview = await request("/member-stories/removal-alerts", owner);
-
+    expect(alertsAfterReview.cache).toContain("no-store");
     expect(alertsAfterReview.data.some((row: { storyId: number }) => row.storyId === published.data.id)).toBe(false);
     expect(alertsAfterReview.data.some((row: { storyId: number }) => row.storyId === stillPending.data.id)).toBe(true);
   }

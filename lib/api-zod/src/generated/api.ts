@@ -337,6 +337,26 @@ export const GetMembershipCheckoutCleanupAlertsResponse = zod.object({
 
 
 /**
+ * @summary Owner and admin alerts for repeated founding subscription review failures
+ */
+export const getMembershipReconciliationAlertsResponseTotalMin = 0;
+
+export const getMembershipReconciliationAlertsResponseSubscriptionsItemConsecutiveFailuresMin = 3;
+
+
+
+export const GetMembershipReconciliationAlertsResponse = zod.object({
+  "total": zod.number().min(getMembershipReconciliationAlertsResponseTotalMin),
+  "subscriptions": zod.array(zod.object({
+  "subscriptionId": zod.string().describe('Stripe subscription ID for staff investigation'),
+  "consecutiveFailures": zod.number().min(getMembershipReconciliationAlertsResponseSubscriptionsItemConsecutiveFailuresMin),
+  "firstFailedAt": zod.coerce.date(),
+  "lastFailedAt": zod.coerce.date()
+}))
+})
+
+
+/**
  * @summary Owner or admin retries one overdue queued checkout cleanup
  */
 

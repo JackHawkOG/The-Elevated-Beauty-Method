@@ -138,6 +138,31 @@ export async function reconcileSubscription(
     );
     await client.query("UPDATE users SET membership_tier = 'Elevated' WHERE clerk_id = $1", [row.clerk_id]);
   }
+  // Clear only after status/access writes succeed, in the same transaction.
+  await client.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [subscriptionId]);
+}
+
+export async function unresolvedReconciliationAlerts(): Promise<{
+  total: number;
+  subscriptions: { subscriptionId: string; consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string }[];
+}> {
+  const result = await pool.query<{
+    subscription_id: string; consecutive_failures: number; first_failed_at: Date; last_failed_at: Date; total: number;
+  }>(`SELECT f.stripe_subscription_id AS subscription_id, f.consecutive_failures, f.first_failed_at, f.last_failed_at,
+       COUNT(*) OVER ()::int AS total
+       FROM membership_reconciliation_failures f
+       JOIN membership_checkouts m ON m.stripe_subscription_id = f.stripe_subscription_id
+       WHERE m.kind = 'founding' AND m.status = 'confirmed' AND f.consecutive_failures >= 3
+       ORDER BY f.last_failed_at DESC, f.stripe_subscription_id LIMIT 100`);
+  return {
+    total: result.rows[0]?.total ?? 0,
+    subscriptions: result.rows.map(row => ({
+      subscriptionId: row.subscription_id,
+      consecutiveFailures: row.consecutive_failures,
+      firstFailedAt: row.first_failed_at.toISOString(),
+      lastFailedAt: row.last_failed_at.toISOString(),
+    })),
+  };
 }
 
 export async function reconcileMemberships(subscriptionId?: string): Promise<void> {
@@ -151,8 +176,8 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
       const stripe = await getUncachableStripeClient();
       let after = "0";
       while (true) {
-        const batch = await client.query<{ id: string; stripe_subscription_id: string }>(
-          "SELECT id, stripe_subscription_id FROM membership_checkouts WHERE (status = 'confirmed' OR (status = 'forfeited' AND kind = 'founding' AND invoice_history_pending AND invoice_history_retry_at <= now())) AND stripe_subscription_id IS NOT NULL AND id > $1 AND ($2::text IS NULL OR stripe_subscription_id = $2) ORDER BY id LIMIT 100",
+        const batch = await client.query<{ id: string; kind: string; status: string; stripe_subscription_id: string }>(
+          "SELECT id, kind, status, stripe_subscription_id FROM membership_checkouts WHERE (status = 'confirmed' OR (status = 'forfeited' AND kind = 'founding' AND invoice_history_pending AND invoice_history_retry_at <= now())) AND stripe_subscription_id IS NOT NULL AND id > $1 AND ($2::text IS NULL OR stripe_subscription_id = $2) ORDER BY id LIMIT 100",
           [after, subscriptionId ?? null],
         );
         if (!batch.rows.length) break;
@@ -165,6 +190,16 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
           } catch (err) {
             await client.query("ROLLBACK");
             logger.error({ err, subscriptionId: row.stripe_subscription_id }, "Membership reconciliation failed");
+            if (row.kind === "founding" && row.status === "confirmed") {
+              try {
+                await client.query(`INSERT INTO membership_reconciliation_failures (stripe_subscription_id)
+                  VALUES ($1) ON CONFLICT (stripe_subscription_id) DO UPDATE SET
+                  consecutive_failures = membership_reconciliation_failures.consecutive_failures + 1,
+                  last_failed_at = now()`, [row.stripe_subscription_id]);
+              } catch (alertError) {
+                logger.error({ err: alertError, subscriptionId: row.stripe_subscription_id }, "Could not record membership reconciliation failure");
+              }
+            }
           }
         }
       }

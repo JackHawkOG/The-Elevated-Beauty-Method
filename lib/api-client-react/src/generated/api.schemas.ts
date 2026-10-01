@@ -217,6 +217,21 @@ export interface MembershipCheckoutCleanupAlerts {
   sessions: MembershipCheckoutCleanupAlert[];
 }
 
+export interface MembershipReconciliationAlert {
+  /** Stripe subscription ID for staff investigation */
+  subscriptionId: string;
+  /** @minimum 3 */
+  consecutiveFailures: number;
+  firstFailedAt: string;
+  lastFailedAt: string;
+}
+
+export interface MembershipReconciliationAlerts {
+  /** @minimum 0 */
+  total: number;
+  subscriptions: MembershipReconciliationAlert[];
+}
+
 export interface MembershipCheckoutCleanupRetryResult {
   resolved: true;
 }

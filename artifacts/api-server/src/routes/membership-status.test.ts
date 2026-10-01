@@ -57,6 +57,10 @@ vi.mock("@workspace/db", () => {
         checkout.membershipTier = "Free";
         return { rows: [] };
       }
+      if (sql.startsWith("DELETE FROM membership_reconciliation_failures")) {
+        expect(params).toEqual([checkout.stripeSubscriptionId]);
+        return { rows: [] };
+      }
       throw new Error(`Unexpected reconciliation query: ${sql}`);
     },
     release: vi.fn(),

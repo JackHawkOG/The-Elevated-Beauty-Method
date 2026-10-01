@@ -30,4 +30,10 @@ export async function ensureMembershipSchema(): Promise<void> {
     created_at timestamptz NOT NULL DEFAULT now()
   )`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS membership_checkout_expirations_age_idx ON membership_checkout_expirations(created_at)`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS membership_reconciliation_failures (
+    stripe_subscription_id text PRIMARY KEY,
+    consecutive_failures integer NOT NULL DEFAULT 1,
+    first_failed_at timestamptz NOT NULL DEFAULT now(),
+    last_failed_at timestamptz NOT NULL DEFAULT now()
+  )`);
 }

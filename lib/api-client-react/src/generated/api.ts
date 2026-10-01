@@ -58,6 +58,7 @@ import type {
   MembershipCheckoutCleanupRetryResult,
   MembershipCheckoutInput,
   MembershipOffer,
+  MembershipReconciliationAlerts,
   MembershipRedirect,
   MyMembership,
   OwnerMemberStory,
@@ -987,6 +988,83 @@ export function useGetMembershipCheckoutCleanupAlerts<TData = Awaited<ReturnType
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMembershipCheckoutCleanupAlertsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMembershipReconciliationAlertsUrl = () => {
+
+
+
+
+  return `/api/membership/reconciliation-alerts`
+}
+
+/**
+ * @summary Owner and admin alerts for repeated founding subscription review failures
+ */
+export const getMembershipReconciliationAlerts = async ( options?: Parameters<typeof customFetch>[1]): Promise<MembershipReconciliationAlerts> => {
+
+  return customFetch<MembershipReconciliationAlerts>(getGetMembershipReconciliationAlertsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMembershipReconciliationAlertsQueryKey = () => {
+    return [
+    `/api/membership/reconciliation-alerts`
+    ] as const;
+    }
+
+
+export const getGetMembershipReconciliationAlertsQueryOptions = <TData = Awaited<ReturnType<typeof getMembershipReconciliationAlerts>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipReconciliationAlerts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMembershipReconciliationAlertsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMembershipReconciliationAlerts>>> = ({ signal }) => getMembershipReconciliationAlerts({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMembershipReconciliationAlerts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMembershipReconciliationAlertsQueryResult = NonNullable<Awaited<ReturnType<typeof getMembershipReconciliationAlerts>>>
+export type GetMembershipReconciliationAlertsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Owner and admin alerts for repeated founding subscription review failures
+ */
+
+export function useGetMembershipReconciliationAlerts<TData = Awaited<ReturnType<typeof getMembershipReconciliationAlerts>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipReconciliationAlerts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMembershipReconciliationAlertsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

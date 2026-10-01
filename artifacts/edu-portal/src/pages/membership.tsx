@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useUser } from "@clerk/react";
 import { Link } from "wouter";
-import { useGetMembershipOffer, useGetMyMembership, useGetConfirmedMembershipCounts, useGetMembershipCheckoutCleanupAlerts, useRetryMembershipCheckoutCleanup, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey, getGetConfirmedMembershipCountsQueryKey, getGetMembershipCheckoutCleanupAlertsQueryKey } from "@workspace/api-client-react";
+import { useGetMembershipOffer, useGetMyMembership, useGetConfirmedMembershipCounts, useGetMembershipCheckoutCleanupAlerts, useGetMembershipReconciliationAlerts, useRetryMembershipCheckoutCleanup, useCreateMembershipCheckout, useCreateMembershipPortal, getGetMembershipOfferQueryKey, getGetMyMembershipQueryKey, getGetConfirmedMembershipCountsQueryKey, getGetMembershipCheckoutCleanupAlertsQueryKey, getGetMembershipReconciliationAlertsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ export default function MembershipPage() {
   const queryClient = useQueryClient();
   const counts = useGetConfirmedMembershipCounts({ query: { queryKey: getGetConfirmedMembershipCountsQueryKey(), enabled: isOwner, staleTime: 30000, refetchInterval: 60000 } });
   const cleanupAlerts = useGetMembershipCheckoutCleanupAlerts({ query: { queryKey: getGetMembershipCheckoutCleanupAlertsQueryKey(), enabled: isOwner, refetchInterval: 60000, refetchOnWindowFocus: "always" } });
+  const reconciliationAlerts = useGetMembershipReconciliationAlerts({ query: { queryKey: getGetMembershipReconciliationAlertsQueryKey(), enabled: isOwner, refetchInterval: 60000, refetchOnWindowFocus: "always" } });
   const { data: offer, isLoading, isError } = useGetMembershipOffer({
     query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 15000, staleTime: 5000 },
   });
@@ -134,6 +135,16 @@ export default function MembershipPage() {
             </li>)}
           </ul>
           {cleanupAlerts.data.total > cleanupAlerts.data.sessions.length && <p className="mt-2 text-sm">Showing the oldest 100 sessions. Check server logs for the remaining failures.</p>}
+        </section> : null)}
+      {isOwner && (reconciliationAlerts.isError
+        ? <p role="alert" className="rounded-2xl border border-destructive p-4 text-destructive">Billing review alerts are unavailable. Check server logs for reconciliation failures.</p>
+        : reconciliationAlerts.data?.total ? <section role="alert" className="rounded-2xl border border-destructive bg-card p-6">
+          <h2 className="font-serif text-2xl">Founding billing reviews need attention</h2>
+          <p className="mt-2">{reconciliationAlerts.data.total} founding {reconciliationAlerts.data.total === 1 ? "subscription has" : "subscriptions have"} failed review at least three times in a row. Check the subscription in Stripe and server logs; the server will keep retrying.</p>
+          <ul className="mt-3 space-y-1 text-sm">
+            {reconciliationAlerts.data.subscriptions.map(subscription => <li key={subscription.subscriptionId}><code>{subscription.subscriptionId}</code> · {subscription.consecutiveFailures} failed reviews · first failed {new Date(subscription.firstFailedAt).toLocaleString()} · last failed {new Date(subscription.lastFailedAt).toLocaleString()}</li>)}
+          </ul>
+          {reconciliationAlerts.data.total > reconciliationAlerts.data.subscriptions.length && <p className="mt-2 text-sm">Showing the latest 100 subscriptions. Check server logs for the remaining failures.</p>}
         </section> : null)}
       {isOwner && cleanupError && <p role="alert" className="text-destructive">{cleanupError}</p>}
       {isOwner && cleanupMessage && <p role="status">{cleanupMessage}</p>}

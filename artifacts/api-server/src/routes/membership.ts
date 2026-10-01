@@ -3,10 +3,10 @@ import { db, pool, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { clerkClient } from "@clerk/express";
-import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlertsResponse, RetryMembershipCheckoutCleanupParams, RetryMembershipCheckoutCleanupResponse } from "@workspace/api-zod";
+import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlertsResponse, GetMembershipReconciliationAlertsResponse, RetryMembershipCheckoutCleanupParams, RetryMembershipCheckoutCleanupResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
-import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp } from "../lib/membership-reconciliation";
+import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp, unresolvedReconciliationAlerts } from "../lib/membership-reconciliation";
 import { GetMyMembershipResponse } from "@workspace/api-zod";
 import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations, retryQueuedCheckoutExpiration } from "../lib/membership-checkout-expirations";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, restorePaidCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
@@ -173,6 +173,23 @@ router.post("/membership/checkout-cleanup-alerts/:sessionId/retry", requireAuth,
     req.log.error({ err: error, stripeSessionId: params.data.sessionId }, "Staff checkout cleanup retry failed");
     res.status(503).json({ error: "Cleanup retry failed. The alert remains queued; try again later." });
   }
+});
+
+router.get("/membership/reconciliation-alerts", requireAuth, async (req, res): Promise<void> => {
+  res.set("Cache-Control", "private, no-store");
+  let role: unknown;
+  try {
+    role = (await clerkClient.users.getUser(req.userId!)).publicMetadata.role;
+  } catch (error) {
+    req.log.error({ err: error }, "Could not verify billing review alert access");
+    res.status(503).json({ error: "Unable to verify staff access" });
+    return;
+  }
+  if (role !== "owner" && role !== "admin") {
+    res.status(403).json({ error: "Staff access required" });
+    return;
+  }
+  res.json(GetMembershipReconciliationAlertsResponse.parse(await unresolvedReconciliationAlerts()));
 });
 
 router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {

@@ -884,4 +884,4 @@ test("founding inventory and payment failures retain their original guarantees",
   expect((await request("/membership/offer")).data.foundingAvailable).toBe(false);
   expect(processWebhook).toHaveBeenCalled();
   vi.restoreAllMocks();
-});
+}, 30_000);

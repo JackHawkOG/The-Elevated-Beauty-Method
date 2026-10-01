@@ -40,3 +40,9 @@ After a rebase adds dependencies, refresh the installed workspace from the merge
 **Why:** The Git merge updates package manifests and the lockfile, but the isolated task's installed dependencies can still reflect its earlier checkout.
 
 **How to apply:** If a newly merged test cannot load a package already declared in the merged manifests, restore dependencies with the frozen lockfile rather than adding another declaration or changing the test.
+
+In a multi-commit rebase, a later repair commit can reintroduce malformed automatic merge output into files resolved correctly in an earlier round. A conflict with no remaining markers is not proof of correct handler or test placement.
+
+**Why:** Semantic conflict resolution has displaced unrelated route bodies and test setup while leaving plausible text, including in the next round's "ours" version.
+
+**How to apply:** Compare full conflicted handlers and test suites against the latest main baseline in each round, then reapply only the intended additions. Preserve newer baseline features rather than assuming the previously resolved side is still clean.

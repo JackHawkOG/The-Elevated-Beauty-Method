@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   role: "member",
   cleanup: { total: 0, sessions: [] as Array<{ sessionId: string; queuedAt: string }> },
+  reconciliation: { total: 0, subscriptions: [] as Array<{ subscriptionId: string; consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string }> },
 }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
@@ -26,6 +27,7 @@ vi.mock("@workspace/api-client-react", () => ({
   useGetMyMembership: () => ({ data: { membership: state.membership }, isPending: false, isError: false }),
   useGetConfirmedMembershipCounts: () => ({ data: { founding: 0, standard: 0 } }),
   useGetMembershipCheckoutCleanupAlerts: () => ({ data: state.cleanup }),
+  useGetMembershipReconciliationAlerts: () => ({ data: state.reconciliation }),
   useRetryMembershipCheckoutCleanup: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateMembershipCheckout: () => ({ isPending: false }),
   useCreateMembershipPortal: () => ({ isPending: false }),
@@ -33,6 +35,7 @@ vi.mock("@workspace/api-client-react", () => ({
   getGetMyMembershipQueryKey: () => ["membership", "me"],
   getGetConfirmedMembershipCountsQueryKey: () => ["membership", "confirmed-counts"],
   getGetMembershipCheckoutCleanupAlertsQueryKey: () => ["membership", "checkout-cleanup-alerts"],
+  getGetMembershipReconciliationAlertsQueryKey: () => ["membership", "reconciliation-alerts"],
 }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: state.invalidateQueries }) }));
 vi.mock("@clerk/react", () => ({ useUser: () => ({ user: { publicMetadata: { role: state.role } } }) }));
@@ -86,6 +89,28 @@ test("staff see overdue cleanup alerts without checkout links, which clear with 
   state.role = "member";
   expect(page("open", true)).not.toContain("cs_test_overdue");
   state.cleanup = { total: 0, sessions: [] };
+});
+
+test("billing review failures are visible to staff, but never to members, and clear after recovery", () => {
+  state.role = "admin";
+  state.reconciliation = { total: 1, subscriptions: [{
+    subscriptionId: "sub_test_review",
+    consecutiveFailures: 3,
+    firstFailedAt: "2026-10-01T14:00:00Z",
+    lastFailedAt: "2026-10-01T14:30:00Z",
+  }] };
+  const alert = page("open", true);
+  expect(alert).toContain("Founding billing reviews need attention");
+  expect(alert).toContain("sub_test_review");
+  expect(alert).toContain("3 failed reviews");
+
+  state.role = "member";
+  expect(page("open", true)).not.toContain("sub_test_review");
+  expect(page("open", true)).not.toContain("Founding billing reviews need attention");
+
+  state.role = "owner";
+  state.reconciliation = { total: 0, subscriptions: [] };
+  expect(page("open", true)).not.toContain("Founding billing reviews need attention");
 });
 
 test("billing return refreshes scheduled cancellation to resumed or ended wording", () => {
