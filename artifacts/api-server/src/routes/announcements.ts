@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, announcementsTable, usersTable, activityTable } from "@workspace/db";
-import { eq, desc, and, or, lt } from "drizzle-orm";
+import { eq, desc, and, or, lt, ilike } from "drizzle-orm";
 import {
   ListAnnouncementsQueryParams,
   ListAnnouncementsResponse,
@@ -22,10 +22,17 @@ router.get("/announcements", async (req, res): Promise<void> => {
   }
   const limit = parsed.data.limit ?? 20;
   const after = parsed.data.after;
+  const search = parsed.data.search?.trim();
+  // Treat user input literally, including SQL LIKE wildcards and escape characters.
+  const pattern = search ? `%${search.replace(/[\\%_]/g, "\\$&")}%` : undefined;
+  const searchFilter = pattern ? or(
+    ilike(announcementsTable.title, pattern),
+    ilike(announcementsTable.body, pattern),
+  ) : undefined;
   let cursor: typeof announcementsTable.$inferSelect | undefined;
   if (after !== undefined) {
     [cursor] = await db.select().from(announcementsTable)
-      .where(eq(announcementsTable.id, after)).limit(1);
+      .where(and(eq(announcementsTable.id, after), searchFilter)).limit(1);
     if (!cursor) {
       res.status(400).json({ error: "Invalid announcement cursor" });
       return;
@@ -33,7 +40,7 @@ router.get("/announcements", async (req, res): Promise<void> => {
   }
 
   const rows = await db.select().from(announcementsTable)
-    .where(cursor ? or(
+    .where(and(searchFilter, cursor ? or(
       // Once past the pinned group, only unpinned posts can follow.
       ...(cursor.pinned ? [eq(announcementsTable.pinned, false)] : []),
       and(
@@ -43,7 +50,7 @@ router.get("/announcements", async (req, res): Promise<void> => {
           and(eq(announcementsTable.createdAt, cursor.createdAt), lt(announcementsTable.id, cursor.id)),
         ),
       ),
-    ) : undefined)
+    ) : undefined))
     .orderBy(desc(announcementsTable.pinned), desc(announcementsTable.createdAt), desc(announcementsTable.id))
     .limit(limit);
 

@@ -33,24 +33,31 @@ function announcementIdFromHash() {
 
 export default function CommunityPage() {
   const [targetId, setTargetId] = useState(announcementIdFromHash);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  // Deep links remain available in the full archive, but must not add
+  // nonmatching cards to a filtered result.
+  const visibleTargetId = search ? null : targetId;
   const pageSize = 20;
   const {
     data: announcementPages, isLoading: announcementsLoading, isError: announcementsError,
     fetchNextPage, hasNextPage, isFetchingNextPage, isFetchNextPageError,
     refetch: refetchAnnouncements,
   } = useInfiniteQuery({
-    queryKey: [...getListAnnouncementsQueryKey(), "pages"],
+    queryKey: [...getListAnnouncementsQueryKey(), "pages", search],
     initialPageParam: undefined as number | undefined,
-    queryFn: ({ pageParam, signal }) => listAnnouncements({ limit: pageSize, ...(pageParam ? { after: pageParam } : {}) }, { signal }),
+    queryFn: ({ pageParam, signal }) => listAnnouncements({
+      limit: pageSize, ...(search ? { search } : {}), ...(pageParam ? { after: pageParam } : {}),
+    }, { signal }),
     getNextPageParam: lastPage => lastPage.length === pageSize ? lastPage[lastPage.length - 1].id : undefined,
   });
   const announcements = announcementPages && Array.from(
     new Map(announcementPages.pages.flat().map(post => [post.id, post])).values(),
   );
   const { data: activity, isLoading: activityLoading } = useGetRecentActivity();
-  const targetInList = announcements?.some(post => post.id === targetId);
-  const { data: targetedPost, isLoading: targetLoading, isError: targetError } = useGetAnnouncement(targetId ?? 0, {
-    query: { queryKey: getGetAnnouncementQueryKey(targetId ?? 0), enabled: !!targetId && !!announcements && !targetInList, retry: false },
+  const targetInList = announcements?.some(post => post.id === visibleTargetId);
+  const { data: targetedPost, isLoading: targetLoading, isError: targetError } = useGetAnnouncement(visibleTargetId ?? 0, {
+    query: { queryKey: getGetAnnouncementQueryKey(visibleTargetId ?? 0), enabled: !!visibleTargetId && !!announcements && !targetInList, retry: false },
   });
 
   useEffect(() => {
@@ -60,10 +67,10 @@ export default function CommunityPage() {
   }, []);
 
   useEffect(() => {
-    if (!announcements || !targetId || (!targetInList && !targetedPost)) return;
-    const target = document.getElementById(`announcement-${targetId}`);
+    if (!announcements || !visibleTargetId || (!targetInList && !targetedPost)) return;
+    const target = document.getElementById(`announcement-${visibleTargetId}`);
     target?.scrollIntoView();
-  }, [announcements, targetId, targetInList, targetedPost]);
+  }, [announcements, visibleTargetId, targetInList, targetedPost]);
   
   return (
     <AppLayout>
@@ -79,8 +86,27 @@ export default function CommunityPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-6">
             <h2 className="text-2xl font-serif font-bold border-b border-border pb-2">Announcements</h2>
+            <form role="search" aria-label="Search announcements" className="space-y-2" onSubmit={event => {
+              event.preventDefault();
+              setSearch(searchInput.trim());
+            }}>
+              <label htmlFor="announcement-search" className="text-sm font-medium">Search announcements</label>
+              <div className="flex flex-wrap gap-2">
+                <Input id="announcement-search" type="search" className="flex-1 min-w-40"
+                  placeholder="Search titles and messages" maxLength={200}
+                  value={searchInput} onChange={event => setSearchInput(event.target.value)} />
+                <Button type="submit">Search</Button>
+                {(searchInput || search) && <Button type="button" variant="outline" onClick={() => {
+                  setSearchInput("");
+                  setSearch("");
+                }}>Clear search</Button>}
+              </div>
+              <p className="text-sm text-muted-foreground" role="status">
+                {search ? `Results for “${search}” across all announcements.` : "Search the full announcement archive."}
+              </p>
+            </form>
             
-            {announcementsLoading || (targetId && !targetInList && targetLoading) ? (
+            {announcementsLoading || (visibleTargetId && !targetInList && targetLoading) ? (
               <div className="space-y-4">
                 {[1, 2, 3].map(i => <Skeleton key={i} className="h-48 w-full rounded-2xl bg-card border border-border" />)}
               </div>
@@ -92,8 +118,8 @@ export default function CommunityPage() {
             ) : announcements?.length === 0 && !targetedPost && !targetError ? (
               <div className="text-center py-16 border border-dashed border-border rounded-2xl bg-card/30">
                 <MessageSquare className="w-10 h-10 text-muted-foreground/50 mx-auto mb-3" />
-                <h3 className="text-lg font-bold mb-1">No announcements yet</h3>
-                <p className="text-muted-foreground text-sm">Check back later for updates.</p>
+                <h3 className="text-lg font-bold mb-1">{search ? "No matching announcements" : "No announcements yet"}</h3>
+                <p className="text-muted-foreground text-sm">{search ? "Try another topic or clear your search." : "Check back later for updates."}</p>
               </div>
             ) : (
               <div className="space-y-6">

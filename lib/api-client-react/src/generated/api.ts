@@ -2657,7 +2657,7 @@ export const getListAnnouncementsUrl = (params?: ListAnnouncementsParams,) => {
 }
 
 /**
- * Returns announcements ordered by pinned first, then newest creation time and ID. Pass the last returned announcement ID as after to continue the list.
+ * Returns announcements ordered by pinned first, then newest creation time and ID. Search matches a case-insensitive literal substring in title or body across the full archive. Pass the last returned announcement ID as after with the same search to continue the filtered list.
  * @summary List community announcements
  */
 export const listAnnouncements = async (params?: ListAnnouncementsParams, options?: Parameters<typeof customFetch>[1]): Promise<Announcement[]> => {

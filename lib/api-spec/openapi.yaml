@@ -728,8 +728,15 @@ paths:
       operationId: listAnnouncements
       tags: [announcements]
       summary: List community announcements
-      description: Returns announcements ordered by pinned first, then newest creation time and ID. Pass the last returned announcement ID as after to continue the list.
+      description: Returns announcements ordered by pinned first, then newest creation time and ID. Search matches a case-insensitive literal substring in title or body across the full archive. Pass the last returned announcement ID as after with the same search to continue the filtered list.
       parameters:
+        - in: query
+          name: search
+          description: Search title or body. Surrounding whitespace is ignored; an empty search returns all announcements.
+          schema:
+            type: string
+            maxLength: 200
+          required: false
         - in: query
           name: limit
           schema:

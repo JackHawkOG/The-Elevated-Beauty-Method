@@ -845,9 +845,11 @@ export const UpdateProgressResponse = zod.object({
 
 
 /**
- * Returns announcements ordered by pinned first, then newest creation time and ID. Pass the last returned announcement ID as after to continue the list.
+ * Returns announcements ordered by pinned first, then newest creation time and ID. Search matches a case-insensitive literal substring in title or body across the full archive. Pass the last returned announcement ID as after with the same search to continue the filtered list.
  * @summary List community announcements
  */
+export const listAnnouncementsQuerySearchMax = 200;
+
 export const listAnnouncementsQueryLimitMax = 100;
 
 export const listAnnouncementsQueryAfterMax = 2147483647;
@@ -855,6 +857,7 @@ export const listAnnouncementsQueryAfterMax = 2147483647;
 
 
 export const ListAnnouncementsQueryParams = zod.object({
+  "search": zod.coerce.string().max(listAnnouncementsQuerySearchMax).optional().describe('Search title or body. Surrounding whitespace is ignored; an empty search returns all announcements.'),
   "limit": zod.coerce.number().int().min(1).max(listAnnouncementsQueryLimitMax).optional(),
   "after": zod.coerce.number().int().min(1).max(listAnnouncementsQueryAfterMax).optional().describe('ID of the last announcement from the preceding page.')
 })

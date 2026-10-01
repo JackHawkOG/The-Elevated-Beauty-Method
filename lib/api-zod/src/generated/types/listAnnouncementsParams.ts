@@ -8,6 +8,11 @@
 
 export type ListAnnouncementsParams = {
 /**
+ * Search title or body. Surrounding whitespace is ignored; an empty search returns all announcements.
+ * @maxLength 200
+ */
+search?: string;
+/**
  * @minimum 1
  * @maximum 100
  */
