@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { activityTable, announcementsTable, db, pool, usersTable } from "@workspace/db";
 import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
 import { requireDevelopmentDatabase } from "./test-development-database";
@@ -14,6 +14,7 @@ vi.mock("@clerk/express", () => ({
 
 const run = randomUUID();
 const user = `test-announcement-${run}`;
+const pagingActor = `test-announcement-pager-${run}`;
 const title = `Announcement test ${run}`;
 const failingTitle = `${title} blocked`;
 const legacyTitle = `${title} historical`;
@@ -22,7 +23,11 @@ let baseUrl: string;
 const ids: number[] = [];
 let started = false;
 
-async function post(key: string | null, body = { title, body: "An update" }, actor = user) {
+async function post(
+  key: string | null,
+  body: { title: string; body: string; pinned?: boolean } = { title, body: "An update" },
+  actor = user,
+) {
   const response = await fetch(`${baseUrl}/announcements`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-test-user": actor, ...(key ? { "Idempotency-Key": key } : {}) },
@@ -53,16 +58,25 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("No test server address");
   baseUrl = `http://127.0.0.1:${address.port}`;
-  await db.insert(usersTable).values({ clerkId: user, email: `${user}@example.invalid`, displayName: "Announcement Test" });
+  await db.insert(usersTable).values([
+    { clerkId: user, email: `${user}@example.invalid`, displayName: "Announcement Test" },
+    { clerkId: pagingActor, email: `${pagingActor}@example.invalid`, displayName: "Paging Actor" },
+  ]);
 });
 
 afterAll(async () => {
   try {
     if (server) await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
     if (!started) return;
-    await db.delete(activityTable).where(inArray(activityTable.entityTitle, [title, failingTitle, legacyTitle]));
-    if (ids.length) await db.delete(announcementsTable).where(inArray(announcementsTable.id, ids));
-    await db.delete(usersTable).where(eq(usersTable.clerkId, user));
+    const actorRows = await db.select({ id: announcementsTable.id }).from(announcementsTable)
+      .where(inArray(announcementsTable.actorId, [user, pagingActor, `another-user-${run}`]));
+    const ownedIds = [...new Set([...ids, ...actorRows.map(row => row.id)])];
+    if (ownedIds.length) {
+      await db.delete(activityTable).where(inArray(activityTable.sourceAnnouncementId, ownedIds));
+      await db.delete(announcementsTable).where(inArray(announcementsTable.id, ownedIds));
+    }
+    await db.delete(activityTable).where(eq(activityTable.entityTitle, legacyTitle));
+    await db.delete(usersTable).where(inArray(usersTable.clerkId, [user, pagingActor]));
   } finally {
     await pool.end();
   }
@@ -135,36 +149,93 @@ test("an activity write failure rolls back the post and permits a clean retry", 
   expect(linked[0].sourceAnnouncementId).toBe(retried.data.id);
 });
 
-test("announcement pages keep pinned-first order and break timestamp ties by ID", async () => {
-  const createdAt = new Date("2099-01-01T00:00:00.000Z");
+test("keyset pages retain fixture order while another actor posts pinned and unpinned announcements", async () => {
+  const pinnedTieAt = new Date(Date.now() - 60 * 60 * 1000);
+  const pinnedOlderAt = new Date(pinnedTieAt.getTime() - 60 * 60 * 1000);
+  const unpinnedTieAt = new Date(pinnedTieAt.getTime() + 30 * 60 * 1000);
   const fixtures = await db.insert(announcementsTable).values([
     ...Array.from({ length: 3 }, (_, i) => ({
-      title: `${title} page ${i}`, body: "Paging fixture", authorName: "Test",
-      pinned: true, createdAt,
+      title: `${title} pinned tie ${i}`, body: "Paging fixture", authorName: "Test",
+      pinned: true, createdAt: pinnedTieAt,
     })),
-    { title: `${title} unpinned`, body: "Paging fixture", authorName: "Test", pinned: false, createdAt },
+    ...Array.from({ length: 2 }, (_, i) => ({
+      title: `${title} pinned older ${i}`, body: "Paging fixture", authorName: "Test",
+      pinned: true, createdAt: pinnedOlderAt,
+    })),
+    ...Array.from({ length: 3 }, (_, i) => ({
+      title: `${title} unpinned tie ${i}`, body: "Paging fixture", authorName: "Test",
+      // Unpinned posts remain below every pinned post, even with a newer timestamp.
+      pinned: false, createdAt: unpinnedTieAt,
+    })),
   ]).returning();
   ids.push(...fixtures.map(row => row.id));
-  const expected = [...fixtures.slice(0, 3)].reverse().map(row => row.id);
-  const first = await fetch(`${baseUrl}/announcements?limit=2`);
-  expect(first.status).toBe(200);
-  const firstPage = await first.json() as Array<{ id: number }>;
-  expect(firstPage.map(row => row.id)).toEqual(expected.slice(0, 2));
-  const second = await fetch(`${baseUrl}/announcements?limit=2&after=${firstPage[1].id}`);
-  expect(second.status).toBe(200);
-  const secondPage = await second.json() as Array<{ id: number }>;
-  expect(secondPage[0].id).toBe(expected[2]);
-  expect(new Set([...firstPage, ...secondPage].map(row => row.id)).size).toBe(4);
+  const expected = [...fixtures]
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) ||
+      b.createdAt.getTime() - a.createdAt.getTime() || b.id - a.id)
+    .map(row => row.id);
+  const fixtureIds = new Set(expected);
+  const pageSize = 2;
+  const readPage = async (after?: number) => {
+    const query = new URLSearchParams({ limit: String(pageSize) });
+    if (after !== undefined) query.set("after", String(after));
+    const response = await fetch(`${baseUrl}/announcements?${query}`);
+    expect(response.status).toBe(200);
+    return await response.json() as Array<{ id: number; pinned: boolean; createdAt: string }>;
+  };
+  const visited: Array<{ id: number; pinned: boolean; createdAt: string }> = [];
+  const record = (page: typeof visited) => {
+    visited.push(...page);
+    expect(new Set(visited.map(row => row.id)).size).toBe(visited.length);
+    expect(visited).toEqual([...visited].sort((a, b) =>
+      Number(b.pinned) - Number(a.pinned) ||
+      Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id,
+    ));
+  };
 
-  const [oldestPinned] = await db.select().from(announcementsTable)
-    .where(eq(announcementsTable.pinned, true))
-    .orderBy(asc(announcementsTable.createdAt), asc(announcementsTable.id)).limit(1);
-  const [newestUnpinned] = await db.select().from(announcementsTable)
-    .where(eq(announcementsTable.pinned, false))
-    .orderBy(desc(announcementsTable.createdAt), desc(announcementsTable.id)).limit(1);
-  const crossing = await fetch(`${baseUrl}/announcements?limit=1&after=${oldestPinned.id}`);
-  expect(crossing.status).toBe(200);
-  expect((await crossing.json() as Array<{ id: number }>)[0].id).toBe(newestUnpinned.id);
+  const firstPage = await readPage();
+  expect(firstPage.length).toBe(pageSize);
+  record(firstPage);
+
+  const pinnedTitle = `${title} posted pinned`;
+  const pinnedPost = await post(randomUUID(), { title: pinnedTitle, body: "Posted during paging", pinned: true }, pagingActor);
+  expect(pinnedPost.status).toBe(201);
+  expect(pinnedPost.data.id).toBeDefined();
+  ids.push(pinnedPost.data.id!);
+
+  const secondPage = await readPage(firstPage.at(-1)!.id);
+  expect(secondPage.length).toBe(pageSize);
+  record(secondPage);
+
+  const unpinnedTitle = `${title} posted unpinned`;
+  const unpinnedPost = await post(randomUUID(), { title: unpinnedTitle, body: "Posted during paging", pinned: false }, pagingActor);
+  expect(unpinnedPost.status).toBe(201);
+  expect(unpinnedPost.data.id).toBeDefined();
+  ids.push(unpinnedPost.data.id!);
+  const postedRows = await db.select().from(announcementsTable)
+    .where(inArray(announcementsTable.id, [pinnedPost.data.id!, unpinnedPost.data.id!]));
+  expect(postedRows.map(row => [row.actorId, row.pinned]).sort()).toEqual([
+    [pagingActor, false],
+    [pagingActor, true],
+  ].sort());
+
+  let cursor = secondPage.at(-1)!.id;
+  while (!expected.every(id => visited.some(row => row.id === id))) {
+    const page = await readPage(cursor);
+    expect(page.length).toBeGreaterThan(0);
+    record(page);
+    cursor = page.at(-1)!.id;
+  }
+
+  const fixtureRows = visited.filter(row => fixtureIds.has(row.id));
+  expect(fixtureRows.map(row => row.id)).toEqual(expected);
+  expect(fixtureRows.map(row => row.pinned)).toEqual([
+    true, true, true, true, true, false, false, false,
+  ]);
+  expect(fixtureRows[0].createdAt).toBe(fixtureRows[1].createdAt);
+  expect(fixtureRows[0].id).toBeGreaterThan(fixtureRows[1].id);
+  expect(fixtureRows[5].id).toBeGreaterThan(fixtureRows[6].id);
+  expect(visited.some(row => row.id === unpinnedPost.data.id)).toBe(true);
+
   for (const query of ["limit=0", "limit=101", "after=-1", "after=2147483648", "after=999999999"]) {
     expect((await fetch(`${baseUrl}/announcements?${query}`)).status).toBe(400);
   }

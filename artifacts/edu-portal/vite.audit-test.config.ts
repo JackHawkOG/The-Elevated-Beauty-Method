@@ -13,6 +13,6 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom"],
   },
-  optimizeDeps: { entries: ["tests/audit-harness.html", "tests/membership-harness.html", "tests/lesson-harness.html"] },
+  optimizeDeps: { entries: ["tests/audit-harness.html", "tests/membership-harness.html", "tests/lesson-harness.html", "tests/community-harness.html"] },
   server: { host: "127.0.0.1", strictPort: true },
 });
