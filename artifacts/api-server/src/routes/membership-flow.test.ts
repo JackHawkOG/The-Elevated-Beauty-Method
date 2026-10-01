@@ -324,23 +324,55 @@ test("recovery does not expire a checkout that completed while cleanup was unava
   sessions.delete(id);
 });
 
-test("recovery clears a paid checkout retry even when Stripe still marks it open", async () => {
-  const id = `cs_${randomUUID()}`;
-  const session: TestSession = { id, status: "open", payment_status: "paid", url: "https://checkout.stripe.test/paid",
-    created: Math.floor(Date.now() / 1000) };
-  sessions.set(id, session);
-  await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
+test("paid reconciliation restores a checkout once after its paid-but-open cleanup retry was cleared", async () => {
+  clock(opens);
+  const buyer = await addUser(218);
+  expect((await request("/membership/checkout", "POST", buyer, { kind: "standard" })).status).toBe(200);
+  const session = sessions.get((await row(buyer)).stripe_session_id)!;
+  const id = session.id;
+  await pool.query("DELETE FROM membership_checkouts WHERE stripe_session_id = $1", [id]);
+  session.payment_status = "paid";
+  session.subscription = `sub_${randomUUID()}`;
   try {
+    await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
+    expect(await row(buyer)).toBeUndefined();
     const expirationsBefore = expireSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
+    const createdBefore = createSession.mock.calls.length;
     await recoverQueuedCheckoutExpirations();
     expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirationsBefore);
     expect(session).toMatchObject({ id, status: "open", payment_status: "paid" });
+    expect(await row(buyer)).toBeUndefined();
     expect((await pool.query(
       "SELECT 1 FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
     )).rows).toHaveLength(0);
+
+    // The paid-session sweep must wait for completion, independently of the cleared queue.
+    await reconcileUntrackedPaidSessions(buyer);
+    expect(await row(buyer)).toBeUndefined();
+    session.status = "complete";
+    await reconcileUntrackedPaidSessions(buyer);
+    expect(await row(buyer)).toMatchObject({
+      status: "confirmed", stripe_session_id: id, membership_tier: "Elevated",
+    });
+    const restored = await pool.query(
+      "SELECT id, stripe_subscription_id FROM membership_checkouts WHERE clerk_id = $1", [buyer],
+    );
+    expect(restored.rows).toEqual([{ id: expect.any(String), stripe_subscription_id: session.subscription }]);
+
+    await reconcileUntrackedPaidSessions(buyer);
+    expect((await pool.query(
+      "SELECT id, stripe_subscription_id FROM membership_checkouts WHERE clerk_id = $1", [buyer],
+    )).rows).toEqual(restored.rows);
+    expect(await row(buyer)).toMatchObject({ status: "confirmed", membership_tier: "Elevated" });
+    expect((await pool.query(
+      "SELECT 1 FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
+    )).rows).toHaveLength(0);
+    expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirationsBefore);
+    expect(createSession.mock.calls.length).toBe(createdBefore);
   } finally {
     await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id]);
     sessions.delete(id);
+    vi.restoreAllMocks();
   }
 });
 
