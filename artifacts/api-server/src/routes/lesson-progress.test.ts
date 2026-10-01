@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   db, pool, activityTable, categoriesTable, coursesTable, enrollmentsTable,
   lessonCompletionsTable, lessonsTable, usersTable,
@@ -20,6 +20,11 @@ vi.mock("../middlewares/requireAuth", () => ({
     next();
   },
   jitProvisionUser: (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
+}));
+
+// Editorial requests stay inside the isolated router, with no live Clerk calls.
+vi.mock("@clerk/express", () => ({
+  clerkClient: { users: { getUser: vi.fn().mockResolvedValue({ publicMetadata: { role: "editor" } }) } },
 }));
 
 const run = randomUUID();
@@ -724,6 +729,104 @@ test("two published approved copies consistently select the lowest ID for listin
     await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
   }
 });
+
+test.each(["success", "cleanup failure", "failure after cleanup"] as const)(
+  "returning a lesson to draft clears only its course's resume pointers: %s",
+  async outcome => {
+    const fixtureCourses: number[] = [];
+    let transactionSpy: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      const courses = await db.insert(coursesTable).values([1, 2].map(index => ({
+        title: `Editorial resume ${index} ${run}`, description: "Isolated editorial fixture",
+        categoryId, instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+      }))).returning();
+      fixtureCourses.push(...courses.map(course => course.id));
+      const [target, sibling, other] = await db.insert(lessonsTable).values([
+        { courseId: courses[0].id, title: "Published target", content: "Original copy", sortOrder: 1, publishedAt: new Date() },
+        { courseId: courses[0].id, title: "Published sibling", sortOrder: 2, publishedAt: new Date() },
+        { courseId: courses[1].id, title: "Other course lesson", sortOrder: 1, publishedAt: new Date() },
+      ]).returning();
+      const members = [1, 2, 3, 4].map(index => `test-editorial-${run}-${index}`);
+      await db.insert(enrollmentsTable).values([
+        { userId: members[0], courseId: target.courseId, lastLessonId: target.id, completedLessons: 2 },
+        { userId: members[1], courseId: target.courseId, lastLessonId: target.id, completedLessons: 1 },
+        { userId: members[2], courseId: target.courseId, lastLessonId: sibling.id, completedLessons: 1 },
+        { userId: members[3], courseId: target.courseId, lastLessonId: null, completedLessons: 0 },
+        { userId: members[0], courseId: other.courseId, lastLessonId: other.id, completedLessons: 1 },
+        // Even a preexisting invalid pointer in another course is outside this edit.
+        { userId: members[1], courseId: other.courseId, lastLessonId: target.id, completedLessons: 0 },
+      ]);
+      await db.insert(lessonCompletionsTable).values([
+        { userId: members[0], lessonId: target.id },
+        { userId: members[0], lessonId: sibling.id },
+        { userId: members[1], lessonId: target.id },
+        { userId: members[2], lessonId: sibling.id },
+        { userId: members[0], lessonId: other.id },
+      ]);
+      const readEnrollments = () => db.select().from(enrollmentsTable)
+        .where(inArray(enrollmentsTable.courseId, fixtureCourses)).orderBy(enrollmentsTable.id);
+      const readCompletions = () => db.select().from(lessonCompletionsTable)
+        .where(inArray(lessonCompletionsTable.lessonId, [target.id, sibling.id, other.id]))
+        .orderBy(lessonCompletionsTable.userId, lessonCompletionsTable.lessonId);
+      const beforeEnrollments = await readEnrollments();
+      const beforeCompletions = await readCompletions();
+      const failure = new Error(`Injected ${outcome}`);
+
+      if (outcome !== "success") {
+        const transaction = db.transaction.bind(db);
+        transactionSpy = vi.spyOn(db, "transaction").mockImplementationOnce((callback, config) =>
+          transaction(async tx => {
+            if (outcome === "cleanup failure") {
+              const update = tx.update.bind(tx);
+              vi.spyOn(tx, "update").mockImplementation(((table: typeof enrollmentsTable) => {
+                if (table === enrollmentsTable) {
+                  return { set: () => ({ where: () => Promise.reject(failure) }) };
+                }
+                return update(table);
+              }) as typeof tx.update);
+            }
+            const result = await callback(tx);
+            if (outcome === "failure after cleanup") throw failure;
+            return result;
+          }, config),
+        );
+      }
+
+      const edited = await request("test-editor", `/lessons/${target.id}`, "PATCH", {
+        title: target.title, content: "Edited draft", sortOrder: target.sortOrder,
+        durationMinutes: target.durationMinutes,
+      });
+      expect(edited.status).toBe(outcome === "success" ? 200 : 500);
+      const [storedLesson] = await db.select().from(lessonsTable).where(eq(lessonsTable.id, target.id));
+      if (outcome === "success") {
+        expect(edited.data).toMatchObject({ id: target.id, content: "Edited draft" });
+        expect(storedLesson).toEqual({ ...target, content: "Edited draft", publishedAt: null });
+        expect(await readEnrollments()).toEqual(beforeEnrollments.map(row =>
+          row.courseId === target.courseId && row.lastLessonId === target.id
+            ? { ...row, lastLessonId: null } : row,
+        ));
+      } else {
+        expect(edited.data).toEqual({ error: failure.message });
+        expect(storedLesson).toEqual(target);
+        expect(await readEnrollments()).toEqual(beforeEnrollments);
+      }
+      expect(await readCompletions()).toEqual(beforeCompletions);
+      expect(await db.select().from(lessonsTable).where(inArray(lessonsTable.id, [sibling.id, other.id]))
+        .orderBy(lessonsTable.id)).toEqual([sibling, other]);
+    } finally {
+      transactionSpy?.mockRestore();
+      if (fixtureCourses.length) {
+        const lessons = await db.select({ id: lessonsTable.id }).from(lessonsTable)
+          .where(inArray(lessonsTable.courseId, fixtureCourses));
+        if (lessons.length) await db.delete(lessonCompletionsTable)
+          .where(inArray(lessonCompletionsTable.lessonId, lessons.map(lesson => lesson.id)));
+        await db.delete(enrollmentsTable).where(inArray(enrollmentsTable.courseId, fixtureCourses));
+        await db.delete(lessonsTable).where(inArray(lessonsTable.courseId, fixtureCourses));
+        await db.delete(coursesTable).where(inArray(coursesTable.id, fixtureCourses));
+      }
+    }
+  },
+);
 
 test("Elevated progress survives fresh requests and revisit; repeats and out-of-order completions do not inflate it", async () => {
   const enrolled = await request(elevatedId, "/enrollments", "POST", { courseId });

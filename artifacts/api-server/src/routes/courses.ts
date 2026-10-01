@@ -323,7 +323,17 @@ router.patch("/lessons/:lessonId", requireAuth, requireContentEditor, async (req
   if (course && isApprovedStandaloneCourse(course.title)) {
     res.status(403).json({ error: "Approved standalone copy is managed through editorial review" }); return;
   }
-  const [updated] = await db.update(lessonsTable).set({ ...parsed.data, publishedAt: null }).where(eq(lessonsTable.id, id)).returning();
+  const updated = await db.transaction(async tx => {
+    const [draft] = await tx.update(lessonsTable).set({ ...parsed.data, publishedAt: null })
+      .where(eq(lessonsTable.id, id)).returning();
+    if (!draft) return undefined;
+    // Keep completion history; only the resume target becomes unavailable.
+    await tx.update(enrollmentsTable).set({ lastLessonId: null }).where(and(
+      eq(enrollmentsTable.courseId, draft.courseId), eq(enrollmentsTable.lastLessonId, id),
+    ));
+    return draft;
+  });
+  if (!updated) { res.status(404).json({ error: "Not found" }); return; }
   res.json(CreateLessonResponse.parse({ ...updated, createdAt: updated.createdAt.toISOString() }));
 });
 
