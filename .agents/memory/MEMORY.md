@@ -45,3 +45,4 @@
 - [Clerk browser role fixtures](clerk-browser-role-fixtures.md) — programmatic sign-in ignores extra role metadata options; verify the actual role before owner UI assertions.
 - [Profile conflict review](profile-conflict-review.md) — refreshes and blind retries must not silently advance an open draft's baseline.
 - [Stripe portal fixture safety](stripe-portal-fixture-safety.md) — reuse existing test portal settings; the first created configuration becomes an undeactivatable default.
+- [Membership return privacy](membership-return-privacy.md) — tab markers do not prove checkout identity; match server-confirmed checkout and keep correlation out of analytics.

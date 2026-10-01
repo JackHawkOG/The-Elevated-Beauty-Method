@@ -1,10 +1,15 @@
 import { useSyncExternalStore } from "react";
 
 const authChanged = "audit-test-auth-change";
-const accountSnapshot = () =>
-  window.sessionStorage.getItem("audit-test-tab-account") ??
-  window.localStorage.getItem("audit-test-account") ??
-  "";
+const accountSnapshot = () => {
+  try {
+    const tabAccount = window.sessionStorage.getItem("audit-test-tab-account");
+    if (tabAccount !== null) return tabAccount;
+  } catch {
+    // Authentication in storage-blocked membership tests still uses the fixture.
+  }
+  return window.localStorage.getItem("audit-test-account") ?? "";
+};
 
 function subscribeToAccountChange(notify: () => void) {
   window.addEventListener(authChanged, notify);

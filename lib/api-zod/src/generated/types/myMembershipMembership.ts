@@ -16,4 +16,9 @@ export type MyMembershipMembership = {
   status: MyMembershipMembershipStatus;
   /** @nullable */
   cancellationDate: Date | null;
+  /**
+     * Private correlation for the authenticated member's confirmed checkout. Never send to analytics.
+     * @nullable
+     */
+  checkoutSessionId?: string | null;
 } | null;

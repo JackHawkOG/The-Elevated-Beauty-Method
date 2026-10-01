@@ -10,27 +10,28 @@ for (const kind of ["founding", "standard"] as const) {
     await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
       events.push(event);
     });
-    await page.addInitScript(() => {
+    await page.addInitScript(({ kind }) => {
       localStorage.setItem("audit-test-account", "membership-test-member");
+      sessionStorage.setItem("membership_checkout_return", JSON.stringify({ kind, accountId: "membership-test-member" }));
       (window as unknown as { umami: { track: (name: string, data?: Record<string, string>) => void } }).umami = {
         track: (name, data) => {
           void (window as unknown as { __recordMembershipEvent: (event: Event) => Promise<void> })
             .__recordMembershipEvent({ name, data });
         },
       };
-    });
+    }, { kind });
     await page.route("**/api/membership/offer", route => route.fulfill({
       json: { phase: "open", foundingAvailable: true, foundingPrice: 24, standardPrice: 48 },
     }));
     await page.route("**/api/membership/me", route => route.fulfill({
-      json: { membership: { kind, status: "confirmed" } },
+      json: { membership: { kind, status: "confirmed", checkoutSessionId: "cs_new" } },
     }));
     await page.route("**/api/membership/checkout", route => {
       checkoutRequests++;
       return route.fulfill({ json: { url: `https://checkout.stripe.com/session/${kind}` } });
     });
 
-    await page.goto("/tests/membership-harness.html?checkout=success");
+    await page.goto("/tests/membership-harness.html?checkout=success#checkout_session_id=cs_old");
     await expect(page.getByText(/membership is active/)).toBeVisible();
     await expect(page).toHaveURL(/\/tests\/membership-harness\.html$/);
     expect(checkoutRequests).toBe(0);
@@ -241,7 +242,7 @@ for (const kind of ["founding", "standard"] as const) {
     expect(events.some(event => event.name === "membership_enrollment_confirmed")).toBe(false);
   });
 
-  test(`${kind} checkout counts enrollment only after server confirmation, once across refresh`, async ({ page }) => {
+  test(`${kind} checkout counts enrollment with blocked session storage only after exact server confirmation, once across refresh`, async ({ page }) => {
     const events: Event[] = [];
     let status: "pending" | "confirmed" = "pending";
     let membership: { kind: Kind; status: "pending" | "confirmed" } | null = null;
@@ -252,6 +253,7 @@ for (const kind of ["founding", "standard"] as const) {
     });
     await page.addInitScript(() => {
       localStorage.setItem("audit-test-account", "membership-test-member");
+      Object.defineProperty(window, "sessionStorage", { get() { throw new Error("Storage blocked"); } });
       (window as unknown as { umami: { track: (name: string, data?: Record<string, string>) => void } }).umami = {
         track: (name, data) => {
           void (window as unknown as { __recordMembershipEvent: (event: Event) => Promise<void> })
@@ -263,7 +265,7 @@ for (const kind of ["founding", "standard"] as const) {
       json: { phase: "open", foundingAvailable: true, foundingPrice: 24, standardPrice: 48 },
     }));
     await page.route("**/api/membership/me", route => route.fulfill({
-      json: { membership: membership && { ...membership, status } },
+      json: { membership: membership && { ...membership, status, checkoutSessionId: status === "confirmed" ? `cs_${kind}` : null } },
     }));
     await page.route("**/api/membership/checkout", async route => {
       expect(route.request().method()).toBe("POST");
@@ -283,7 +285,7 @@ for (const kind of ["founding", "standard"] as const) {
       { name: "membership_checkout_started", data: { kind } },
     ]);
 
-    await page.goto("/tests/membership-harness.html?checkout=success");
+    await page.goto(`/tests/membership-harness.html?checkout=success#checkout_session_id=cs_${kind}`);
     await expect(page.getByText("Your checkout is awaiting payment confirmation.")).toBeVisible();
     expect(events).toEqual([{ name: "membership_checkout_started", data: { kind } }]);
     await expect(page).toHaveURL(/checkout=success/);

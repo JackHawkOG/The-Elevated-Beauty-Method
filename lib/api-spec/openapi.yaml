@@ -1385,6 +1385,9 @@ components:
             kind: { type: string, enum: [founding, standard] }
             status: { type: string, enum: [pending, confirmed, forfeited] }
             cancellationDate: { type: ["string", "null"], format: date-time }
+            checkoutSessionId:
+              type: ["string", "null"]
+              description: Private correlation for the authenticated member's confirmed checkout. Never send to analytics.
     HealthStatus:
       type: object
       properties:

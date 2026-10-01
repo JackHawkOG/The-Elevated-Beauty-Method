@@ -300,7 +300,8 @@ export const GetMyMembershipResponse = zod.object({
   "membership": zod.object({
   "kind": zod.enum(['founding', 'standard']),
   "status": zod.enum(['pending', 'confirmed', 'forfeited']),
-  "cancellationDate": zod.coerce.date().nullable()
+  "cancellationDate": zod.coerce.date().nullable(),
+  "checkoutSessionId": zod.string().nullish().describe('Private correlation for the authenticated member\'s confirmed checkout. Never send to analytics.')
 }).nullable()
 })
 

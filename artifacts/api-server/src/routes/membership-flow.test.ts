@@ -27,7 +27,8 @@ type TestSession = {
 };
 const sessions = new Map<string, TestSession>();
 const customers = new Map<string, { metadata: { clerkId: string }; deleted: false }>();
-const createSession = vi.fn(async (params?: { metadata?: TestSession["metadata"]; customer?: string; client_reference_id?: string; mode?: string; line_items?: Array<{ price: string }> }, options?: { idempotencyKey?: string }) => {
+const createSession = vi.fn(async (params?: { metadata?: TestSession["metadata"]; customer?: string; client_reference_id?: string; mode?: string; line_items?: Array<{ price: string }>; success_url?: string }, options?: { idempotencyKey?: string }) => {
+  expect(params?.success_url).toMatch(/\/membership\?checkout=success#checkout_session_id=\{CHECKOUT_SESSION_ID\}$/);
   const id = `cs_${randomUUID()}`;
   const session: TestSession = { id, status: "open", url: `https://checkout.stripe.test/${id}`,
     created: Math.floor(Date.now() / 1000), metadata: params?.metadata, customer: params?.customer,

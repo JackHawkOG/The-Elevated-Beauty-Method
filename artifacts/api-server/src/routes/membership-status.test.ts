@@ -9,6 +9,7 @@ const { checkout, otherCheckout, pendingCheckout, retrieveSubscription, queries 
     kind: "standard",
     status: "confirmed",
     stripeSubscriptionId: "sub_status_test",
+    stripeSessionId: "cs_status_test",
     membershipTier: "Elevated",
   },
   otherCheckout: {
@@ -16,12 +17,14 @@ const { checkout, otherCheckout, pendingCheckout, retrieveSubscription, queries 
     kind: "founding",
     status: "confirmed",
     stripeSubscriptionId: "sub_status_other",
+    stripeSessionId: "cs_status_other",
   },
   pendingCheckout: {
     clerkId: "status-test-pending-member",
     kind: "founding",
     status: "pending",
     stripeSubscriptionId: null,
+    stripeSessionId: "cs_status_pending",
   },
   retrieveSubscription: vi.fn(),
   queries: [] as string[],
@@ -78,6 +81,7 @@ vi.mock("@workspace/db", () => {
           kind: record.kind,
           status: record.status,
           stripe_subscription_id: record.stripeSubscriptionId,
+          stripe_session_id: record.stripeSessionId,
         }] : [] };
       },
       connect: async () => client,
@@ -140,13 +144,13 @@ test("authenticated membership status follows a scheduled cancellation, a portal
   retrieveSubscription.mockResolvedValueOnce(subscription({ cancel_at: explicitEnd, cancel_at_period_end: true }));
   expect(await status(checkout.clerkId)).toEqual({
     code: 200,
-    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-06-14T12:00:00.000Z" } },
+    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-06-14T12:00:00.000Z", checkoutSessionId: checkout.stripeSessionId } },
   });
   // Stripe may instead only supply the subscription item's period end.
   retrieveSubscription.mockResolvedValueOnce(subscription({ cancel_at_period_end: true }));
   expect(await status(checkout.clerkId)).toEqual({
     code: 200,
-    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-06-15T12:00:00.000Z" } },
+    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-06-15T12:00:00.000Z", checkoutSessionId: checkout.stripeSessionId } },
   });
   expect(checkout.status).toBe("confirmed");
   expect(checkout.membershipTier).toBe("Elevated");
@@ -157,7 +161,7 @@ test("authenticated membership status follows a scheduled cancellation, a portal
   retrieveSubscription.mockResolvedValueOnce(subscription({}));
   expect(await status(checkout.clerkId)).toEqual({
     code: 200,
-    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: null } },
+    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: null, checkoutSessionId: checkout.stripeSessionId } },
   });
   expect(checkout.status).toBe("confirmed");
   expect(queries.some(sql => sql.startsWith("UPDATE"))).toBe(false);
@@ -200,11 +204,11 @@ test("membership status and cancellation date stay scoped to the signed-in membe
 
   expect(await status(checkout.clerkId)).toEqual({
     code: 200,
-    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-08-20T12:00:00.000Z" } },
+    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-08-20T12:00:00.000Z", checkoutSessionId: checkout.stripeSessionId } },
   });
   expect(await status(otherCheckout.clerkId)).toEqual({
     code: 200,
-    body: { membership: { kind: "founding", status: "confirmed", cancellationDate: "2099-09-12T12:00:00.000Z" } },
+    body: { membership: { kind: "founding", status: "confirmed", cancellationDate: "2099-09-12T12:00:00.000Z", checkoutSessionId: otherCheckout.stripeSessionId } },
   });
   expect(await status(pendingCheckout.clerkId)).toEqual({
     code: 200,
@@ -213,7 +217,7 @@ test("membership status and cancellation date stay scoped to the signed-in membe
   // Returning to the first account must still read its own checkout.
   expect(await status(checkout.clerkId)).toEqual({
     code: 200,
-    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-08-20T12:00:00.000Z" } },
+    body: { membership: { kind: "standard", status: "confirmed", cancellationDate: "2099-08-20T12:00:00.000Z", checkoutSessionId: checkout.stripeSessionId } },
   });
   expect(retrieveSubscription).toHaveBeenCalledTimes(stripeCalls + 3);
   expect(retrieveSubscription.mock.calls.slice(stripeCalls).map(([id]) => id))

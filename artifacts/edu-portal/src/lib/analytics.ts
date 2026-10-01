@@ -67,13 +67,7 @@ export function trackAuditResumptionIfRequested(accountId: string, location: Aud
   clearAuditVerification();
 }
 
-const membershipCheckoutReturnKey = "membership_checkout_return";
-export function trackMembershipCheckoutStarted(kind: "founding" | "standard", accountId: string | undefined): void {
-  try {
-    if (accountId) window.sessionStorage.setItem(membershipCheckoutReturnKey, JSON.stringify({ kind, accountId }));
-  } catch {
-    // Storage may be disabled; analytics must not interrupt checkout.
-  }
+export function trackMembershipCheckoutStarted(kind: "founding" | "standard"): void {
   trackEvent("membership_checkout_started", { kind });
 }
 
@@ -82,39 +76,27 @@ export function trackMembershipEnrollmentConfirmed(kind: "founding" | "standard"
 }
 
 export function trackConfirmedMembershipReturn(
-  membership: { kind: "founding" | "standard"; status: "pending" | "confirmed" | "forfeited" } | null | undefined,
-  accountId: string | undefined,
+  membership: { kind: "founding" | "standard"; status: "pending" | "confirmed" | "forfeited"; checkoutSessionId?: string | null } | null | undefined,
 ): void {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   const returnType = url.searchParams.get("checkout");
-  if (returnType === "cancel") {
-    try {
-      window.sessionStorage.removeItem(membershipCheckoutReturnKey);
-    } catch {
-      // Storage may be disabled.
-    }
-    return;
-  }
   if (membership?.status !== "confirmed") return;
   if (returnType !== "success") return;
 
-  // A confirmed membership may predate a pasted or bookmarked success URL.
-  // Count only a checkout initiated in this tab, then consume that marker.
-  try {
-    const started = window.sessionStorage.getItem(membershipCheckoutReturnKey);
-    window.sessionStorage.removeItem(membershipCheckoutReturnKey);
-    if (accountId && started &&
-        JSON.stringify({ kind: membership.kind, accountId }) === started) {
-      trackMembershipEnrollmentConfirmed(membership.kind);
-    }
-  } catch {
-    // Storage may be disabled; do not count an unverified browser return.
-  }
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  const sessionId = fragment.get("checkout_session_id");
+  const matches = Boolean(sessionId && membership.checkoutSessionId === sessionId);
+  // Never forward the private session correlation to analytics. Remove it
+  // before tracking, and consume the return so polls and refreshes cannot count it.
+  fragment.delete("checkout_session_id");
+  url.hash = fragment.toString();
   url.searchParams.delete("checkout");
   try {
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
   } catch {
-    // History access must not interrupt the membership page.
+    // Fail closed if the private correlation cannot be removed before tracking.
+    return;
   }
+  if (matches) trackMembershipEnrollmentConfirmed(membership.kind);
 }

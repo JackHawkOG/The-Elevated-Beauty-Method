@@ -35,7 +35,7 @@ export default function MembershipPage() {
     query: { queryKey: getGetMembershipOfferQueryKey(), refetchInterval: 15000, staleTime: 5000 },
   });
   const { data: mine, isError: membershipError, isPending: membershipPending } = useGetMyMembership({
-    query: { queryKey: getGetMyMembershipQueryKey(), refetchInterval: 10000, refetchOnMount: "always", refetchOnWindowFocus: "always" },
+    query: { queryKey: [...getGetMyMembershipQueryKey(), user?.id], enabled: Boolean(user), refetchInterval: 10000, refetchOnMount: "always", refetchOnWindowFocus: "always" },
   });
   const checkout = useCreateMembershipCheckout();
   const portal = useCreateMembershipPortal();
@@ -48,8 +48,8 @@ export default function MembershipPage() {
   const canBuy = offer?.phase !== "upcoming" && Boolean(offer);
 
   useEffect(() => {
-    trackConfirmedMembershipReturn(mine?.membership, user?.id);
-  }, [mine?.membership?.kind, mine?.membership?.status, user?.id]);
+    if (!membershipError) trackConfirmedMembershipReturn(mine?.membership);
+  }, [mine?.membership?.kind, mine?.membership?.status, mine?.membership?.checkoutSessionId, membershipError]);
 
   useEffect(() => {
     const refreshAfterPortal = () => {
@@ -64,7 +64,7 @@ export default function MembershipPage() {
     try {
       const result = await checkout.mutateAsync({ data: { kind } });
       const checkoutUrl = stripeCheckoutUrl(result?.url);
-      trackMembershipCheckoutStarted(kind, user?.id);
+      trackMembershipCheckoutStarted(kind);
       window.location.assign(checkoutUrl);
     } catch (err) {
       queryClient.invalidateQueries({ queryKey: getGetMembershipOfferQueryKey() });

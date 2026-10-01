@@ -66,8 +66,9 @@ router.get("/membership/offer", async (_req, res): Promise<void> => {
 });
 
 router.get("/membership/me", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
-  const result = await pool.query<{ kind: string; status: string; stripe_subscription_id: string | null }>(
-    "SELECT kind, status, stripe_subscription_id FROM membership_checkouts WHERE clerk_id = $1 AND status IN ('pending', 'confirmed', 'forfeited') ORDER BY CASE WHEN status IN ('pending', 'confirmed') THEN 0 ELSE 1 END, id DESC LIMIT 1",
+  res.set("Cache-Control", "private, no-store");
+  const result = await pool.query<{ kind: string; status: string; stripe_subscription_id: string | null; stripe_session_id: string | null }>(
+    "SELECT kind, status, stripe_subscription_id, stripe_session_id FROM membership_checkouts WHERE clerk_id = $1 AND status IN ('pending', 'confirmed', 'forfeited') ORDER BY CASE WHEN status IN ('pending', 'confirmed') THEN 0 ELSE 1 END, id DESC LIMIT 1",
     [req.userId],
   );
   const row = result.rows[0];
@@ -100,7 +101,7 @@ router.get("/membership/me", requireAuth, jitProvisionUser, async (req, res): Pr
   }
   const end = scheduledCancellationTimestamp(subscription);
   res.json(GetMyMembershipResponse.parse({
-    membership: { kind: row.kind, status: row.status, cancellationDate: end === null ? null : new Date(end * 1000).toISOString() },
+    membership: { kind: row.kind, status: row.status, cancellationDate: end === null ? null : new Date(end * 1000).toISOString(), checkoutSessionId: row.stripe_session_id ?? null },
   }));
 });
 
@@ -281,7 +282,9 @@ router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, r
       client_reference_id: user.clerkId,
       metadata: { reservationId: reservation.rows[0].id, membershipCheckout: "true" },
       subscription_data: { metadata: { reservationId: reservation.rows[0].id } },
-      success_url: `${base}/membership?checkout=success`,
+      // A fragment keeps the private correlation out of HTTP requests/referrers.
+      // The client removes it before sending the confirmed-return event.
+      success_url: `${base}/membership?checkout=success#checkout_session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${base}/membership?checkout=cancel`,
     }, { idempotencyKey: `membership-${reservation.rows[0].id}` });
     createdSessionId = session.id;
