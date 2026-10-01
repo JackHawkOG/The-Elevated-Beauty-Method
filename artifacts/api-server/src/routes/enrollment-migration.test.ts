@@ -461,6 +461,203 @@ test("a writer waits for the SQL migration to merge legacy rows and install uniq
   }
 }, 15000);
 
+test("waiting startup repair recovers after a SQL migration fails and rolls back", async () => {
+  requireDevelopmentDatabase();
+
+  // Both repair paths share private legacy tables, with no public fallback in
+  // either search_path. The real migration script is executed unchanged.
+  const schemaName = `enrollment_migration_${randomUUID().replaceAll("-", "")}`;
+  const admin = await pool.connect();
+  let migrationClient: PoolClient | undefined;
+  let repairClient: PoolClient | undefined;
+  let migrationRun: Promise<unknown> | undefined;
+  let repairRun: Promise<unknown> | undefined;
+  let resumeRepair: (() => void) | undefined;
+  let gateHeld = false;
+  let created = false;
+  try {
+    await admin.query(`CREATE SCHEMA "${schemaName}"`);
+    created = true;
+    await admin.query(`
+      CREATE TABLE "${schemaName}".enrollments (
+        id integer PRIMARY KEY,
+        user_id text NOT NULL,
+        course_id integer NOT NULL,
+        completed_lessons integer NOT NULL DEFAULT 0,
+        last_lesson_id integer,
+        enrolled_at timestamp NOT NULL
+      )
+    `);
+    await admin.query(`
+      CREATE TABLE "${schemaName}".lessons (
+        id integer PRIMARY KEY, course_id integer NOT NULL, published_at timestamp
+      )
+    `);
+    await admin.query(`
+      INSERT INTO "${schemaName}".lessons (id, course_id, published_at)
+      VALUES (31, 7, '2022-01-01')
+    `);
+    await admin.query(`
+      INSERT INTO "${schemaName}".enrollments
+        (id, user_id, course_id, completed_lessons, last_lesson_id, enrolled_at)
+      VALUES (1, 'member', 7, 1, NULL, '2022-01-01'),
+             (2, 'member', 7, 4, 31, '2023-01-01')
+    `);
+    const rows = async () => (await admin.query(`
+      SELECT id, user_id, course_id, completed_lessons, last_lesson_id,
+        enrolled_at::date::text AS enrolled_at
+      FROM "${schemaName}".enrollments ORDER BY id
+    `)).rows;
+    const indexes = async () => (await admin.query(`
+      SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1 ORDER BY indexname
+    `, [schemaName])).rows;
+    const originalRows = await rows();
+    const originalIndexes = await indexes();
+
+    // AFTER UPDATE proves the merge has written the survivor before pausing.
+    // Only the migration session opts into failure, so the waiting repair can
+    // subsequently execute its real UPDATE with this same trigger installed.
+    await admin.query(`
+      CREATE FUNCTION "${schemaName}".fail_migration_after_update() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF current_setting('enrollment_test.fail_migration', true) = 'on' THEN
+          IF OLD.completed_lessons <> 1 OR NEW.completed_lessons <> 4
+             OR OLD.last_lesson_id IS NOT NULL OR NEW.last_lesson_id IS DISTINCT FROM 31
+             OR NOT EXISTS (
+               SELECT 1 FROM enrollments
+               WHERE id = 1 AND completed_lessons = 4 AND last_lesson_id = 31
+             ) THEN
+            RAISE EXCEPTION 'migration did not write the expected merged progress';
+          END IF;
+          PERFORM pg_advisory_xact_lock(hashtext(TG_TABLE_SCHEMA));
+          RAISE EXCEPTION 'injected SQL migration failure after enrollment merge';
+        END IF;
+        RETURN NEW;
+      END
+      $$
+    `);
+    await admin.query(`
+      CREATE TRIGGER fail_migration_after_update AFTER UPDATE ON "${schemaName}".enrollments
+      FOR EACH ROW EXECUTE FUNCTION "${schemaName}".fail_migration_after_update()
+    `);
+    await admin.query("SELECT pg_advisory_lock(hashtext($1))", [schemaName]);
+    gateHeld = true;
+
+    migrationClient = await pool.connect();
+    repairClient = await pool.connect();
+    for (const client of [migrationClient, repairClient]) {
+      await client.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+      // A broken lock release should fail the test, not hang its teardown.
+      await client.query("SET statement_timeout = '8s'");
+    }
+    await migrationClient.query("SET enrollment_test.fail_migration = 'on'");
+    const { rows: [{ pid: adminPid }] } = await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const { rows: [{ pid: migrationPid }] } = await migrationClient.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const { rows: [{ pid: repairPid }] } = await repairClient.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const waitUntilBlockedBy = async (pid: number, blocker: number) => {
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const { rows: [{ waiting }] } = await admin.query<{ waiting: boolean }>(`
+          SELECT wait_event_type = 'Lock' AND $2::int = ANY(pg_blocking_pids(pid)) AS waiting
+          FROM pg_stat_activity WHERE pid = $1
+        `, [pid, blocker]);
+        if (waiting) return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
+    };
+
+    migrationRun = migrationClient.query(await readFile(migrationUrl, "utf8")).then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    expect(await waitUntilBlockedBy(migrationPid, adminPid),
+      "migration must pause after its table lock and actual merge update").toBe(true);
+
+    let signalRepairLock!: () => void;
+    const repairLocked = new Promise<void>((resolve) => { signalRepairLock = resolve; });
+    const pauseRepair = new Promise<void>((resolve) => { resumeRepair = resolve; });
+    let repairStatements = 0;
+    const repairDb = drizzle(repairClient, { schema });
+    const pausedRepairDb: Pick<typeof db, "transaction"> = {
+      transaction: ((callback: Parameters<typeof db.transaction>[0]) =>
+        repairDb.transaction((tx) => callback(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property !== "execute") return Reflect.get(target, property, receiver);
+            return async (statement: Parameters<typeof tx.execute>[0]) => {
+              const result = await target.execute(statement);
+              if (++repairStatements === 1) {
+                signalRepairLock();
+                await pauseRepair;
+              }
+              return result;
+            };
+          },
+        })))) as typeof db.transaction,
+    };
+    // Handle failures immediately while observing the real PostgreSQL wait.
+    repairRun = ensureEnrollmentSchema(pausedRepairDb).then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    expect(await waitUntilBlockedBy(repairPid, migrationPid),
+      "startup repair must wait on the migration's table lock").toBe(true);
+    await admin.query("SELECT pg_advisory_unlock(hashtext($1))", [schemaName]);
+    gateHeld = false;
+    expect(await migrationRun).toMatchObject({
+      status: "rejected",
+      error: { code: "P0001", message: "injected SQL migration failure after enrollment merge" },
+    });
+    // Unlike Drizzle's transaction wrapper, the SQL script leaves an aborted
+    // explicit transaction. Roll it back before waiting for repair to proceed.
+    await migrationClient.query("ROLLBACK");
+    await Promise.race([
+      repairLocked,
+      repairRun.then(() => { throw new Error("Repair ended before acquiring the table lock"); }),
+    ]);
+    // Repair now holds its lock but has not changed anything: compare the
+    // complete legacy rows and index definitions to the pre-migration snapshot.
+    expect(await rows()).toEqual(originalRows);
+    expect(await indexes()).toEqual(originalIndexes);
+
+    resumeRepair!();
+    expect(await repairRun).toEqual({ status: "fulfilled" });
+    expect(await rows()).toEqual([{
+      id: 1, user_id: "member", course_id: 7, completed_lessons: 4,
+      last_lesson_id: 31, enrolled_at: "2022-01-01",
+    }]);
+    expect(await indexes()).toEqual(expect.arrayContaining([{
+      indexname: "enrollments_user_id_course_id_unique",
+      indexdef: expect.stringContaining("UNIQUE INDEX"),
+    }]));
+    await expect(admin.query(`
+      INSERT INTO "${schemaName}".enrollments (id, user_id, course_id, enrolled_at)
+      VALUES (3, 'member', 7, '2024-01-01')
+    `)).rejects.toMatchObject({ code: "23505", constraint: "enrollments_user_id_course_id_unique" });
+  } finally {
+    if (gateHeld) await admin.query("SELECT pg_advisory_unlock(hashtext($1))", [schemaName]);
+    await Promise.allSettled([migrationRun].filter((promise) => promise !== undefined));
+    // Release the failed migration transaction before draining a blocked repair.
+    if (migrationClient) await migrationClient.query("ROLLBACK");
+    resumeRepair?.();
+    await Promise.allSettled([repairRun].filter((promise) => promise !== undefined));
+    if (migrationClient) {
+      await migrationClient.query("RESET enrollment_test.fail_migration");
+      await migrationClient.query("RESET statement_timeout");
+      await migrationClient.query("RESET search_path");
+      migrationClient.release();
+    }
+    if (repairClient) {
+      await repairClient.query("RESET statement_timeout");
+      await repairClient.query("RESET search_path");
+      repairClient.release();
+    }
+    if (created) await admin.query(`DROP SCHEMA "${schemaName}" CASCADE`);
+    admin.release();
+  }
+}, 20000);
+
 test("two startup repairs serialize on the same legacy enrollments", async () => {
   requireDevelopmentDatabase();
 
