@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { trackConfirmedMembershipReturn, trackMembershipCheckoutStarted } from "@/lib/analytics";
+import { stripeBillingPortalUrl } from "@/lib/stripe-billing-portal-url";
 
 function stripeCheckoutUrl(value: unknown): string {
   const message = "Checkout could not be started. Please try again.";
@@ -15,23 +16,6 @@ function stripeCheckoutUrl(value: unknown): string {
   try {
     const url = new URL(value);
     if (url.protocol === "https:" && url.hostname === "checkout.stripe.com" && !url.port && !url.username && !url.password) {
-      return url.href;
-    }
-  } catch {
-    // Treat malformed URLs the same as unexpected destinations.
-  }
-  throw new Error(message);
-}
-
-function stripeBillingPortalUrl(value: unknown): string {
-  const message = "Billing is temporarily unavailable. Please try again.";
-  if (typeof value !== "string" || !value || value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value) || !/^https:\/\//i.test(value)) {
-    throw new Error(message);
-  }
-  try {
-    const url = new URL(value);
-    if (url.protocol === "https:" && url.hostname === "billing.stripe.com" && !url.port && !url.username && !url.password
-      && /^\/p\/session\/[^/]+\/?$/.test(url.pathname)) {
       return url.href;
     }
   } catch {

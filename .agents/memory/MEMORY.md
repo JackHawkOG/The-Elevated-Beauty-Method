@@ -44,3 +44,4 @@
 - [Billing review notice semantics](billing-review-notice-semantics.md) — review outages are private operational alerts, not evidence of member delinquency.
 - [Clerk browser role fixtures](clerk-browser-role-fixtures.md) — programmatic sign-in ignores extra role metadata options; verify the actual role before owner UI assertions.
 - [Profile conflict review](profile-conflict-review.md) — refreshes and blind retries must not silently advance an open draft's baseline.
+- [Stripe portal fixture safety](stripe-portal-fixture-safety.md) — reuse existing test portal settings; the first created configuration becomes an undeactivatable default.

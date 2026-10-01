@@ -13,6 +13,8 @@ A free educational community portal where anyone can sign up, browse courses acr
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
 - `pnpm --filter @workspace/edu-portal run dev` — run the frontend (port 21120)
 - `pnpm run typecheck` — full typecheck across all packages
+- `pnpm run check:stripe-billing-links` — real Stripe test-mode portal URL contract check, also required by `check:pre-release`. Uses the exact membership destination validator; never opens or logs the session URL. Requires an existing active test portal configuration with payment updates and cancellation at period end enabled and subscription updates disabled. Creates/deletes only a disposable customer, with no app member or database writes; never changes portal settings. Missing test credentials/configuration, URL format drift, and cleanup failures exit nonzero.
+- `pnpm run test:stripe-billing-links` — offline coverage for the contract check, destination protections, fixture isolation, and cleanup; included in `check`.
 - `pnpm run build` — typecheck + build all packages
 - `pnpm run check` — pre-merge development check: typecheck, progress and publication HTTP suites; uses disposable fixtures in the workspace development database. The registered `check` validation must pass before release; do not run these database-writing tests during a production build.
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
