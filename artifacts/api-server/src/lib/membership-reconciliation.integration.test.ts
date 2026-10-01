@@ -214,6 +214,79 @@ test("late invoice and subscription notices use current Stripe state; sweeps can
   });
 });
 
+test("ending one of two confirmed subscriptions preserves access until the remaining subscription ends", async () => {
+  const memberClerkId = `billing-two-subscriptions-${id}`;
+  const firstSubscriptionId = `sub_billing_two_first_${id}`;
+  const remainingSubscriptionId = `sub_billing_two_remaining_${id}`;
+  const statuses = new Map<string, Stripe.Subscription.Status>([
+    [firstSubscriptionId, "active"],
+    [remainingSubscriptionId, "active"],
+  ]);
+  const retrieve = vi.fn(async (requestedId: string) => {
+    expect(statuses.has(requestedId)).toBe(true);
+    return {
+      status: statuses.get(requestedId), cancel_at: null, cancel_at_period_end: false,
+    } as Stripe.Subscription;
+  });
+  const cancel = vi.fn();
+  const list = vi.fn(async (params: { subscription: string; limit: number }) => {
+    expect(statuses.has(params.subscription)).toBe(true);
+    expect(params.limit).toBe(100);
+    return { data: [], has_more: false };
+  });
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: { retrieve, cancel },
+    invoices: { list },
+  } as unknown as Stripe);
+
+  await pool.query(
+    "INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [memberClerkId, "Two subscriptions fixture", `${memberClerkId}@example.invalid`],
+  );
+  try {
+    await pool.query(
+      "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2), ($1, 'founding', 'confirmed', $3)",
+      [memberClerkId, firstSubscriptionId, remainingSubscriptionId],
+    );
+    const confirmed = {
+      status: "confirmed", failed_months: 0, last_failed_invoice: null, membership_tier: "Elevated",
+    };
+    expect(await state(firstSubscriptionId)).toEqual(confirmed);
+    expect(await state(remainingSubscriptionId)).toEqual(confirmed);
+
+    statuses.set(firstSubscriptionId, "canceled");
+    await reconcileMemberships(firstSubscriptionId);
+    expect(retrieve).toHaveBeenCalledWith(firstSubscriptionId);
+    expect(await state(firstSubscriptionId)).toEqual({ ...confirmed, status: "forfeited" });
+    expect(await state(remainingSubscriptionId)).toEqual(confirmed);
+
+    // Rechecking the ended checkout and reviewing the active one cannot remove access.
+    await reconcileMemberships(firstSubscriptionId);
+    await reconcileMemberships(remainingSubscriptionId);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(await state(firstSubscriptionId)).toEqual({ ...confirmed, status: "forfeited" });
+    expect(await state(remainingSubscriptionId)).toEqual(confirmed);
+
+    statuses.set(remainingSubscriptionId, "canceled");
+    await reconcileMemberships(remainingSubscriptionId);
+    const ended = { ...confirmed, status: "forfeited", membership_tier: "Free" };
+    expect(await state(firstSubscriptionId)).toEqual(ended);
+    expect(await state(remainingSubscriptionId)).toEqual(ended);
+    await reconcileMemberships(firstSubscriptionId);
+    await reconcileMemberships(remainingSubscriptionId);
+    expect(retrieve).toHaveBeenCalledTimes(3);
+    expect(list).toHaveBeenCalledTimes(3);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(await state(firstSubscriptionId)).toEqual(ended);
+    expect(await state(remainingSubscriptionId)).toEqual(ended);
+  } finally {
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = ANY($1::text[])",
+      [[firstSubscriptionId, remainingSubscriptionId]]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [memberClerkId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [memberClerkId]);
+  }
+});
+
 test("a renewal paid after invoice history is read keeps the founding place", async () => {
   const march = invoice("review-mar", "2026-03-01", "open");
   const february = invoice("review-feb", "2026-02-01", "open");
