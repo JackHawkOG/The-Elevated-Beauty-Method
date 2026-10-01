@@ -53,6 +53,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "enrollments_user_id_course_id_unique"
   ON "enrollments" ("user_id", "course_id");
 -- IF NOT EXISTS only checks the name; reject a legacy index with an
 -- incompatible definition rather than committing a repair without uniqueness.
+-- Operator recovery (never DROP CASCADE): docs/enrollment-index-recovery.md.
 DO $$
 BEGIN
   IF NOT EXISTS (

@@ -60,6 +60,7 @@ export async function ensureEnrollmentSchema(database: Pick<typeof db, "transact
     `);
     // IF NOT EXISTS checks the name, not the index definition. Refuse to
     // commit the merge if a legacy index with that name does not protect pairs.
+    // Deliberate recovery: docs/enrollment-index-recovery.md (preserve dependencies).
     await tx.execute(sql`
       DO $$
       BEGIN
