@@ -27,6 +27,18 @@ Deployment logs fetched on September 28 included platform startup lines and an A
 
 The API now holds the committed repair result until the first successful `/api/healthz` response (the configured production startup health check), then writes one `Legacy announcement activity reconciliation` log entry with `repairedIds` and `review`. Ambiguous cases also produce `Ambiguous legacy announcement activity requires manual review`. Neither result is returned to the health-check caller. Search the API's **Publishing logs** for these exact messages immediately after publishing, and preserve the entry externally if it is needed beyond the deployment log window. An empty `repairedIds` on later startups means there was nothing left to insert on *that* run; it is not evidence about a prior publish.
 
+## Published log verification on October 1, 2026
+
+The existing successful production deployment was inspected without publishing or restarting it. Publishing logs show API startup at `2026-10-01T21:28:24.518Z`, followed by the first successful `/api/healthz` request at `21:28:34.397Z` (request ID 1, PID 20). The committed summary appears one millisecond later:
+
+```text
+[2026-10-01T21:28:34.398Z INFO] Legacy announcement activity reconciliation {"pid":20,"hostname":"localhost","repairedIds":[],"review":[{"announcementId":1,"activityIds":[3],"reason":"feed entry has a different author or timestamp"},{"announcementId":3,"activityIds":[7],"reason":"feed entry has a different author or timestamp"}]}
+```
+
+The corresponding `Ambiguous legacy announcement activity requires manual review` warning is also indexed at `21:28:34.398Z`. Both required summary fields are present: this startup inserted nothing, and retained announcements 1 and 3 for review. This does not reconstruct the September 27 repair result or change the historical author-label decision below.
+
+Two subsequent production health checks returned HTTP 200 with `{"status":"ok"}`. Publishing logs record them at `23:48:24.307Z` and `23:48:24.428Z` (request IDs 185 and 186, the same PID 20), with no reconciliation summary in that interval. A separate exact-message search from this startup returned only the single `21:28:34.398Z` summary. Production indexing and once-per-process reporting are therefore confirmed for this observed startup; no collector investigation was needed.
+
 ## Historical author-label decision on September 28, 2026
 
 Read-only inspection of the **full production records** confirms:
