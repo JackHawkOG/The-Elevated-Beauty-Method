@@ -232,9 +232,18 @@ export interface MembershipReconciliationAlert {
   lastFailedAt: string;
 }
 
+export type MembershipReconciliationAlertsSweepFailure = {
+  /** @minimum 3 */
+  consecutiveFailures: number;
+  firstFailedAt: string;
+  lastFailedAt: string;
+} | null;
+
 export interface MembershipReconciliationAlerts {
   /** @minimum 0 */
   total: number;
+  subscriptionsAvailable?: boolean;
+  sweepFailure?: MembershipReconciliationAlertsSweepFailure;
   subscriptions: MembershipReconciliationAlert[];
 }
 

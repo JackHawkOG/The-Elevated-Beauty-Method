@@ -146,6 +146,13 @@ export default function MembershipPage() {
           </ul>
           {reconciliationAlerts.data.total > reconciliationAlerts.data.subscriptions.length && <p className="mt-2 text-sm">Showing the latest 100 subscriptions. Check server logs for the remaining failures.</p>}
         </section> : null)}
+      {isOwner && !reconciliationAlerts.isError && reconciliationAlerts.data?.sweepFailure && <section role="alert" className="rounded-2xl border border-destructive bg-card p-6">
+        <h2 className="font-serif text-2xl">Membership review sweep needs attention</h2>
+        <p className="mt-2">The membership review sweep could not complete {reconciliationAlerts.data.sweepFailure.consecutiveFailures} times in a row. Founding memberships may not have been checked. This is a review service outage, not evidence of a member payment problem.</p>
+        <p className="mt-2 text-sm">First failed {new Date(reconciliationAlerts.data.sweepFailure.firstFailedAt).toLocaleString()} · last failed {new Date(reconciliationAlerts.data.sweepFailure.lastFailedAt).toLocaleString()}.</p>
+        <p className="mt-2 text-sm">Check the database and Stripe connection in server logs. The server keeps retrying; a completed sweep clears this warning automatically.</p>
+      </section>}
+      {isOwner && !reconciliationAlerts.isError && reconciliationAlerts.data?.subscriptionsAvailable === false && <p role="alert" className="text-destructive">Individual billing review alerts cannot be checked while the database is unavailable.</p>}
       {isOwner && cleanupError && <p role="alert" className="text-destructive">{cleanupError}</p>}
       {isOwner && cleanupMessage && <p role="status">{cleanupMessage}</p>}
       {isOwner && <section aria-label="Paid enrollment counts" className="rounded-2xl border border-border bg-card p-6">

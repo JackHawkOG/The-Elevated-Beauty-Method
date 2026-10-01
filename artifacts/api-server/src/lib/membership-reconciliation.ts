@@ -3,6 +3,7 @@ import { pool } from "@workspace/db";
 import type Stripe from "stripe";
 import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
+import { membershipSweepHealth, type SweepFailure } from "./membership-sweep-health";
 
 const SWEEP_INTERVAL_MS = 15 * 60_000;
 const MAX_HISTORY_RETRY_MS = 24 * 60 * 60_000;
@@ -144,25 +145,38 @@ export async function reconcileSubscription(
 
 export async function unresolvedReconciliationAlerts(): Promise<{
   total: number;
+  subscriptionsAvailable: boolean;
+  sweepFailure: SweepFailure | null;
   subscriptions: { subscriptionId: string; consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string }[];
 }> {
-  const result = await pool.query<{
-    subscription_id: string; consecutive_failures: number; first_failed_at: Date; last_failed_at: Date; total: number;
-  }>(`SELECT f.stripe_subscription_id AS subscription_id, f.consecutive_failures, f.first_failed_at, f.last_failed_at,
+  try {
+    const sweepFailure = await membershipSweepHealth.warning();
+    const result = await pool.query<{
+      subscription_id: string; consecutive_failures: number; first_failed_at: Date; last_failed_at: Date; total: number;
+    }>(`SELECT f.stripe_subscription_id AS subscription_id, f.consecutive_failures, f.first_failed_at, f.last_failed_at,
        COUNT(*) OVER ()::int AS total
        FROM membership_reconciliation_failures f
        JOIN membership_checkouts m ON m.stripe_subscription_id = f.stripe_subscription_id
        WHERE m.kind = 'founding' AND m.status = 'confirmed' AND f.consecutive_failures >= 3
        ORDER BY f.last_failed_at DESC, f.stripe_subscription_id LIMIT 100`);
-  return {
-    total: result.rows[0]?.total ?? 0,
-    subscriptions: result.rows.map(row => ({
-      subscriptionId: row.subscription_id,
-      consecutiveFailures: row.consecutive_failures,
-      firstFailedAt: row.first_failed_at.toISOString(),
-      lastFailedAt: row.last_failed_at.toISOString(),
-    })),
-  };
+    return {
+      total: result.rows[0]?.total ?? 0,
+      subscriptionsAvailable: true,
+      sweepFailure,
+      subscriptions: result.rows.map(row => ({
+        subscriptionId: row.subscription_id,
+        consecutiveFailures: row.consecutive_failures,
+        firstFailedAt: row.first_failed_at.toISOString(),
+        lastFailedAt: row.last_failed_at.toISOString(),
+      })),
+    };
+  } catch (err) {
+    const sweepFailure = membershipSweepHealth.localWarning();
+    if (!sweepFailure) throw err;
+    // Do not hide a known prolonged global outage behind the failed database
+    // query, or represent unavailable per-subscription checks as healthy.
+    return { total: 0, subscriptions: [], subscriptionsAvailable: false, sweepFailure };
+  }
 }
 
 export async function outstandingReviewNotifications(): Promise<{ id: string; createdAt: string }[]> {
@@ -176,9 +190,15 @@ export async function outstandingReviewNotifications(): Promise<{ id: string; cr
   return result.rows.map(row => ({ id: row.id, createdAt: row.created_at.toISOString() }));
 }
 
+let sweepRunning = false;
+
 export async function reconcileMemberships(subscriptionId?: string): Promise<void> {
-  const client = await pool.connect();
+  if (!subscriptionId && sweepRunning) return;
+  if (!subscriptionId) sweepRunning = true;
+  let client: PoolClient | undefined;
+  let failureRecorded = false;
   try {
+    client = await pool.connect();
     // Only one server instance sweeps at a time. This session lock is released
     // even if one subscription or the whole sweep fails.
     const lock = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_lock(20261001, 56) AS acquired");
@@ -220,11 +240,23 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
           }
         }
       }
+      if (!subscriptionId) await membershipSweepHealth.healthy(client);
+    } catch (err) {
+      if (!subscriptionId) {
+        await membershipSweepHealth.failed(client);
+        failureRecorded = true;
+      }
+      throw err;
     } finally {
       await client.query("SELECT pg_advisory_unlock(20261001, 56)");
     }
+  } catch (err) {
+    // Connection/lock failures occur before the inner sweep error handler.
+    if (!subscriptionId && !failureRecorded) await membershipSweepHealth.failed(client);
+    throw err;
   } finally {
-    client.release();
+    client?.release();
+    if (!subscriptionId) sweepRunning = false;
   }
 }
 

@@ -1333,6 +1333,15 @@ components:
       required: [total, subscriptions]
       properties:
         total: { type: number, minimum: 0 }
+        subscriptionsAvailable: { type: boolean }
+        sweepFailure:
+          type: object
+          nullable: true
+          required: [consecutiveFailures, firstFailedAt, lastFailedAt]
+          properties:
+            consecutiveFailures: { type: number, minimum: 3 }
+            firstFailedAt: { type: string, format: date-time }
+            lastFailedAt: { type: string, format: date-time }
         subscriptions:
           type: array
           items:

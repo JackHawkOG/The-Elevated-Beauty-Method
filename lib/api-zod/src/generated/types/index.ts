@@ -56,6 +56,7 @@ export * from './membershipOffer';
 export * from './membershipOfferPhase';
 export * from './membershipReconciliationAlert';
 export * from './membershipReconciliationAlerts';
+export * from './membershipReconciliationAlertsSweepFailure';
 export * from './membershipRedirect';
 export * from './membershipReviewNotification';
 export * from './memberStoryInput';

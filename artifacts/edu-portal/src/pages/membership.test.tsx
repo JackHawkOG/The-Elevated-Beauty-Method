@@ -16,7 +16,12 @@ const state = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
   role: "member",
   cleanup: { total: 0, sessions: [] as Array<{ sessionId: string; queuedAt: string }> },
-  reconciliation: { total: 0, subscriptions: [] as Array<{ subscriptionId: string; consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string }> },
+  reconciliation: { total: 0, subscriptions: [] as Array<{ subscriptionId: string; consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string }>, sweepFailure: null as null | { consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string }, subscriptionsAvailable: true } as {
+    total: number;
+    subscriptions: Array<{ subscriptionId: string; consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string }>;
+    sweepFailure?: null | { consecutiveFailures: number; firstFailedAt: string; lastFailedAt: string };
+    subscriptionsAvailable?: boolean;
+  },
 }));
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
@@ -111,6 +116,28 @@ test("billing review failures are visible to staff, but never to members, and cl
   state.role = "owner";
   state.reconciliation = { total: 0, subscriptions: [] };
   expect(page("open", true)).not.toContain("Founding billing reviews need attention");
+});
+
+test("global sweep outages are staff-only, contain no member details, and clear on recovery", () => {
+  state.reconciliation = {
+    total: 0, subscriptions: [], subscriptionsAvailable: false,
+    sweepFailure: { consecutiveFailures: 3, firstFailedAt: "2026-10-01T14:00:00Z", lastFailedAt: "2026-10-01T14:30:00Z" },
+  };
+  for (const role of ["owner", "admin"]) {
+    state.role = role;
+    const html = page("open", true);
+    expect(html).toContain("Membership review sweep needs attention");
+    expect(html).toContain("not evidence of a member payment problem");
+    expect(html).toContain("Individual billing review alerts cannot be checked");
+    expect(html).not.toMatch(/sub_test|in_test|cus_test/);
+  }
+  state.role = "member";
+  expect(page("open", true)).not.toContain("Membership review sweep needs attention");
+  expect(page("open", true)).not.toContain("Individual billing review alerts cannot be checked");
+  state.role = "owner";
+  state.reconciliation = { total: 0, subscriptions: [], sweepFailure: null, subscriptionsAvailable: true };
+  expect(page("open", true)).not.toContain("Membership review sweep needs attention");
+  state.role = "member";
 });
 
 test("billing return refreshes scheduled cancellation to resumed or ended wording", () => {

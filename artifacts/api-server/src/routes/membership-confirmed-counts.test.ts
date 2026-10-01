@@ -8,6 +8,7 @@ import { confirmCheckout } from "../lib/membership-reservations";
 import { requireDevelopmentDatabase } from "./test-development-database";
 import type Stripe from "stripe";
 import { recoverCheckoutExpiration, retryQueuedCheckoutExpiration } from "../lib/membership-checkout-expirations";
+import { membershipSweepHealth } from "../lib/membership-sweep-health";
 
 const stripeClient = vi.hoisted(() => ({ getUncachableStripeClient: vi.fn() }));
 vi.mock("../lib/stripeClient", () => ({ ...stripeClient, getStripeSync: vi.fn() }));
@@ -229,6 +230,38 @@ test("private billing notices exclude all billing identifiers and fail closed fo
     await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [subscriptionId]);
     await pool.query("DELETE FROM membership_checkouts WHERE stripe_subscription_id = $1", [subscriptionId]);
     await pool.query("DELETE FROM users WHERE clerk_id = $1", [clerkId]);
+  }
+});
+
+test("a global sweep warning is staff-only and readable during a database outage", async () => {
+  const warning = {
+    consecutiveFailures: 3,
+    firstFailedAt: "2026-10-01T14:00:00.000Z",
+    lastFailedAt: "2026-10-01T14:30:00.000Z",
+  };
+  const read = vi.spyOn(membershipSweepHealth, "warning").mockRejectedValue(new Error("database offline"));
+  const local = vi.spyOn(membershipSweepHealth, "localWarning").mockReturnValue(warning);
+  try {
+    for (const staff of [owner, admin]) {
+      const result = await reconciliationAlerts(staff);
+      expect(result.status).toBe(200);
+      expect(result.cache).toBe("private, no-store");
+      expect(result.body).toEqual({ total: 0, subscriptions: [], subscriptionsAvailable: false, sweepFailure: warning });
+    }
+    const calls = read.mock.calls.length;
+    expect((await reconciliationAlerts(member)).status).toBe(403);
+    expect((await reconciliationAlerts()).status).toBe(401);
+    expect(read.mock.calls).toHaveLength(calls);
+    getUser.mockRejectedValueOnce(new Error("Identity service unavailable"));
+    const denied = await reconciliationAlerts(owner);
+    expect(denied.status).toBe(503);
+    expect(denied.body).not.toHaveProperty("sweepFailure");
+    read.mockResolvedValue(null);
+    local.mockReturnValue(null);
+    expect((await reconciliationAlerts(owner)).body.sweepFailure).toBeNull();
+  } finally {
+    read.mockRestore();
+    local.mockRestore();
   }
 });
 

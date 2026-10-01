@@ -341,12 +341,20 @@ export const GetMembershipCheckoutCleanupAlertsResponse = zod.object({
  */
 export const getMembershipReconciliationAlertsResponseTotalMin = 0;
 
+export const getMembershipReconciliationAlertsResponseSweepFailureConsecutiveFailuresMin = 3;
+
 export const getMembershipReconciliationAlertsResponseSubscriptionsItemConsecutiveFailuresMin = 3;
 
 
 
 export const GetMembershipReconciliationAlertsResponse = zod.object({
   "total": zod.number().min(getMembershipReconciliationAlertsResponseTotalMin),
+  "subscriptionsAvailable": zod.boolean().optional(),
+  "sweepFailure": zod.object({
+  "consecutiveFailures": zod.number().min(getMembershipReconciliationAlertsResponseSweepFailureConsecutiveFailuresMin),
+  "firstFailedAt": zod.coerce.date(),
+  "lastFailedAt": zod.coerce.date()
+}).nullish(),
   "subscriptions": zod.array(zod.object({
   "subscriptionId": zod.string().describe('Stripe subscription ID for staff investigation'),
   "consecutiveFailures": zod.number().min(getMembershipReconciliationAlertsResponseSubscriptionsItemConsecutiveFailuresMin),

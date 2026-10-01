@@ -6,9 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MembershipReconciliationAlert } from './membershipReconciliationAlert';
+import type { MembershipReconciliationAlertsSweepFailure } from './membershipReconciliationAlertsSweepFailure';
 
 export interface MembershipReconciliationAlerts {
   /** @minimum 0 */
   total: number;
+  subscriptionsAvailable?: boolean;
+  sweepFailure?: MembershipReconciliationAlertsSweepFailure;
   subscriptions: MembershipReconciliationAlert[];
 }
