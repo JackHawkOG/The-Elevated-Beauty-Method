@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import { useProfileFreshness } from "@/hooks/use-profile-freshness";
 
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
@@ -79,6 +80,8 @@ const clerkAppearance = {
 
 function MemberQuerySession() {
   const [queryClient] = useState(() => new QueryClient());
+  const { user } = useUser();
+  useProfileFreshness(user?.id, queryClient);
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>

@@ -20,6 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { notifyProfileChanged } from "@/hooks/use-profile-freshness";
 
 // A form can unmount between saves, but the member's query client survives navigation.
 const latestProfileSave = new WeakMap<QueryClient, number>();
@@ -238,6 +239,7 @@ export function ProfileEditForm({ initialProfile, onSuccess }: { initialProfile:
         queryClient.setQueryData<UserProfile>(getGetMeQueryKey(), (old) =>
           old ? { ...old, displayName: data.displayName, bio: data.bio, profileVersion: data.profileVersion } : old
         );
+        notifyProfileChanged(initialProfile.clerkId);
         toast({ title: "Profile updated", description: "Your changes have been saved." });
         onSuccess();
       },

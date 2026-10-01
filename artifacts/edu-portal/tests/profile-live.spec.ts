@@ -5,6 +5,87 @@ import { expect, test } from "@playwright/test";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 import { profileFixturePrivateMetadata } from "./profile-fixtures";
 
+test("two signed-in tabs refresh saved name and bio without replacing an open draft", async ({ page, context }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const marker = randomUUID().slice(0, 12);
+  const email = `profile-a-${marker}+clerk_test@example.com`;
+  let userId: string | undefined;
+  const second = await context.newPage();
+  try {
+    const user = await client.users.createUser({
+      emailAddress: [email],
+      firstName: `Profile ${marker}`,
+      privateMetadata: profileFixturePrivateMetadata,
+      skipPasswordRequirement: true,
+    });
+    userId = user.id;
+    await page.goto("/profile");
+    await clerk.signIn({ page, emailAddress: email });
+    await page.goto("/profile");
+    await expect(page.locator("main")).toContainText(email);
+    await second.goto("/profile");
+    await expect(second.locator("main")).toContainText(email);
+
+    const savedName = `Saved name ${marker}`;
+    const savedBio = `Saved bio ${marker}`;
+    await page.getByRole("button", { name: "Edit Profile" }).click();
+    await page.locator("form input").fill(savedName);
+    await page.locator("form textarea").fill(savedBio);
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByRole("button", { name: "Edit Profile" })).toBeVisible();
+    // Do not navigate, reload, or focus the receiving tab to trigger this update.
+    await expect(second.getByRole("heading", { name: savedName, exact: true })).toBeVisible();
+    await expect(second.locator("main")).toContainText(savedBio);
+
+    await second.getByRole("button", { name: "Edit Profile" }).click();
+    const draftName = `Unsaved name ${marker}`;
+    const draftBio = `Unsaved bio ${marker}`;
+    await second.locator("form input").fill(draftName);
+    await second.locator("form textarea").fill(draftBio);
+    const nextName = `New saved name ${marker}`;
+    const nextBio = `New saved bio ${marker}`;
+    await page.getByRole("button", { name: "Edit Profile" }).click();
+    await page.locator("form input").fill(nextName);
+    await page.locator("form textarea").fill(nextBio);
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByRole("button", { name: "Edit Profile" })).toBeVisible();
+    await expect(second.getByRole("heading", { name: nextName, exact: true })).toBeVisible();
+    await expect(second.locator("form input")).toHaveValue(draftName);
+    await expect(second.locator("form textarea")).toHaveValue(draftBio);
+    // The refresh must not silently rebase the draft and authorize an overwrite.
+    await second.getByRole("button", { name: "Save Changes" }).click();
+    await expect(second.getByRole("alert")).toContainText(`Saved name: ${nextName}`);
+    await expect(second.getByRole("alert")).toContainText(`Saved bio: ${nextBio}`);
+    await expect(second.locator("form input")).toHaveValue(draftName);
+    await expect(second.locator("form textarea")).toHaveValue(draftBio);
+    await second.getByRole("button", { name: "Use latest saved details" }).click();
+    await expect(second.locator("form input")).toHaveValue(nextName);
+    await expect(second.locator("form textarea")).toHaveValue(nextBio);
+    await second.locator("form").getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(second.locator("main")).toContainText(nextBio);
+    await test.info().attach("refreshed-profile-in-second-tab", {
+      body: await second.screenshot(),
+      contentType: "image/png",
+    });
+  } finally {
+    // Close both pages before cleanup so pending refreshes cannot recreate rows.
+    await second.close();
+    await page.close();
+    if (userId) {
+      const [{ db, usersTable }, { eq }] =
+        await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+      try {
+        await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
+      } finally {
+        await client.users.deleteUser(userId);
+      }
+    }
+  }
+});
+
 test("a completed profile save cannot update the next member when its response arrives late", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
