@@ -236,6 +236,35 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
       }
     }
 
+    // A failure inside the real DELETE transaction must roll back the local row
+    // and must not reach Clerk. Use a session-local trigger, never a public object.
+    await connection.query(`
+      CREATE FUNCTION pg_temp.reject_profile_fixture_delete() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        RAISE EXCEPTION 'Injected profile fixture database deletion failure';
+      END;
+      $$;
+      CREATE TRIGGER reject_profile_fixture_delete
+        AFTER DELETE ON pg_temp.users
+        FOR EACH ROW EXECUTE FUNCTION pg_temp.reject_profile_fixture_delete();
+    `);
+    try {
+      const beforeFailure = await snapshot();
+      const result = await execute([stale.id, ...protectedIds], true);
+      expect(result.errors).toHaveLength(1);
+      const messages: string[] = [];
+      for (let error = result.errors[0]; error; error = (error as { cause?: unknown }).cause) {
+        messages.push(String(error));
+      }
+      expect(messages.join("\n")).toMatch(/Injected profile fixture database deletion failure/);
+      expect(result.deleted).toEqual([]);
+      expect(await snapshot()).toEqual(beforeFailure);
+    } finally {
+      await connection.query("DROP TRIGGER reject_profile_fixture_delete ON pg_temp.users");
+      await connection.query("DROP FUNCTION pg_temp.reject_profile_fixture_delete()");
+    }
+
     // Prove DB-first retry behavior using a real marked stale Clerk fixture.
     const failed = await execute([stale.id, ...protectedIds], true, { failDelete: true });
     expect(failed.errors.map(String).join("\n")).toMatch(/Injected development Clerk deletion outage/);
