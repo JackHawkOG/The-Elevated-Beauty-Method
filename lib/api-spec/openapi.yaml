@@ -284,6 +284,26 @@ paths:
           description: Sign-in required
         "403":
           description: Owner or admin access required
+  /membership/review-notifications:
+    get:
+      operationId: getMembershipReviewNotifications
+      tags: [membership]
+      summary: Private owner notifications for persistent billing review outages
+      responses:
+        "200":
+          description: Outstanding notifications without subscription or payment details
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MembershipReviewNotification"
+        "401":
+          description: Sign-in required
+        "403":
+          description: Owner or admin access required
+        "503":
+          description: Unable to verify owner access
   /membership/checkout-cleanup-alerts/{sessionId}/retry:
     post:
       operationId: retryMembershipCheckoutCleanup
@@ -1294,6 +1314,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MembershipCheckoutCleanupAlert"
+    MembershipReviewNotification:
+      type: object
+      required: [id, createdAt]
+      properties:
+        id: { type: string, description: Opaque notification identifier }
+        createdAt: { type: string, format: date-time }
     MembershipReconciliationAlert:
       type: object
       required: [subscriptionId, consecutiveFailures, firstFailedAt, lastFailedAt]

@@ -165,6 +165,17 @@ export async function unresolvedReconciliationAlerts(): Promise<{
   };
 }
 
+export async function outstandingReviewNotifications(): Promise<{ id: string; createdAt: string }[]> {
+  // Deliberately project only notification metadata, never billing identifiers.
+  const result = await pool.query<{ id: string; created_at: Date }>(`
+    SELECT f.notification_id::text AS id, f.notified_at AS created_at
+    FROM membership_reconciliation_failures f
+    JOIN membership_checkouts m ON m.stripe_subscription_id = f.stripe_subscription_id
+    WHERE m.kind = 'founding' AND m.status = 'confirmed' AND f.notification_id IS NOT NULL
+    ORDER BY f.notified_at DESC, f.notification_id`);
+  return result.rows.map(row => ({ id: row.id, createdAt: row.created_at.toISOString() }));
+}
+
 export async function reconcileMemberships(subscriptionId?: string): Promise<void> {
   const client = await pool.connect();
   try {
@@ -195,7 +206,13 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
                 await client.query(`INSERT INTO membership_reconciliation_failures (stripe_subscription_id)
                   VALUES ($1) ON CONFLICT (stripe_subscription_id) DO UPDATE SET
                   consecutive_failures = membership_reconciliation_failures.consecutive_failures + 1,
-                  last_failed_at = now()`, [row.stripe_subscription_id]);
+                  last_failed_at = now(),
+                  notification_id = CASE WHEN membership_reconciliation_failures.consecutive_failures + 1 >= 3
+                    THEN COALESCE(membership_reconciliation_failures.notification_id, gen_random_uuid())
+                    ELSE membership_reconciliation_failures.notification_id END,
+                  notified_at = CASE WHEN membership_reconciliation_failures.consecutive_failures + 1 >= 3
+                    THEN COALESCE(membership_reconciliation_failures.notified_at, now())
+                    ELSE membership_reconciliation_failures.notified_at END`, [row.stripe_subscription_id]);
               } catch (alertError) {
                 logger.error({ err: alertError, subscriptionId: row.stripe_subscription_id }, "Could not record membership reconciliation failure");
               }

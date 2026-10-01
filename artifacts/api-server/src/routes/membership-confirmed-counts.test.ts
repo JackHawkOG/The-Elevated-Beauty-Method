@@ -67,6 +67,13 @@ async function retryCleanup(sessionId: string, user?: string) {
   return { status: response.status, body: await response.json() as Record<string, unknown> };
 }
 
+async function reviewNotifications(user?: string) {
+  const response = await fetch(`${baseUrl}/membership/review-notifications`, {
+    headers: user ? { "x-test-user": user } : {},
+  });
+  return { status: response.status, cache: response.headers.get("cache-control"), body: await response.json() };
+}
+
 beforeAll(async () => {
   requireDevelopmentDatabase();
   safeToCleanup = true;
@@ -181,6 +188,43 @@ test("founding billing review alerts are accessible only to staff and exclude pa
       expect(JSON.stringify(result.body)).not.toContain(clerkId);
       expect(JSON.stringify(result.body)).not.toContain("invoice");
     }
+  } finally {
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [subscriptionId]);
+    await pool.query("DELETE FROM membership_checkouts WHERE stripe_subscription_id = $1", [subscriptionId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [clerkId]);
+  }
+});
+
+test("private billing notices exclude all billing identifiers and fail closed for nonowners or an identity outage", async () => {
+  const subscriptionId = `sub_private_notice_${randomUUID()}`;
+  const clerkId = ids[0];
+  const notificationId = randomUUID();
+  await pool.query("INSERT INTO users (clerk_id, display_name, email) VALUES ($1, $1, $2)", [clerkId, `${clerkId}@example.invalid`]);
+  try {
+    await pool.query("INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2)", [clerkId, subscriptionId]);
+    await pool.query(`INSERT INTO membership_reconciliation_failures
+      (stripe_subscription_id, consecutive_failures, notification_id, notified_at) VALUES ($1, 3, $2, now())`,
+      [subscriptionId, notificationId]);
+    expect((await reviewNotifications()).status).toBe(401);
+    const forbidden = await reviewNotifications(member);
+    expect(forbidden.status).toBe(403);
+    expect(JSON.stringify(forbidden.body)).not.toContain(notificationId);
+    for (const staff of [owner, admin]) {
+      const result = await reviewNotifications(staff);
+      expect(result.status).toBe(200);
+      expect(result.cache).toBe("private, no-store");
+      expect(result.body).toContainEqual({ id: notificationId, createdAt: expect.any(String) });
+      for (const row of result.body as { id: string; createdAt: string }[]) expect(Object.keys(row).sort()).toEqual(["createdAt", "id"]);
+      expect(JSON.stringify(result.body)).not.toContain(subscriptionId);
+      expect(JSON.stringify(result.body)).not.toContain(clerkId);
+    }
+    getUser.mockRejectedValueOnce(new Error("Identity service unavailable"));
+    const unavailable = await reviewNotifications(owner);
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.cache).toBe("private, no-store");
+    expect(JSON.stringify(unavailable.body)).not.toContain(notificationId);
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [subscriptionId]);
+    expect((await reviewNotifications(owner)).body).not.toContainEqual({ id: notificationId, createdAt: expect.any(String) });
   } finally {
     await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1", [subscriptionId]);
     await pool.query("DELETE FROM membership_checkouts WHERE stripe_subscription_id = $1", [subscriptionId]);

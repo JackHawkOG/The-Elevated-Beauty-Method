@@ -357,6 +357,16 @@ export const GetMembershipReconciliationAlertsResponse = zod.object({
 
 
 /**
+ * @summary Private owner notifications for persistent billing review outages
+ */
+export const GetMembershipReviewNotificationsResponseItem = zod.object({
+  "id": zod.string().describe('Opaque notification identifier'),
+  "createdAt": zod.coerce.date()
+})
+export const GetMembershipReviewNotificationsResponse = zod.array(GetMembershipReviewNotificationsResponseItem)
+
+
+/**
  * @summary Owner or admin retries one overdue queued checkout cleanup
  */
 

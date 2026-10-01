@@ -5,6 +5,7 @@ import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, S
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getListMemberStoryRemovalAlertsQueryKey, useListMemberStoryRemovalAlerts } from "@workspace/api-client-react";
 import { clearAuditDraftOnSignOut } from "@/lib/radiant-audit-draft";
+import { BillingReviewNotice } from "@/components/billing-review-notice";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
@@ -107,6 +108,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </SidebarFooter>
         </Sidebar>
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+          <BillingReviewNotice />
           <header className="h-20 flex items-center px-4 border-b border-border bg-card/50 backdrop-blur sticky top-0 z-10 md:hidden">
             <SidebarTrigger />
             <Link href="/dashboard" aria-label="The Elevated Beauty Method ™ home" className="ml-3 block w-[min(44vw,150px)]">

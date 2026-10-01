@@ -3,10 +3,10 @@ import { db, pool, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { clerkClient } from "@clerk/express";
-import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlertsResponse, GetMembershipReconciliationAlertsResponse, RetryMembershipCheckoutCleanupParams, RetryMembershipCheckoutCleanupResponse } from "@workspace/api-zod";
+import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlertsResponse, GetMembershipReconciliationAlertsResponse, GetMembershipReviewNotificationsResponse, RetryMembershipCheckoutCleanupParams, RetryMembershipCheckoutCleanupResponse } from "@workspace/api-zod";
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
-import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp, unresolvedReconciliationAlerts } from "../lib/membership-reconciliation";
+import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp, unresolvedReconciliationAlerts, outstandingReviewNotifications } from "../lib/membership-reconciliation";
 import { GetMyMembershipResponse } from "@workspace/api-zod";
 import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations, retryQueuedCheckoutExpiration } from "../lib/membership-checkout-expirations";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, restorePaidCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
@@ -190,6 +190,23 @@ router.get("/membership/reconciliation-alerts", requireAuth, async (req, res): P
     return;
   }
   res.json(GetMembershipReconciliationAlertsResponse.parse(await unresolvedReconciliationAlerts()));
+});
+
+router.get("/membership/review-notifications", requireAuth, async (req, res): Promise<void> => {
+  res.set("Cache-Control", "private, no-store");
+  let role: unknown;
+  try {
+    role = (await clerkClient.users.getUser(req.userId!)).publicMetadata.role;
+  } catch (error) {
+    req.log.error({ err: error }, "Could not verify billing notification access");
+    res.status(503).json({ error: "Unable to verify owner access" });
+    return;
+  }
+  if (role !== "owner" && role !== "admin") {
+    res.status(403).json({ error: "Owner access required" });
+    return;
+  }
+  res.json(GetMembershipReviewNotificationsResponse.parse(await outstandingReviewNotifications()));
 });
 
 router.post("/membership/checkout", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {

@@ -41,3 +41,5 @@
 - [Isolated live story publication](isolated-live-story-publication.md) — public browser checks use keyed visibility at persistence, not post-test cleanup, so interrupted runs cannot expose quotes.
 - [Corrected announcement links](corrected-announcement-links.md) — intentional unlink must remain a review decision; startup repair must not silently restore a disputed match.
 - [Clerk development API budgets](clerk-development-rate-limits.md) — repeated scoped listing can hit HTTP 429; budget verification and teardown calls without treating outages as absence.
+- [Billing review notice semantics](billing-review-notice-semantics.md) — review outages are private operational alerts, not evidence of member delinquency.
+- [Clerk browser role fixtures](clerk-browser-role-fixtures.md) — programmatic sign-in ignores extra role metadata options; verify the actual role before owner UI assertions.

@@ -12,7 +12,7 @@ vi.mock("./stripeClient", () => ({
 }));
 
 import { getStripeSync, getUncachableStripeClient } from "./stripeClient";
-import { reconcileMemberships, unresolvedReconciliationAlerts } from "./membership-reconciliation";
+import { reconcileMemberships, unresolvedReconciliationAlerts, outstandingReviewNotifications } from "./membership-reconciliation";
 import { handleMembershipWebhook } from "../routes/membership";
 
 const id = randomUUID();
@@ -766,14 +766,20 @@ test("three consecutive founding review failures alert staff, and a successful r
       "SELECT consecutive_failures FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1",
       [reviewSubscriptionId],
     )).rows[0]?.consecutive_failures;
+    const notice = async () => (await pool.query<{ notification_id: string | null; notified_at: Date | null }>(
+      "SELECT notification_id, notified_at FROM membership_reconciliation_failures WHERE stripe_subscription_id = $1",
+      [reviewSubscriptionId],
+    )).rows[0];
 
     await reconcileMemberships(reviewSubscriptionId);
     expect(await failureCount()).toBe(1);
+    expect(await notice()).toEqual({ notification_id: null, notified_at: null });
     expect((await unresolvedReconciliationAlerts()).subscriptions).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ subscriptionId: reviewSubscriptionId }),
     ]));
     await reconcileMemberships(reviewSubscriptionId);
     expect(await failureCount()).toBe(2);
+    expect(await notice()).toEqual({ notification_id: null, notified_at: null });
     expect((await unresolvedReconciliationAlerts()).subscriptions).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ subscriptionId: reviewSubscriptionId }),
     ]));
@@ -782,6 +788,16 @@ test("three consecutive founding review failures alert staff, and a successful r
       subscriptionId: reviewSubscriptionId, consecutiveFailures: 3,
       firstFailedAt: expect.any(String), lastFailedAt: expect.any(String),
     }));
+    // No membership-page request is involved in creating the notification.
+    const firstNotice = (await notice())!;
+    expect(firstNotice).toEqual({ notification_id: expect.any(String), notified_at: expect.any(Date) });
+    const publicNotice = { id: firstNotice.notification_id, createdAt: firstNotice.notified_at!.toISOString() };
+    expect(await outstandingReviewNotifications()).toContainEqual(publicNotice);
+    await reconcileMemberships(reviewSubscriptionId);
+    await reconcileMemberships(reviewSubscriptionId);
+    expect(await failureCount()).toBe(5);
+    expect(await notice()).toEqual(firstNotice);
+    expect((await outstandingReviewNotifications()).filter(item => item.id === firstNotice.notification_id)).toEqual([publicNotice]);
     await reconcileMemberships(standardSubscriptionId);
     await reconcileMemberships(standardSubscriptionId);
     await reconcileMemberships(standardSubscriptionId);
@@ -790,6 +806,7 @@ test("three consecutive founding review failures alert staff, and a successful r
     failing.delete(reviewSubscriptionId);
     await reconcileMemberships(reviewSubscriptionId);
     expect(await failureCount()).toBeUndefined();
+    expect(await outstandingReviewNotifications()).not.toContainEqual(publicNotice);
     expect((await unresolvedReconciliationAlerts()).subscriptions).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ subscriptionId: reviewSubscriptionId }),
     ]));
@@ -798,6 +815,10 @@ test("three consecutive founding review failures alert staff, and a successful r
     failing.add(reviewSubscriptionId);
     await reconcileMemberships(reviewSubscriptionId);
     expect(await failureCount()).toBe(1);
+    expect(await notice()).toEqual({ notification_id: null, notified_at: null });
+    await reconcileMemberships(reviewSubscriptionId);
+    await reconcileMemberships(reviewSubscriptionId);
+    expect((await notice())!.notification_id).not.toBe(firstNotice.notification_id);
   } finally {
     await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = ANY($1::text[])", [[reviewSubscriptionId, standardSubscriptionId]]);
     await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = ANY($1::text[])", [[reviewClerkId, standardClerkId]]);

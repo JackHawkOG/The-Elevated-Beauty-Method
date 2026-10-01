@@ -60,6 +60,7 @@ import type {
   MembershipOffer,
   MembershipReconciliationAlerts,
   MembershipRedirect,
+  MembershipReviewNotification,
   MyMembership,
   OwnerMemberStory,
   ProgressUpdate,
@@ -1065,6 +1066,83 @@ export function useGetMembershipReconciliationAlerts<TData = Awaited<ReturnType<
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMembershipReconciliationAlertsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMembershipReviewNotificationsUrl = () => {
+
+
+
+
+  return `/api/membership/review-notifications`
+}
+
+/**
+ * @summary Private owner notifications for persistent billing review outages
+ */
+export const getMembershipReviewNotifications = async ( options?: Parameters<typeof customFetch>[1]): Promise<MembershipReviewNotification[]> => {
+
+  return customFetch<MembershipReviewNotification[]>(getGetMembershipReviewNotificationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMembershipReviewNotificationsQueryKey = () => {
+    return [
+    `/api/membership/review-notifications`
+    ] as const;
+    }
+
+
+export const getGetMembershipReviewNotificationsQueryOptions = <TData = Awaited<ReturnType<typeof getMembershipReviewNotifications>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipReviewNotifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMembershipReviewNotificationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMembershipReviewNotifications>>> = ({ signal }) => getMembershipReviewNotifications({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMembershipReviewNotifications>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMembershipReviewNotificationsQueryResult = NonNullable<Awaited<ReturnType<typeof getMembershipReviewNotifications>>>
+export type GetMembershipReviewNotificationsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Private owner notifications for persistent billing review outages
+ */
+
+export function useGetMembershipReviewNotifications<TData = Awaited<ReturnType<typeof getMembershipReviewNotifications>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipReviewNotifications>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMembershipReviewNotificationsQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

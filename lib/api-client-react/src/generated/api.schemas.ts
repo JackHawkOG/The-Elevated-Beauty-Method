@@ -217,6 +217,12 @@ export interface MembershipCheckoutCleanupAlerts {
   sessions: MembershipCheckoutCleanupAlert[];
 }
 
+export interface MembershipReviewNotification {
+  /** Opaque notification identifier */
+  id: string;
+  createdAt: string;
+}
+
 export interface MembershipReconciliationAlert {
   /** Stripe subscription ID for staff investigation */
   subscriptionId: string;

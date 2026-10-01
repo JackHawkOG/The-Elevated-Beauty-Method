@@ -36,4 +36,10 @@ export async function ensureMembershipSchema(): Promise<void> {
     first_failed_at timestamptz NOT NULL DEFAULT now(),
     last_failed_at timestamptz NOT NULL DEFAULT now()
   )`);
+  await db.execute(sql`ALTER TABLE membership_reconciliation_failures ADD COLUMN IF NOT EXISTS notification_id uuid`);
+  await db.execute(sql`ALTER TABLE membership_reconciliation_failures ADD COLUMN IF NOT EXISTS notified_at timestamptz`);
+  // Existing persistent outages also need a notice after this upgrade.
+  await db.execute(sql`UPDATE membership_reconciliation_failures
+    SET notification_id = gen_random_uuid(), notified_at = now()
+    WHERE consecutive_failures >= 3 AND notification_id IS NULL`);
 }
