@@ -28,6 +28,19 @@ async function refusesWithoutChanges(mock: Mocks, message: RegExp) {
   }
 }
 
+function useSharedCatalog(mock: Mocks) {
+  Object.assign(mock.state.products[0], {
+    name: "TEST ONLY - reusable membership privacy check (free)",
+    metadata: { fixture_owner: "edu-portal-membership-status-privacy-check-v1" },
+  });
+  const patch = {
+    type: "recurring",
+    metadata: { fixture_owner: "edu-portal-membership-status-privacy-check-v1" },
+  };
+  Object.assign(mock.state.prices[0], patch);
+  Object.assign(mock.state.subscriptions[0].items.data[0].price, patch);
+}
+
 describe("full membership fixture cleanup using only disposable mocks", () => {
   it("dry-runs all three systems without writes", async () => {
     const mock = membershipCleanupMocks();
@@ -61,6 +74,8 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
     expect(mock.state.subscriptions[0].status).toBe("canceled");
     expect(mock.state.prices[0].active).toBe(false);
     expect(mock.state.products[0].active).toBe(false);
+    expect(mock.stripe.prices.update).toHaveBeenCalledExactlyOnceWith("price_fixture", { active: false });
+    expect(mock.stripe.products.update).toHaveBeenCalledExactlyOnceWith("prod_fixture", { active: false });
     expect(protectedRecords(mock)).toEqual(before);
     const after = mock.snapshot();
     mock.events.length = 0;
@@ -96,23 +111,62 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
     expect(protectedRecords(mock)).toEqual(before);
   });
 
-  it("keeps the reusable owned free catalog active for later checks", async () => {
+  it.each(["active", "canceled"] as const)(
+    "cleans a stale %s subscription without archiving the shared free catalog", async status => {
     const mock = membershipCleanupMocks();
-    Object.assign(mock.state.products[0], {
-      name: "TEST ONLY - reusable membership privacy check (free)",
-      metadata: { fixture_owner: "edu-portal-membership-status-privacy-check-v1" },
-    });
-    const patch = { type: "recurring", metadata: { fixture_owner: "edu-portal-membership-status-privacy-check-v1" } };
-    Object.assign(mock.state.prices[0], patch);
-    Object.assign(mock.state.subscriptions[0].items.data[0].price, patch);
+    useSharedCatalog(mock);
+    mock.state.subscriptions[0].status = status;
+    if (status === "canceled") mock.state.subscriptions[0].cancel_at = null;
+    const protectedBefore = protectedRecords(mock);
     const before = structuredClone({ products: mock.state.products, prices: mock.state.prices });
     await mock.run();
+    expect(mock.mutations()).toEqual([
+      "DELETE FROM membership_checkouts WHERE clerk_id = $1",
+      "DELETE FROM users WHERE clerk_id = $1 AND email = $2",
+      ...(status === "active" ? ["cancel:sub_fixture"] : []),
+      "customer-delete:cus_fixture", "clerk-delete:user_fixture",
+    ]);
+    expect(mock.state.members.map(row => row.clerk_id)).toEqual(["user_member"]);
+    expect(mock.state.checkouts.map(row => row.clerk_id)).toEqual(["user_member"]);
     expect(mock.state.identities.map(row => row.id)).toEqual(["user_member"]);
+    expect(mock.state.customers.map(row => row.id)).toEqual(["cus_member"]);
+    expect(mock.state.subscriptions[0].status).toBe("canceled");
     expect(mock.stripe.products.retrieve).toHaveBeenCalledWith("prod_fixture");
     expect(mock.stripe.products.update).not.toHaveBeenCalled();
     expect(mock.stripe.prices.update).not.toHaveBeenCalled();
     expect({ products: mock.state.products, prices: mock.state.prices }).toEqual(before);
+    expect(protectedRecords(mock)).toEqual(protectedBefore);
   });
+
+  it.each(["cancel:sub_fixture", "customer-delete:cus_fixture", "clerk-delete:user_fixture"])(
+    "resumes shared-catalog cleanup after a failed %s without archiving reusable billing", async failure => {
+      const mock = membershipCleanupMocks();
+      useSharedCatalog(mock);
+      const catalogBefore = structuredClone({ products: mock.state.products, prices: mock.state.prices });
+      const protectedBefore = protectedRecords(mock);
+      mock.failOnce(failure);
+      await expect(mock.run()).rejects.toThrow(`Injected ${failure} failure`);
+      expect(mock.events).toContain("COMMIT");
+      expect(mock.state.members.map(row => row.clerk_id)).toEqual(["user_member"]);
+      expect(mock.state.checkouts.map(row => row.clerk_id)).toEqual(["user_member"]);
+      expect(mock.state.identities.some(row => row.id === "user_fixture")).toBe(true);
+      expect({ products: mock.state.products, prices: mock.state.prices }).toEqual(catalogBefore);
+
+      await mock.run();
+      expect(mock.state.identities.map(row => row.id)).toEqual(["user_member"]);
+      expect(mock.state.customers.map(row => row.id)).toEqual(["cus_member"]);
+      expect(mock.state.subscriptions[0].status).toBe("canceled");
+      expect(mock.stripe.prices.update).not.toHaveBeenCalled();
+      expect(mock.stripe.products.update).not.toHaveBeenCalled();
+      expect({ products: mock.state.products, prices: mock.state.prices }).toEqual(catalogBefore);
+      expect(protectedRecords(mock)).toEqual(protectedBefore);
+      const after = mock.snapshot();
+      mock.events.length = 0;
+      await mock.run();
+      expect(mock.snapshot()).toEqual(after);
+      expect(mock.mutations()).toEqual([]);
+    },
+  );
 
   it("finds an eligible fixture after a full page of unrelated identities", async () => {
     const mock = membershipCleanupMocks();
