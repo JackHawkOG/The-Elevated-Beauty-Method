@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import { activityTable, db } from "@workspace/db";
+import { activityTable, db, usersTable } from "@workspace/db";
 import { expect, test } from "vitest";
 import { activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate } from "./member-progress-leftovers";
 import { inspectProgressLeftovers, progressLeftoverArgs, runProgressLeftovers } from "./member-progress-leftovers-cli";
@@ -192,3 +192,77 @@ test("database cleanup rolls back every selected feed row if one changes after s
     }
   }
 });
+
+test.each(["changed", "unchanged"] as const)(
+  "database member cleanup preserves a %s selection before identity deletion",
+  async state => {
+    requireDevelopmentDatabase();
+    const fixtureRun = randomUUID();
+    const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const identities = [0, 1].map(index => ({
+      id: `progress-leftovers-${index}-${fixtureRun}`,
+      email: `progress-${index}-${fixtureRun}@example.com`,
+      name: `Progress ${index === 0 ? "Elevated" : "Free"} ${fixtureRun}`,
+      createdAt,
+    }));
+    const memberIds: string[] = [];
+    const activityIds: number[] = [];
+    const deletedIdentities: string[] = [];
+    const output: string[] = [];
+    const changedEmail = `changed-${fixtureRun}@example.com`;
+    try {
+      for (const identity of identities) {
+        const [row] = await db.insert(usersTable).values({
+          clerkId: identity.id, email: identity.email, displayName: identity.name, createdAt,
+        }).returning({ clerkId: usersTable.clerkId });
+        memberIds.push(row.clerkId);
+      }
+      const [activity] = await db.insert(activityTable).values({
+        actorName: identities[0].name, entityTitle: "The Beauty Mindset Accelerator",
+        type: "enrollment", description: "enrolled in a course", createdAt,
+      }).returning({ id: activityTable.id });
+      activityIds.push(activity.id);
+
+      const cleanup = inspectProgressLeftovers(
+        fixtureRun, identities,
+        async id => { deletedIdentities.push(id); },
+        message => output.push(message),
+        async () => {
+          if (state === "changed") {
+            // Change the second selected member so an earlier successful delete
+            // must roll back, without ever reaching the identity provider.
+            await db.update(usersTable).set({ email: changedEmail })
+              .where(eq(usersTable.clerkId, identities[1].id));
+          }
+        },
+      );
+      if (state === "changed") {
+        await expect(cleanup).rejects.toThrow(/Member changed during cleanup; refusing partial deletion/);
+        expect(deletedIdentities).toEqual([]);
+        expect(output).toEqual([]);
+        const remaining = await db.select({
+          clerkId: usersTable.clerkId, email: usersTable.email,
+        }).from(usersTable).where(inArray(usersTable.clerkId, memberIds)).orderBy(usersTable.id);
+        expect(remaining).toEqual([
+          { clerkId: identities[0].id, email: identities[0].email },
+          { clerkId: identities[1].id, email: changedEmail },
+        ]);
+        expect(await db.select({ id: activityTable.id }).from(activityTable)
+          .where(inArray(activityTable.id, activityIds))).toEqual([{ id: activity.id }]);
+      } else {
+        await cleanup;
+        expect(deletedIdentities).toEqual(memberIds);
+        expect(output).toEqual([
+          `Removed confirmed disposable records for ${fixtureRun}. Re-run dry run to check for remaining Clerk users.`,
+        ]);
+        expect(await db.select().from(usersTable)
+          .where(inArray(usersTable.clerkId, memberIds))).toEqual([]);
+        expect(await db.select().from(activityTable)
+          .where(inArray(activityTable.id, activityIds))).toEqual([]);
+      }
+    } finally {
+      if (activityIds.length) await db.delete(activityTable).where(inArray(activityTable.id, activityIds));
+      if (memberIds.length) await db.delete(usersTable).where(inArray(usersTable.clerkId, memberIds));
+    }
+  },
+);

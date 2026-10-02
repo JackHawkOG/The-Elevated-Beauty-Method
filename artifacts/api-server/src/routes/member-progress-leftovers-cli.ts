@@ -170,8 +170,10 @@ export async function inspectProgressLeftovers(
         await tx.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, id));
       }
       for (const member of membersForRun) {
-        await tx.delete(usersTable).where(and(
-          eq(usersTable.clerkId, member.id), eq(usersTable.email, member.marker)));
+        const removed = await tx.delete(usersTable).where(and(
+          eq(usersTable.clerkId, member.id), eq(usersTable.email, member.marker)))
+          .returning({ id: usersTable.id });
+        if (removed.length !== 1) throw new Error("Member changed during cleanup; refusing partial deletion");
       }
       if (course) {
         await tx.delete(lessonsTable).where(eq(lessonsTable.courseId, course.id));
