@@ -508,6 +508,106 @@ test("a later sweep recovers from a temporary subscription retrieval outage with
   }
 });
 
+test("an unfiltered sweep continues after a failed status lookup and ends another member's access", async () => {
+  const failedClerkId = `billing-batch-failed-${id}`;
+  const failedSubscriptionId = `sub_billing_batch_failed_${id}`;
+  const canceledClerkId = `billing-batch-canceled-${id}`;
+  const canceledSubscriptionId = `sub_billing_batch_canceled_${id}`;
+  const previousFailure = invoice("batch-feb", "2026-02-01", "open");
+  const failures = [invoice("batch-mar", "2026-03-01", "open"), previousFailure];
+  const retrieve = vi.fn(async (requestedId: string) => {
+    if (requestedId === failedSubscriptionId) throw new Error("Temporary Stripe status outage");
+    expect(requestedId).toBe(canceledSubscriptionId);
+    return { status: "canceled", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+  });
+  const cancel = vi.fn();
+  const list = vi.fn(async (params: { subscription: string; limit: number }) => {
+    expect(params).toEqual({ subscription: canceledSubscriptionId, limit: 100 });
+    return { data: failures, has_more: false };
+  });
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: { retrieve, cancel },
+    invoices: { list },
+  } as unknown as Stripe);
+
+  const client = await pool.connect();
+  let connectSpy: ReturnType<typeof vi.spyOn> | undefined;
+  try {
+    // Bound waiting for a live background sweep, then retain its session lock.
+    // The sweep's own acquisition is reentrant on this same private connection.
+    await client.query("SET statement_timeout = '10s'");
+    await client.query("SELECT pg_advisory_lock(20261001, 56)");
+    // Copy structure, never data. Exclude public from name resolution so a
+    // missing fixture table fails closed instead of falling through to members.
+    await client.query(`
+      CREATE TEMP TABLE users (LIKE public.users INCLUDING DEFAULTS INCLUDING INDEXES);
+      CREATE TEMP TABLE membership_checkouts (LIKE public.membership_checkouts INCLUDING DEFAULTS INCLUDING INDEXES);
+      CREATE TEMP TABLE membership_reconciliation_failures (LIKE public.membership_reconciliation_failures INCLUDING DEFAULTS INCLUDING INDEXES);
+      CREATE TEMP TABLE membership_sweep_health (LIKE public.membership_sweep_health INCLUDING DEFAULTS INCLUDING INDEXES);
+      ALTER TABLE pg_temp.users ALTER COLUMN id DROP DEFAULT;
+      ALTER TABLE pg_temp.membership_checkouts ALTER COLUMN id DROP DEFAULT;
+      SET search_path = pg_temp, pg_catalog;
+    `);
+    await client.query(`
+      INSERT INTO users (id, clerk_id, display_name, email, membership_tier)
+      VALUES (1, $1, 'Batch failed fixture', $2, 'Elevated'),
+             (2, $3, 'Batch canceled fixture', $4, 'Elevated')
+    `, [failedClerkId, `${failedClerkId}@example.invalid`, canceledClerkId, `${canceledClerkId}@example.invalid`]);
+    // Fixed private IDs guarantee the failure occurs before the canceled row.
+    await client.query(`
+      INSERT INTO membership_checkouts (id, clerk_id, kind, status, stripe_subscription_id, failed_months, last_failed_invoice)
+      VALUES (1, $1, 'founding', 'confirmed', $2, 1, $5),
+             (2, $3, 'founding', 'confirmed', $4, 1, $5)
+    `, [failedClerkId, failedSubscriptionId, canceledClerkId, canceledSubscriptionId, previousFailure.id]);
+    const privateState = async (forSubscriptionId: string) => (await client.query<MembershipState>(
+      "SELECT m.status, m.failed_months, m.last_failed_invoice, u.membership_tier FROM membership_checkouts m JOIN users u ON u.clerk_id = m.clerk_id WHERE m.stripe_subscription_id = $1",
+      [forSubscriptionId],
+    )).rows[0];
+    const unchanged = await privateState(failedSubscriptionId);
+    expect(unchanged).toEqual({
+      status: "confirmed", failed_months: 1, last_failed_invoice: previousFailure.id, membership_tier: "Elevated",
+    });
+
+    // Only the connection lease is mocked; all sweep SQL, transactions, row
+    // locks, access updates and failure records run against real PostgreSQL.
+    const release = vi.fn();
+    connectSpy = vi.spyOn(pool, "connect").mockImplementation(async () => ({
+      query: client.query.bind(client),
+      release,
+    } as unknown as PoolClient));
+    await reconcileMemberships(); // Deliberately no subscription filter.
+
+    expect(connectSpy).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(retrieve).toHaveBeenNthCalledWith(1, failedSubscriptionId);
+    expect(retrieve).toHaveBeenNthCalledWith(2, canceledSubscriptionId);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(await privateState(failedSubscriptionId)).toEqual(unchanged);
+    expect(await privateState(canceledSubscriptionId)).toEqual({
+      status: "forfeited", failed_months: 2, last_failed_invoice: failures[0].id, membership_tier: "Free",
+    });
+    expect((await client.query(
+      "SELECT stripe_subscription_id, consecutive_failures FROM membership_reconciliation_failures",
+    )).rows).toEqual([{ stripe_subscription_id: failedSubscriptionId, consecutive_failures: 1 }]);
+  } finally {
+    connectSpy?.mockRestore();
+    try {
+      // Even failed setup/assertions cannot leave fixtures or failure records.
+      await client.query("ROLLBACK");
+      await client.query(`
+        DROP TABLE IF EXISTS pg_temp.membership_reconciliation_failures,
+          pg_temp.membership_sweep_health, pg_temp.membership_checkouts, pg_temp.users;
+      `);
+    } finally {
+      // Destroy, rather than pool, the session with changed search_path and
+      // the retained advisory lock; this also removes any remaining temp data.
+      client.release(true);
+    }
+  }
+}, 30000);
+
 test("an already canceled subscription ends access even when invoice history is unavailable", async () => {
   const canceledClerkId = `billing-ended-${id}`;
   const canceledSubscriptionId = `sub_billing_ended_${id}`;
