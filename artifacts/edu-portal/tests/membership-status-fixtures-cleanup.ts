@@ -1,6 +1,7 @@
 // From the workspace root: pnpm run cleanup:membership-status-fixtures [--delete]
 // Dry run by default. Only marked identities older than 24 hours are eligible.
 import { createClerkClient } from "@clerk/backend";
+import { pathToFileURL } from "node:url";
 import type Stripe from "stripe";
 import type { PoolClient } from "../../../lib/db/src/index";
 import { getTestStripeClient } from "../../../scripts/src/stripeClient";
@@ -129,16 +130,26 @@ async function inspectRows(
   return { members: members.length, checkouts: checkouts.length };
 }
 
-async function main() {
-  const args = process.argv.slice(2);
+function validateArgs(args: string[]) {
   if (args.length > 1 || (args.length === 1 && args[0] !== "--delete")) {
     throw new Error("Usage: pnpm run cleanup:membership-status-fixtures [--delete]");
   }
-  requireAuditDevelopment();
-  const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-  const stripe = await getTestStripeClient();
-  // Connect only after both the workspace DB guard and test-mode Stripe guard.
-  const { pool } = await import("../../../lib/db/src/index");
+}
+
+// The CLI and isolated tests execute the same orchestration and predicates.
+// Importing this module never opens a database or contacts either provider.
+export async function cleanupMembershipStatusFixtures(
+  { clerk, stripe, pool, requireDevelopment = requireAuditDevelopment, log = console.log }: {
+    clerk: ReturnType<typeof createClerkClient>;
+    stripe: Stripe;
+    pool: Pick<typeof import("../../../lib/db/src/index").pool, "connect" | "end">;
+    requireDevelopment?: () => void;
+    log?: (message: string) => void;
+  },
+  args: string[] = [],
+) {
+  validateArgs(args);
+  requireDevelopment();
   try {
     const candidates: Array<{ id: string; email: string }> = [];
     const blockedTags = new Set<string>();
@@ -158,7 +169,7 @@ async function main() {
       if (!page.data.length || offset + page.data.length >= page.totalCount) break;
     }
     for (const candidate of candidates) {
-      requireAuditDevelopment();
+      requireDevelopment();
       const identity = await clerk.users.getUser(candidate.id);
       const fixture = staleMembershipStatusFixture(identity);
       if (!fixture || fixture.email !== candidate.email) {
@@ -192,7 +203,7 @@ async function main() {
       } finally {
         connection.release();
       }
-      console.log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${fixture.email}): ${counts.members} member, ${counts.checkouts} checkout, ${subscription ? 1 : 0} subscription, ${customer ? 1 : 0} customer`);
+      log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${fixture.email}): ${counts.members} member, ${counts.checkouts} checkout, ${subscription ? 1 : 0} subscription, ${customer ? 1 : 0} customer`);
       if (args.length) {
         if (subscription && subscription.status !== "canceled") await stripe.subscriptions.cancel(subscription.id);
         if (customer) await stripe.customers.del(customer.id);
@@ -203,10 +214,27 @@ async function main() {
         await clerk.users.deleteUser(candidate.id);
       }
     }
-    if (!args.length) console.log("Dry run; nothing deleted. Pass --delete to remove eligible marked fixtures.");
+    if (!args.length) log("Dry run; nothing deleted. Pass --delete to remove eligible marked fixtures.");
   } finally {
     await pool.end();
   }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+async function main() {
+  const args = process.argv.slice(2);
+  // Keep the usage check inline so the repository's static safety check can
+  // prove that no client/database work happens before the development guard.
+  if (args.length > 1 || (args.length === 1 && args[0] !== "--delete")) {
+    throw new Error("Usage: pnpm run cleanup:membership-status-fixtures [--delete]");
+  }
+  requireAuditDevelopment();
+  const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const stripe = await getTestStripeClient();
+  // Connect only after both the workspace DB guard and test-mode Stripe guard.
+  const { pool } = await import("../../../lib/db/src/index");
+  await cleanupMembershipStatusFixtures({ clerk, stripe, pool }, args);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => { console.error(error); process.exitCode = 1; });
+}
