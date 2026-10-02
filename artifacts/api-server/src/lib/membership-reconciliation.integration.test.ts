@@ -10,6 +10,13 @@ vi.mock("./stripeClient", () => ({
   getStripeSync: vi.fn(),
   getUncachableStripeClient: vi.fn(),
 }));
+// Full-sweep checks must not clear the running app's independent health blob.
+vi.mock("./membership-health-store", () => ({
+  independentSweepHealthStore: {
+    read: vi.fn().mockResolvedValue(null),
+    update: vi.fn(async change => change(null)),
+  },
+}));
 
 import { getStripeSync, getUncachableStripeClient } from "./stripeClient";
 import { reconcileMemberships, unresolvedReconciliationAlerts, outstandingReviewNotifications } from "./membership-reconciliation";

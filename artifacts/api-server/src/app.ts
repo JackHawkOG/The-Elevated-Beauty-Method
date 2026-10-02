@@ -11,6 +11,7 @@ import {
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { handleMembershipWebhook } from "./routes/membership";
+import { databaseStartupGuard } from "./lib/database-startup-outage";
 
 const app: Express = express();
 // The server is reached through one trusted Replit proxy hop. This lets
@@ -40,6 +41,7 @@ app.use(
 // Clerk proxy must come before body parsers (streams raw bytes)
 app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
 
+app.use(databaseStartupGuard);
 app.use(cors({ credentials: true, origin: true }));
 app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), handleMembershipWebhook);
 app.use(express.json());

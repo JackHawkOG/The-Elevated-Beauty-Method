@@ -20,6 +20,7 @@ import { startCheckoutExpirationRecovery } from "./lib/membership-checkout-expir
 import { startMembershipOrphanRecovery } from "./lib/membership-orphan-recovery";
 import { startUntrackedPaidCheckoutRecovery } from "./lib/membership-paid-recovery";
 import { ensureRoutineGuideSchema, startRoutineGuideRateLimitCleanup } from "./lib/ensure-routine-guide-schema";
+import { tryDatabaseStartup } from "./lib/database-startup-outage";
 
 const rawPort = process.env["PORT"];
 
@@ -35,46 +36,42 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-await ensureProfileSchema();
-await ensureEnrollmentSchema();
-await ensureAnnouncementSchema();
-await ensureMemberStoriesSchema();
-await ensureProgressSchema();
-await ensureRadiantAuditSchema();
-await ensureMembershipSchema();
-await ensureRoutineGuideSchema();
-const needsPublicationBackfill = await ensurePublicationSchema();
-await ensureMemberJourneyContent(needsPublicationBackfill);
-const announcementRepair = await reconcileAnnouncementActivity();
-// Deployment logs may not index pre-listen output. The configured startup
-// health check runs after the server is accepting requests; report the
-// committed result once there rather than rerunning a non-repeatable repair.
-reportAfterFirstHealthcheck(() => {
-  logger.info(announcementRepair, "Legacy announcement activity reconciliation");
-  if (announcementRepair.review.length) {
-    logger.warn({ review: announcementRepair.review }, "Ambiguous legacy announcement activity requires manual review");
-  }
-});
+async function initialize(): Promise<void> {
+  await ensureProfileSchema();
+  await ensureEnrollmentSchema();
+  await ensureAnnouncementSchema();
+  await ensureMemberStoriesSchema();
+  await ensureProgressSchema();
+  await ensureRadiantAuditSchema();
+  await ensureMembershipSchema();
+  await ensureRoutineGuideSchema();
+  const needsPublicationBackfill = await ensurePublicationSchema();
+  await ensureMemberJourneyContent(needsPublicationBackfill);
+  const announcementRepair = await reconcileAnnouncementActivity();
+  // Deployment logs may not index pre-listen output. The configured startup
+  // health check runs after the server is accepting requests; report the
+  // committed result once there rather than rerunning a non-repeatable repair.
+  reportAfterFirstHealthcheck(() => {
+    logger.info(announcementRepair, "Legacy announcement activity reconciliation");
+    if (announcementRepair.review.length) {
+      logger.warn({ review: announcementRepair.review }, "Ambiguous legacy announcement activity requires manual review");
+    }
+  });
 
-if (!process.env.DATABASE_URL || !process.env.REPLIT_DOMAINS?.split(",")[0]) {
-  throw new Error("Stripe requires DATABASE_URL and REPLIT_DOMAINS");
+  if (!process.env.DATABASE_URL || !process.env.REPLIT_DOMAINS?.split(",")[0]) {
+    throw new Error("Stripe requires DATABASE_URL and REPLIT_DOMAINS");
+  }
+  await runMigrations({ databaseUrl: process.env.DATABASE_URL });
+  const stripeSync = await getStripeSync();
+  await stripeSync.findOrCreateManagedWebhook(`https://${process.env.REPLIT_DOMAINS.split(",")[0]}/api/stripe/webhook`);
+  await syncStripeStartupBackfill(
+    stripeSync,
+    async id => (await getUncachableStripeClient()).customers.retrieve(id),
+    customerId => logger.warn({ customerId }, "Repaired a verified deleted Stripe customer during startup backfill"),
+  );
 }
-await runMigrations({ databaseUrl: process.env.DATABASE_URL });
-const stripeSync = await getStripeSync();
-await stripeSync.findOrCreateManagedWebhook(`https://${process.env.REPLIT_DOMAINS.split(",")[0]}/api/stripe/webhook`);
-await syncStripeStartupBackfill(
-  stripeSync,
-  async id => (await getUncachableStripeClient()).customers.retrieve(id),
-  customerId => logger.warn({ customerId }, "Repaired a verified deleted Stripe customer during startup backfill"),
-);
 
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
-
-  logger.info({ port }, "Server listening");
+function startBackgroundJobs(): void {
   startRadiantAuditReceiptCleanup();
   startRadiantAuditDraftPruning();
   startMembershipReconciliation();
@@ -83,4 +80,30 @@ app.listen(port, (err) => {
   startMembershipOrphanRecovery();
   startUntrackedPaidCheckoutRecovery();
   startRoutineGuideRateLimitCleanup();
+}
+
+const initialized = await tryDatabaseStartup(initialize);
+app.listen(port, (err) => {
+  if (err) {
+    logger.error({ err }, "Error listening on port");
+    process.exit(1);
+  }
+
+  logger.info({ port }, "Server listening");
+  if (initialized) return startBackgroundJobs();
+  // Serialize retries and keep the same 15-minute attempt spacing as sweeps.
+  // No background data mutation starts until initialization fully completes.
+  async function retryStartup(): Promise<void> {
+    try {
+      if (await tryDatabaseStartup(initialize)) {
+        startBackgroundJobs();
+        return;
+      }
+      setTimeout(() => { void retryStartup(); }, 15 * 60_000).unref();
+    } catch {
+      logger.fatal("Database startup retry encountered a non-connectivity failure");
+      process.exit(1);
+    }
+  }
+  setTimeout(() => { void retryStartup(); }, 15 * 60_000).unref();
 });

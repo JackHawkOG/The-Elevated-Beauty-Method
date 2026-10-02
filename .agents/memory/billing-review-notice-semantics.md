@@ -17,9 +17,9 @@ After an ambiguous external email send, retry only the original immutable payloa
 
 Sweep-wide health must have an observation path that does not depend on the failed database. Database persistence alone cannot report a database connection outage.
 
-**Why:** A sweep can fail before it reaches any subscription, and the staff alert query can fail for the same reason. A known operational warning must remain visible without claiming that unavailable individual review data is healthy. Local outage state is necessarily lost on process restart while the database remains unreachable; durable independent monitoring would be a separate reliability improvement.
+**Why:** A sweep can fail before it reaches any subscription, and the staff alert query can fail for the same reason. A known operational warning must remain visible without claiming that unavailable individual review data is healthy. Process memory cannot preserve that streak through a restart during the same outage.
 
-**How to apply:** Preserve known outage metadata locally during database unavailability, explicitly mark individual checks unavailable, and keep role verification mandatory even on the degraded response path.
+**How to apply:** Use a private independent durable store containing only timestamps and attempt counts, with separate development and production records. Explicitly mark individual checks unavailable, and keep role verification mandatory even on degraded startup. Block normal operations until initialization completes; resolve the warning only after a completed sweep. Do not turn non-database startup failures into degraded database operation.
 
 Keep invoice-history recovery for ended founding memberships separate from billing-review failure alerts. Staff inspection is read-only and must never restore forfeited access.
 
