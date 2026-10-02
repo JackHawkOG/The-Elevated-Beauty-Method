@@ -9,6 +9,18 @@ Fixture eligibility is not deletion authorization once another connection can ed
 
 **How to apply:** Preserve database precision when comparing snapshots, abort on a deleted-row count mismatch, and leave the Clerk identity available for a safe retry. Concurrency tests need independently connected, explicitly owned development data rather than session-local tables that another connection cannot see.
 
+Database-first fixture deletion needs a second, fenced decision before removing the external identity. If new member data appears in the commit gap, restore the validated profile without overwriting a newly recreated profile and preserve the identity.
+
+**Why:** Database and Clerk deletion are not atomic. Many member-content references are plain identity strings rather than foreign keys, so locking only the profile row cannot protect them. Development-only cleanup accepts a short table-wide write fence through the external call; this tradeoff is not suitable for a normal production member-deletion route.
+
+**How to apply:** Include every identity-bearing table in both the final guard and its fence. Commit compensating restoration before reporting refusal, and verify the commit gap using an independently connected writer that observes the committed deletion.
+
+Pre-deletion safety-check failures need compensation too, not just explicit data conflicts. Keep that compensation independent of external identity lookups and linked-table fences.
+
+**Why:** A failed Clerk lookup or lock acquisition after the database commit can otherwise skip restoration entirely. Once external deletion has actually been attempted, however, restoring could recreate a profile for an identity that was deleted despite an uncertain response.
+
+**How to apply:** Separate failures before the external deletion attempt from uncertain deletion outcomes. Restore known local conflicts before querying Clerk, and test lock timeouts and lookup outages with a second database connection.
+
 Verify remote deletion through the exact Clerk identity endpoint with bounded propagation time, not an immediate list result.
 
 **Why:** A development list response briefly retained a deleted identity with its email addresses already removed, causing an otherwise successful cleanup regression to fail.

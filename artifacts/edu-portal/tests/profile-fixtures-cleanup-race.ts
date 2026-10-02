@@ -14,7 +14,7 @@ export async function profileCleanupRace() {
   const run = randomUUID();
   const schema = `profile_race_${randomBytes(12).toString("hex")}`;
   const connection = await database.pool.connect();
-  let writer: Awaited<ReturnType<typeof database.pool.connect>> | undefined;
+  let writer: typeof connection | undefined;
   let schemaCreated = false;
   let ownedId: string | undefined;
   const db = drizzle(connection, { schema: database });
@@ -30,7 +30,12 @@ export async function profileCleanupRace() {
     }
   }
 
-  async function execute(beforeDelete?: () => Promise<void>) {
+  async function execute(options: {
+    beforeDelete?: () => Promise<void>;
+    afterCommit?: () => Promise<void>;
+    beforeClerkDelete?: () => Promise<void>;
+    finalLookup?: () => Promise<void>;
+  } = {}) {
     requireAuditDevelopment();
     if (!ownedId) throw new Error("Missing owned race fixture");
     const id = ownedId;
@@ -46,13 +51,16 @@ export async function profileCleanupRace() {
       finish();
     });
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    // Pause at execution of the actual DELETE, after every validation SELECT.
-    // The other connection commits its edit before this statement is sent.
+    let transactions = 0;
+    let firstCommitFinished = false;
+    // Intercept the awaited RETURNING query, not just the preceding builder.
+    // Also pause after the actual first COMMIT, before the final fenced check.
     const cleanupDb = new Proxy(db, {
       get(target, key) {
         if (key !== "transaction") return Reflect.get(target, key);
-        return (callback: Parameters<typeof db.transaction>[0]) => target.transaction(tx =>
-          callback(new Proxy(tx, {
+        return async (callback: Parameters<typeof db.transaction>[0]) => {
+          const number = ++transactions;
+          const result = await target.transaction(tx => callback(new Proxy(tx, {
             get(target, key) {
               if (key !== "delete") return Reflect.get(target, key);
               return (...args: Parameters<typeof tx.delete>) => {
@@ -64,12 +72,20 @@ export async function profileCleanupRace() {
                       const query = target.where(condition);
                       return new Proxy(query, {
                         get(target, key) {
-                          if (key !== "then") return Reflect.get(target, key);
-                          return (...args: Parameters<typeof query.then>) =>
-                            (async () => {
-                              await beforeDelete?.();
-                              return await target;
-                            })().then(...args);
+                          if (key !== "returning") return Reflect.get(target, key);
+                          return (...args: Parameters<typeof query.returning>) => {
+                            const returning = target.returning(...args);
+                            return new Proxy(returning, {
+                              get(target, key) {
+                                if (key !== "then") return Reflect.get(target, key);
+                                return (...args: Parameters<typeof returning.then>) =>
+                                  (async () => {
+                                    await options.beforeDelete?.();
+                                    return await target;
+                                  })().then(...args);
+                              },
+                            });
+                          };
                         },
                       });
                     };
@@ -77,8 +93,13 @@ export async function profileCleanupRace() {
                 });
               };
             },
-          })),
-        );
+          })));
+          if (number === 1) {
+            firstCommitFinished = true;
+            await options.afterCommit?.();
+          }
+          return result;
+        };
       },
     });
     vi.resetModules();
@@ -92,6 +113,7 @@ export async function profileCleanupRace() {
           },
           getUser: async (candidate: string) => {
             if (candidate !== id) throw new Error("Non-owned Clerk lookup");
+            if (firstCommitFinished) await options.finalLookup?.();
             return clerkCall(() => clerk.users.getUser(id));
           },
           deleteUser: async (candidate: string) => {
@@ -99,6 +121,7 @@ export async function profileCleanupRace() {
             if (candidate !== id) throw new Error("Non-owned Clerk deletion");
             const user = await clerkCall(() => clerk.users.getUser(id));
             if (user.privateMetadata.profileCleanupIntegrationRun !== run) throw new Error("Clerk ownership changed");
+            await options.beforeClerkDelete?.();
             deleted.push(id);
             return clerkCall(() => clerk.users.deleteUser(id));
           },
@@ -161,7 +184,7 @@ export async function profileCleanupRace() {
     );
     const before = (await connection.query(`SELECT * FROM "${schema}".users WHERE clerk_id = $1`, [ownedId])).rows[0];
     let writes = 0;
-    const result = await execute(async () => {
+    const result = await execute({ beforeDelete: async () => {
       requireAuditDevelopment();
       const edit = await writer!.query(
         `UPDATE "${schema}".users SET bio = 'Concurrent member edit', skin_type = 'Dry',
@@ -169,7 +192,7 @@ export async function profileCleanupRace() {
       );
       expect(edit.rowCount).toBe(1);
       writes++;
-    });
+    } });
     expect(writes).toBe(1);
     expect(result.errors).toHaveLength(1);
     expect(result.errors.map(String).join("\n")).toMatch(/member changed during cleanup/);
@@ -188,7 +211,171 @@ export async function profileCleanupRace() {
     expect((await clerkCall(() => clerk.users.getUser(ownedId!))).id).toBe(ownedId);
     // Only an explicit fixture reset authorizes a successful subsequent retry.
     await connection.query(`UPDATE "${schema}".users SET bio = NULL, skin_type = NULL WHERE clerk_id = $1`, [ownedId]);
-    expect(await execute()).toEqual({ errors: [], deleted: [ownedId] });
+    const pristine = (await connection.query(`SELECT to_jsonb(u)::text AS snapshot FROM "${schema}".users u WHERE clerk_id = $1`, [ownedId])).rows[0].snapshot;
+
+    // Exercise string identity links without foreign keys as well as private
+    // Audit content. Each second connection write actually commits; no sleeps.
+    const contentCases = [
+      {
+        table: "announcements",
+        insert: `INSERT INTO "${schema}".announcements (id, title, body, author_name, actor_id)
+          VALUES (1, 'Concurrent announcement', 'Keep this content', 'Disposable author', $1)`,
+      },
+      {
+        table: "radiant_audit_drafts",
+        insert: `INSERT INTO "${schema}".radiant_audit_drafts (clerk_id, answers, expires_at)
+          VALUES ($1, '{"concurrent":"Keep private answers"}', NOW() + INTERVAL '1 day')`,
+      },
+      {
+        table: "member_stories",
+        insert: `INSERT INTO "${schema}".member_stories
+          (id, quote, attribution, permission_record, permission_recorded_by, permission_recorded_at, published_at)
+          VALUES (1, 'Keep this quote', 'Disposable subject', 'Synthetic permission', $1, NOW(), NOW())`,
+      },
+    ];
+    for (const phase of ["beforeDelete", "afterCommit"] as const) {
+      for (const content of contentCases) {
+        let writes = 0;
+        let inserted: unknown[] = [];
+        const outcome = await execute({ [phase]: async () => {
+          requireAuditDevelopment();
+          // The commit hook must see the deletion from another connection.
+          expect((await writer!.query(`SELECT id FROM "${schema}".users WHERE clerk_id = $1`, [ownedId])).rowCount)
+            .toBe(phase === "afterCommit" ? 0 : 1);
+          await writer!.query(content.insert, [ownedId]);
+          inserted = (await writer!.query(`SELECT * FROM "${schema}"."${content.table}"`)).rows;
+          writes++;
+        } });
+        expect(writes, `${phase}: ${content.table}`).toBe(1);
+        expect(outcome.errors.map(String).join("\n")).toMatch(/changed after database cleanup/);
+        expect(outcome.deleted).toEqual([]);
+        expect((await connection.query(`SELECT * FROM "${schema}"."${content.table}"`)).rows).toEqual(inserted);
+        expect((await connection.query(`SELECT to_jsonb(u)::text AS snapshot FROM "${schema}".users u WHERE clerk_id = $1`, [ownedId])).rows)
+          .toEqual([{ snapshot: pristine }]);
+        expect((await clerkCall(() => clerk.users.getUser(ownedId!))).id).toBe(ownedId);
+        // A normal retry still refuses until the test explicitly resets content.
+        const retry = await execute();
+        expect(retry.errors.map(String).join("\n")).toMatch(/Related member data exists/);
+        expect(retry.deleted).toEqual([]);
+        expect((await connection.query(`SELECT * FROM "${schema}"."${content.table}"`)).rows).toEqual(inserted);
+        await connection.query(`DELETE FROM "${schema}"."${content.table}"`);
+      }
+    }
+
+    const expectRestored = async () => {
+      expect((await connection.query(`SELECT to_jsonb(u)::text AS snapshot FROM "${schema}".users u WHERE clerk_id = $1`, [ownedId])).rows)
+        .toEqual([{ snapshot: pristine }]);
+      expect((await clerkCall(() => clerk.users.getUser(ownedId!))).id).toBe(ownedId);
+    };
+
+    // A known content conflict must restore without depending on Clerk. Arm a
+    // failing final lookup and prove that cleanup never needs to call it.
+    let finalLookups = 0;
+    const contentDuringOutage = await execute({
+      afterCommit: async () => { await writer!.query(contentCases[0].insert, [ownedId]); },
+      finalLookup: async () => {
+        finalLookups++;
+        throw new Error("Injected final Clerk lookup outage");
+      },
+    });
+    expect(contentDuringOutage.errors.map(String).join("\n")).toMatch(/changed after database cleanup/);
+    expect(contentDuringOutage.deleted).toEqual([]);
+    expect(finalLookups).toBe(0);
+    await expectRestored();
+    const outageContent = (await connection.query(`SELECT * FROM "${schema}".announcements`)).rows;
+    expect(outageContent).toHaveLength(1);
+    expect(outageContent[0]).toMatchObject({ actor_id: ownedId, body: "Keep this content" });
+    const contentOutageRetry = await execute();
+    expect(contentOutageRetry.errors.map(String).join("\n")).toMatch(/Related member data exists/);
+    expect(contentOutageRetry.deleted).toEqual([]);
+    expect((await connection.query(`SELECT * FROM "${schema}".announcements`)).rows).toEqual(outageContent);
+    await connection.query(`DELETE FROM "${schema}".announcements`);
+
+    // With no known local conflict, a failed final Clerk lookup must still
+    // compensate the committed DB deletion, with no external deletion attempt.
+    const lookupFailure = await execute({ finalLookup: async () => {
+      finalLookups++;
+      throw new Error("Injected final Clerk lookup outage");
+    } });
+    expect(finalLookups).toBe(1);
+    expect(lookupFailure.errors.map(String).join("\n")).toMatch(/Injected final Clerk lookup outage/);
+    expect(lookupFailure.deleted).toEqual([]);
+    await expectRestored();
+    const secondLookupFailure = await execute({ finalLookup: async () => {
+      throw new Error("Injected final Clerk lookup outage");
+    } });
+    expect(secondLookupFailure.errors.map(String).join("\n")).toMatch(/Injected final Clerk lookup outage/);
+    expect(secondLookupFailure.deleted).toEqual([]);
+    await expectRestored();
+
+    // A second connection holds a real table write lock past the CLI's five
+    // second fence budget. Compensation must not depend on this linked table.
+    let writerTransactionOpen = false;
+    try {
+      const fenceTimeout = await execute({ afterCommit: async () => {
+        expect((await writer!.query(`SELECT id FROM "${schema}".users WHERE clerk_id = $1`, [ownedId])).rowCount).toBe(0);
+        await writer!.query(contentCases[0].insert, [ownedId]);
+        await writer!.query("BEGIN");
+        writerTransactionOpen = true;
+        await writer!.query(`LOCK TABLE "${schema}".announcements IN ROW EXCLUSIVE MODE`);
+      } });
+      expect(fenceTimeout.errors).toHaveLength(1);
+      let failure = fenceTimeout.errors[0];
+      while ((failure as { cause?: unknown }).cause) failure = (failure as { cause: unknown }).cause;
+      expect(failure).toMatchObject({ code: "55P03" });
+      expect(fenceTimeout.deleted).toEqual([]);
+      await expectRestored();
+      const retained = (await connection.query(`SELECT * FROM "${schema}".announcements`)).rows;
+      expect(retained).toHaveLength(1);
+      expect(retained[0]).toMatchObject({ actor_id: ownedId, body: "Keep this content" });
+      const retry = await execute();
+      expect(retry.errors.map(String).join("\n")).toMatch(/Related member data exists/);
+      expect(retry.deleted).toEqual([]);
+      expect((await connection.query(`SELECT * FROM "${schema}".announcements`)).rows).toEqual(retained);
+      await expectRestored();
+    } finally {
+      if (writerTransactionOpen) await writer!.query("ROLLBACK");
+    }
+    await connection.query(`DELETE FROM "${schema}".announcements`);
+
+    // A member recreated in the commit gap belongs to the writer, not cleanup.
+    let recreated: unknown[] = [];
+    const recreation = await execute({ afterCommit: async () => {
+      expect((await writer!.query(`SELECT id FROM "${schema}".users WHERE clerk_id = $1`, [ownedId])).rowCount).toBe(0);
+      await writer!.query(`INSERT INTO "${schema}".users
+        SELECT * FROM json_populate_record(NULL::"${schema}".users,
+          jsonb_set($1::jsonb, '{bio}', '"New member profile in commit gap"')::json)`, [pristine]);
+      recreated = (await writer!.query(`SELECT * FROM "${schema}".users`)).rows;
+    } });
+    expect(recreation.errors.map(String).join("\n")).toMatch(/changed after database cleanup/);
+    expect(recreation.deleted).toEqual([]);
+    expect((await connection.query(`SELECT * FROM "${schema}".users`)).rows).toEqual(recreated);
+    expect((await clerkCall(() => clerk.users.getUser(ownedId!))).id).toBe(ownedId);
+    await connection.query(`UPDATE "${schema}".users SET bio = NULL WHERE clerk_id = $1`, [ownedId]);
+
+    // Verify the fence lasts through Clerk deletion: writes on every guarded
+    // table must fail with lock_not_available, not slip past a final SELECT.
+    let fenced = 0;
+    expect(await execute({ beforeClerkDelete: async () => {
+      await writer!.query("SET lock_timeout = '100ms'");
+      try {
+        for (const table of [
+          "users", "enrollments", "lesson_completions", "announcements", "member_stories",
+          "activity", "announcement_activity_corrections", "member_story_review_corrections",
+          "membership_checkouts", "radiant_audit_drafts", "radiant_audits",
+          "radiant_audit_history", "radiant_audit_submissions",
+        ]) {
+          // DELETE also acquires a write lock when no row matches, without
+          // introducing an unrelated fixture or relying on column shapes.
+          await expect(writer!.query(`DELETE FROM "${schema}"."${table}" WHERE false`))
+            .rejects.toMatchObject({ code: "55P03" });
+          fenced++;
+        }
+      } finally {
+        await writer!.query("RESET lock_timeout");
+      }
+    } })).toEqual({ errors: [], deleted: [ownedId] });
+    expect(fenced).toBe(13);
     expect((await connection.query(`SELECT * FROM "${schema}".users WHERE clerk_id = $1`, [ownedId])).rowCount).toBe(0);
     // Clerk's list index can briefly retain a deleted identity. Verify the
     // exact identity endpoint instead, allowing bounded deletion propagation.

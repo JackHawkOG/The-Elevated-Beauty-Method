@@ -6,7 +6,7 @@ import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 import { profileFixturePrivateMetadata } from "./profile-fixtures";
 import { profileCleanupRace } from "./profile-fixtures-cleanup-race";
 
-it("preserves a profile edited after validation and allows safe cleanup retries", profileCleanupRace, 90_000);
+it("preserves concurrent profile/content writes across validation and commit, and fences Clerk deletion", profileCleanupRace, 180_000);
 
 const tables = [
   "users", "enrollments", "lesson_completions", "announcements", "member_stories",

@@ -48,15 +48,7 @@ async function main() {
           fixture.tag !== candidate.tag || fixture.role !== candidate.role) {
         throw new Error(`Profile fixture identity changed; refusing deletion for ${candidate.id}`);
       }
-      await db.transaction(async tx => {
-        const members = await tx.select({
-          ...getTableColumns(usersTable),
-          // Capture the exact database representation, including timestamp precision.
-          cleanupSnapshot: sql<string>`to_jsonb(${usersTable})::text`,
-        }).from(usersTable).where(eq(usersTable.clerkId, candidate.id));
-        if (members.some(member => !profileFixtureMember(member, fixture))) {
-          throw new Error(`Non-fixture member row; refusing deletion for ${candidate.id}`);
-        }
+      const relatedData = async (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => {
         const linked = await Promise.all([
           tx.select({ id: enrollmentsTable.id }).from(enrollmentsTable).where(eq(enrollmentsTable.userId, candidate.id)),
           tx.select({ id: lessonCompletionsTable.lessonId }).from(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, candidate.id)),
@@ -83,7 +75,18 @@ async function main() {
           tx.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, candidate.id)),
           tx.select().from(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, candidate.id)),
         ]);
-        if (linked.some(rows => rows.length)) {
+        return linked.some(rows => rows.length);
+      };
+      const removedMembers = await db.transaction(async tx => {
+        const members = await tx.select({
+          ...getTableColumns(usersTable),
+          // Capture the exact database representation, including timestamp precision.
+          cleanupSnapshot: sql<string>`to_jsonb(${usersTable})::text`,
+        }).from(usersTable).where(eq(usersTable.clerkId, candidate.id));
+        if (members.some(member => !profileFixtureMember(member, fixture))) {
+          throw new Error(`Non-fixture member row; refusing deletion for ${candidate.id}`);
+        }
+        if (await relatedData(tx)) {
           throw new Error(`Related member data exists; refusing deletion for ${candidate.id}`);
         }
         console.log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${candidate.email}): ${members.length} member row(s)`);
@@ -99,9 +102,71 @@ async function main() {
             throw new Error(`Profile fixture member changed during cleanup; refusing deletion for ${candidate.id}`);
           }
         }
+        return members;
       });
       // Keep the marked Clerk identity on DB failure so a rerun can finish.
-      if (args.length) await client.users.deleteUser(candidate.id);
+      if (args.length) {
+        const restore = async (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => {
+          // Never overwrite a newly recreated member. JSON preserves precision.
+          for (const member of removedMembers) {
+            await tx.execute(sql`INSERT INTO ${usersTable}
+              SELECT * FROM json_populate_record(NULL::users, ${member.cleanupSnapshot}::json)
+              ON CONFLICT DO NOTHING`);
+          }
+        };
+        let externalDeletionStarted = false;
+        let refusal: string | undefined;
+        try {
+          refusal = await db.transaction(async tx => {
+            // Development cleanup only: fence ALL guarded tables, including tables
+            // without user foreign keys. A fresh READ COMMITTED snapshot after the
+            // locks sees writes committed since the first transaction. Keep the
+            // fence through the external call, not just through its guard queries.
+            await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+            await tx.execute(sql`LOCK TABLE
+              users, enrollments, lesson_completions, announcements, member_stories,
+              activity, announcement_activity_corrections, member_story_review_corrections,
+              membership_checkouts, radiant_audit_drafts, radiant_audits,
+              radiant_audit_history, radiant_audit_submissions IN SHARE ROW EXCLUSIVE MODE`);
+            const currentMembers = await tx.select().from(usersTable).where(eq(usersTable.clerkId, candidate.id));
+            const linked = await relatedData(tx);
+            const refusal = `Profile fixture data or identity changed after database cleanup; refusing deletion for ${candidate.id}`;
+            if (currentMembers.length || linked) {
+              // Known DB refusal must not depend on Clerk being available.
+              await restore(tx);
+              return refusal;
+            }
+            const currentUser = await client.users.getUser(candidate.id);
+            const currentFixture = staleProfileFixture(currentUser);
+            const identityChanged = !currentFixture || currentFixture.email !== candidate.email ||
+              currentFixture.tag !== candidate.tag || currentFixture.role !== candidate.role;
+            if (identityChanged) {
+              await restore(tx);
+              return refusal;
+            }
+            requireAuditDevelopment();
+            externalDeletionStarted = true;
+            await client.users.deleteUser(candidate.id);
+            return undefined;
+          });
+        } catch (error) {
+          if (!externalDeletionStarted) {
+            // The failed fence transaction has rolled back, releasing partial
+            // locks. Restore independently of Clerk and the linked tables.
+            // Do not reuse its lock timeout: a concurrent user writer may need
+            // to finish before the conflict-safe INSERT can complete.
+            try { await db.transaction(restore); }
+            catch (restorationError) {
+              throw new AggregateError([error, restorationError],
+                `Profile cleanup stopped before Clerk deletion but profile restoration failed for ${candidate.id}`);
+            }
+          }
+          // After an uncertain deleteUser result, retain DB-first retry behavior;
+          // restoring then could recreate a profile for a deleted identity.
+          throw error;
+        }
+        if (refusal) throw new Error(refusal);
+      }
     }
     if (!args.length) {
       for (const possible of legacy) {
