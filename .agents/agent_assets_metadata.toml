@@ -140,3 +140,45 @@ mtime_ms = 1790875706319
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/d9f43428-cd10-42ab-9f75-10aff6896d28/2738449b-7a88-4c3d-9aab-96fbb34aae42"
 storage_version_token = "1790875719274501"
 content_type = "text/csv"
+
+[[outputs]]
+id = "yZekJtlVcXfc-vteOpn-s"
+uri = "file://downloads/github-push-chat-recap.txt"
+type = "text"
+title = "GitHub Push Troubleshooting — Chat Recap"
+description = "Downloadable text recap of the push attempts, authentication troubleshooting, confirmed status, and suggested support summary."
+logical_id = "97a40180-dcae-40fd-a62b-172c60484eea"
+content_hash = "sha256:9a9fc669914d0b7253b035bf66c53b0d991bdf9e306868f0a9047b0a3e367233"
+size = 5912
+mtime_ms = 1790905400541
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/97a40180-dcae-40fd-a62b-172c60484eea/4ca768a9-f7af-4bfe-875e-1517521b3881"
+storage_version_token = "1790905409744550"
+content_type = "text/plain"
+
+[[outputs]]
+id = "67hMzQDlbi3qyp1IQYRUL"
+uri = "file://downloads/tebm-backup-2026-10-01-eb00f5f.bundle"
+type = "unspecified"
+title = "TEBM — Main and Full Commit History"
+description = "Verified Git bundle, approximately 27 MB. Contains committed main at eb00f5f and all 293 reachable commits. Download and keep private."
+logical_id = "0a5450ee-5971-4df3-92d4-6dafe489546a"
+content_hash = "sha256:9fbc93fd9464148143bd81b4a8a20e33eb15451dc21b78866795aed8adee56f7"
+size = 27038990
+mtime_ms = 1790906272661
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/0a5450ee-5971-4df3-92d4-6dafe489546a/0f2d04a4-fc58-4069-b2ba-90538601ae47"
+storage_version_token = "1790906295832490"
+content_type = "application/octet-stream"
+
+[[outputs]]
+id = "cmLk08X7AkDybjW6pBc1X"
+uri = "file://downloads/tebm-backup-2026-10-01-eb00f5f-files.zip"
+type = "unspecified"
+title = "TEBM — Current Project Files"
+description = "Verified ZIP, approximately 24 MB, containing 627 tracked and non-ignored working files plus restore instructions. Excludes database, Replit Secrets, and ignored dependencies."
+logical_id = "99cde681-6a43-4c7e-ae9a-e62450a4902b"
+content_hash = "sha256:f587be4367af80d75b7a115eca4c1765b81f3cca1ad406a73e070a2939c6cce0"
+size = 23843377
+mtime_ms = 1790906278797
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/99cde681-6a43-4c7e-ae9a-e62450a4902b/890e58ca-966f-4520-a54b-8ab60adbf71f"
+storage_version_token = "1790906297183943"
+content_type = "application/octet-stream"
