@@ -1140,6 +1140,16 @@ for (const storageFailure of ["read throws", "write throws", "write ignored"] as
 for (const scenario of ["expired", "unknown-age"] as const) {
   test(`a signed-in ${scenario} retry waits for current Audit review and explicit new save`, async ({ page }) => {
     const answers = fixture(scenario);
+    await page.addInitScript(() => {
+      const events: Array<{ name: string; data?: unknown }> = [];
+      (window as unknown as { __auditTracking: typeof events }).__auditTracking = events;
+      (window as unknown as { umami: { track: (name: string, data?: unknown) => void } }).umami = {
+        track: (name, data) => { events.push({ name, data }); },
+      };
+    });
+    const tracking = () => page.evaluate(() =>
+      (window as unknown as { __auditTracking: TrackingEvent[] }).__auditTracking,
+    );
     const oldId = crypto.randomUUID();
     const writes: string[] = [];
     let reads = 0;
@@ -1148,6 +1158,8 @@ for (const scenario of ["expired", "unknown-age"] as const) {
       ...fixture("already-saved"), routineScore: 1, valuesScore: 2,
       completedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     } : null;
+    let savedCurrent = current;
+    await page.route("**/api/users/me/radiant-audit/history", route => route.fulfill({ json: [] }));
     await page.route("**/api/users/me/radiant-audit", route => {
       if (route.request().method() === "GET") {
         reads++;
@@ -1155,12 +1167,13 @@ for (const scenario of ["expired", "unknown-age"] as const) {
           failReview = false;
           return route.fulfill({ status: 503, json: { error: "Unavailable" } });
         }
-        return route.fulfill({ json: current });
+        return route.fulfill({ json: savedCurrent });
       }
       const { submissionId, ...input } = route.request().postDataJSON() as Answers & { submissionId: string };
       writes.push(submissionId);
+      savedCurrent = { ...input, routineScore: 1, valuesScore: 2, completedAt: new Date().toISOString() };
       return route.fulfill({ json: {
-        audit: { ...input, routineScore: 1, valuesScore: 2, completedAt: new Date().toISOString() },
+        audit: savedCurrent,
         completionKind: current ? "retake" : "first_time",
       } });
     });
@@ -1192,20 +1205,37 @@ for (const scenario of ["expired", "unknown-age"] as const) {
     await expect(page.getByRole("alertdialog").getByRole("alert")).toContainText("couldn't load your current Audit");
     expect(reads).toBeGreaterThan(priorReads);
     expect(writes).toEqual([]);
+    expect(await tracking()).toEqual([]);
     await page.getByRole("button", { name: "Try loading again" }).click();
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toContainText(current ? "will create a new retake" : "will create a new Audit");
     expect(writes).toEqual([]);
+    const reviewed: TrackingEvent = {
+      name: "radiant_audit_expired_retry_reviewed",
+      data: { has_current_audit: current !== null },
+    };
+    expect(await tracking()).toEqual([reviewed]);
     await dialog.getByRole("button", { name: "Keep editing" }).click();
     expect(writes).toEqual([]);
+    expect(await tracking()).toEqual([reviewed]);
     await page.getByRole("button", { name: "Save my Audit" }).click();
     await expect(dialog).toContainText(current ? "will create a new retake" : "will create a new Audit");
     expect(writes).toEqual([]);
+    expect(await tracking()).toEqual([reviewed, reviewed]);
     await dialog.getByRole("button", { name: current ? "Save as a new retake" : "Save as a new Audit" }).click();
     expect(writes).toHaveLength(1);
     await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
     expect(writes[0]).not.toBe(oldId);
     expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+    // Exact payloads exclude all answer text, email, account and submission IDs.
+    expect(await tracking()).toEqual([
+      reviewed, reviewed,
+      {
+        name: "radiant_audit_expired_retry_new_save_selected",
+        data: { has_current_audit: current !== null },
+      },
+      { name: "radiant_audit_saved", data: { completion_kind: current ? "retake" : "first_time" } },
+    ]);
   });
 }
 

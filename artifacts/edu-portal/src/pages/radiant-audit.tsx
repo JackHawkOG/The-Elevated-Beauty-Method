@@ -389,14 +389,18 @@ export default function RadiantAuditPage() {
     }
   }
 
-  async function loadCurrentForRetry(owner: string) {
+  async function loadCurrentForRetry(owner: string, reason?: "storage" | "changed") {
     const version = ++retryReadVersion.current;
     setRetryReview(previous => previous?.owner === owner ? { ...previous, loading: true, error: false, current: undefined } : previous);
     try {
       // Read the server now, not a possibly stale query cache.
       const current = await getRadiantAudit({ responseType: "json" });
-      if (activeAccount.current === owner && retryReadVersion.current === version)
+      if (activeAccount.current === owner && retryReadVersion.current === version) {
         setRetryReview(previous => previous?.owner === owner ? { ...previous, current, loading: false } : previous);
+        // Only a successfully loaded aged/unknown-age review counts. Never send
+        // the account, answers, or private retry correlation to analytics.
+        if (!reason) trackEvent("radiant_audit_expired_retry_reviewed", { has_current_audit: current !== null });
+      }
     } catch {
       if (activeAccount.current === owner && retryReadVersion.current === version)
         setRetryReview(previous => previous?.owner === owner ? { ...previous, loading: false, error: true } : previous);
@@ -439,6 +443,8 @@ export default function RadiantAuditPage() {
     if (!retryReview || retryReview.owner !== accountId || retryReview.loading ||
         retryReview.error || retryReview.current === undefined || retrySaving.current || save.isPending) return;
     retrySaving.current = true;
+    if (!retryReview.reason)
+      trackEvent("radiant_audit_expired_retry_new_save_selected", { has_current_audit: retryReview.current !== null });
     const started = startAuditSubmission(retryReview.owner, retryReview.audit);
     if (!started.persisted) setRetryProtectionUnavailable(true);
     attempt.current = { accountId: retryReview.owner, answers: JSON.stringify(auditAnswers(retryReview.audit)), ...started };
@@ -509,7 +515,7 @@ export default function RadiantAuditPage() {
         }
         if (!id) {
           setRetryReview({ owner: user!.id, audit, loading: true, error: false, reason: reviewReason });
-          void loadCurrentForRetry(user!.id);
+           void loadCurrentForRetry(user!.id, reviewReason);
           return;
         }
         await saveSignedInAudit(audit, id);
@@ -596,7 +602,7 @@ export default function RadiantAuditPage() {
         {retryReview?.loading ? <p role="status">Loading your current Audit…</p> :
           retryReview?.error ? <div>
             <p role="alert">We couldn't load your current Audit. Nothing has been saved again.</p>
-            <Button type="button" variant="outline" className="mt-3" onClick={() => void loadCurrentForRetry(retryReview.owner)}>Try loading again</Button>
+            <Button type="button" variant="outline" className="mt-3" onClick={() => void loadCurrentForRetry(retryReview.owner, retryReview.reason)}>Try loading again</Button>
           </div> : retryReview?.current !== undefined ? <p>
             {retryReview.current
               ? `Your current Audit was saved on ${new Date(retryReview.current.completedAt).toLocaleDateString()}. Saving these answers will create a new retake.`
