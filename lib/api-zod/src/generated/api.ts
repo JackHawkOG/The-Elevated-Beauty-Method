@@ -9,6 +9,57 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Guide-only request information
+ */
+export const GetRoutineGuideResponse = zod.object({
+  "title": zod.string(),
+  "consentText": zod.string(),
+  "privacyNotice": zod.string(),
+  "version": zod.string(),
+  "pageCount": zod.number(),
+  "available": zod.boolean(),
+  "publishedInLibrary": zod.boolean()
+})
+
+
+/**
+ * @summary Request one guide-only delivery email
+ */
+export const claimRoutineGuideBodyEmailMax = 254;
+
+export const claimRoutineGuideBodyWebsiteMax = 200;
+
+
+
+export const ClaimRoutineGuideBody = zod.object({
+  "email": zod.string().email().max(claimRoutineGuideBodyEmailMax),
+  "consent": zod.boolean(),
+  "requestId": zod.string().uuid(),
+  "website": zod.string().max(claimRoutineGuideBodyWebsiteMax).optional()
+})
+
+export const ClaimRoutineGuideResponse = zod.object({
+  "status": zod.enum(['sent', 'processing']),
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Approved free Curated Digital Guides
+ */
+export const ListDigitalGuidesResponseItem = zod.object({
+  "title": zod.string(),
+  "consentText": zod.string(),
+  "privacyNotice": zod.string(),
+  "version": zod.string(),
+  "pageCount": zod.number(),
+  "available": zod.boolean(),
+  "publishedInLibrary": zod.boolean()
+})
+export const ListDigitalGuidesResponse = zod.array(ListDigitalGuidesResponseItem)
+
+
+/**
  * @summary Publicly visible member stories
  */
 export const ListPublishedMemberStoriesResponseItem = zod.object({
@@ -1484,5 +1535,3 @@ export const GetRecentActivityResponseItem = zod.object({
   "createdAt": zod.string()
 })
 export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem)
-
-

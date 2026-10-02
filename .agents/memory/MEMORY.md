@@ -1,5 +1,5 @@
 - [Wouter server rendering in tests](wouter-ssr-tests.md) — static rendering of linked components needs a synchronous router hook; memoryLocation lacks a server snapshot.
-- [OpenAPI integer codegen](openapi-integer-codegen.md) — generated Zod can emit z.int() against the installed Zod v3 runtime; check integer fields before relying on codegen.
+- [OpenAPI Zod codegen](openapi-integer-codegen.md) — automatic version detection can disagree with the consumer; check integer, email, and UUID validators against its runtime.
 - [OpenAPI Zod constant ordering](openapi-zod-constant-ordering.md) — generated Zod can reference a bound constant before declaration; verify generated typecheck after codegen.
 - [Audit browser test boundary](audit-browser-test-boundary.md) — the repeatable comparison browser test isolates auth/API; pair it with server isolation checks rather than treating it as live Clerk coverage.
 - [Clerk test tickets](clerk-test-tickets.md) — consumed sign-in tickets cannot be revoked; keep them short-lived and clean up disposable users.
@@ -48,3 +48,5 @@
 - [Stripe portal fixture safety](stripe-portal-fixture-safety.md) — reuse existing test portal settings; the first created configuration becomes an undeactivatable default.
 - [Membership return privacy](membership-return-privacy.md) — tab markers do not prove checkout identity; match server-confirmed checkout and keep correlation out of analytics.
 - [Browser write classification](browser-write-classification.md) — UI actions are potential writes; a route mock alone does not prove a spec is isolated.
+- [Audit dialog history tests](audit-dialog-history-tests.md) — synthetic visibility events may not refetch history during a modal; invalidate the test client's query to simulate an external update.
+- [PDF subset fonts](pdf-subset-fonts.md) — extracted PDF fonts may lack glyphs for revised copy; verify both text extraction and rendering.

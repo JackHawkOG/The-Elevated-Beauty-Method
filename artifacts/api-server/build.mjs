@@ -3,16 +3,32 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
+const privateGuideSource = path.resolve(artifactDir, "../../docs/assets/the-elevated-routine-review.pdf");
+const privateGuideSourceCopy = path.resolve(artifactDir, "private-assets/the-elevated-routine.pdf");
+const privateGuideSha256 = "d52221527813a33ad7e6c90e3071b3b4927ae0d95cf6b7eac9c20e99147b4f44";
 
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
+  const sourceGuide = await readFile(privateGuideSource);
+  const sourceGuideHash = createHash("sha256").update(sourceGuide).digest("hex");
+  if (sourceGuideHash !== privateGuideSha256) {
+    throw new Error("The approved private routine guide attachment failed its SHA-256 integrity check.");
+  }
+  const packagedGuide = await readFile(privateGuideSourceCopy);
+  if (!packagedGuide.equals(sourceGuide)) {
+    throw new Error("The private server attachment is not byte-identical to the approved guide.");
+  }
+  const privateAssetsDir = path.join(distDir, "private-assets");
+  await mkdir(privateAssetsDir, { recursive: true });
+  await copyFile(privateGuideSourceCopy, path.join(privateAssetsDir, "the-elevated-routine.pdf"));
 
   await esbuild({
     entryPoints: [path.resolve(artifactDir, "src/index.ts")],

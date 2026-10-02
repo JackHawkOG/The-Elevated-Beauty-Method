@@ -182,3 +182,17 @@ mtime_ms = 1790906278797
 storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/99cde681-6a43-4c7e-ae9a-e62450a4902b/890e58ca-966f-4520-a54b-8ab60adbf71f"
 storage_version_token = "1790906297183943"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "JNlah_HJKuWh057jxuJM2"
+uri = "file://docs/assets/the-elevated-routine-review.pdf"
+type = "pdf"
+title = "The Elevated Routine — approved PDF"
+description = "Approved nine-page PDF, matching the tested email attachment. Original uploads are preserved; guide-only delivery and the free member library are ready in development. No marketing enrollment or production deployment."
+logical_id = "3b87b664-7060-4bec-b2fa-217b2ae524a2"
+content_hash = "sha256:d52221527813a33ad7e6c90e3071b3b4927ae0d95cf6b7eac9c20e99147b4f44"
+size = 1617296
+mtime_ms = 1790949107957
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:cb9c30f0-c090-4c7c-b784-c78fc9eee237/3b87b664-7060-4bec-b2fa-217b2ae524a2/a0e40b48-449d-414b-ac7d-2f7081283f0f"
+storage_version_token = "1790949432384089"
+content_type = "application/pdf"

@@ -74,6 +74,9 @@ import type {
   RadiantAuditInput,
   RadiantAuditSaveResult,
   RadiantAuditStoredDraft,
+  RoutineGuideClaimInput,
+  RoutineGuideClaimResult,
+  RoutineGuideInfo,
   UserProfile,
   UserProfileUpdate
 } from './api.schemas';
@@ -104,6 +107,231 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetRoutineGuideUrl = () => {
+
+
+
+
+  return `/api/routine-guide`
+}
+
+/**
+ * @summary Guide-only request information
+ */
+export const getRoutineGuide = async ( options?: Parameters<typeof customFetch>[1]): Promise<RoutineGuideInfo> => {
+
+  return customFetch<RoutineGuideInfo>(getGetRoutineGuideUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRoutineGuideQueryKey = () => {
+    return [
+    `/api/routine-guide`
+    ] as const;
+    }
+
+
+export const getGetRoutineGuideQueryOptions = <TData = Awaited<ReturnType<typeof getRoutineGuide>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRoutineGuide>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRoutineGuideQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRoutineGuide>>> = ({ signal }) => getRoutineGuide({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRoutineGuide>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetRoutineGuideQueryResult = NonNullable<Awaited<ReturnType<typeof getRoutineGuide>>>
+export type GetRoutineGuideQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Guide-only request information
+ */
+
+export function useGetRoutineGuide<TData = Awaited<ReturnType<typeof getRoutineGuide>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRoutineGuide>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetRoutineGuideQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getClaimRoutineGuideUrl = () => {
+
+
+
+
+  return `/api/routine-guide/claim`
+}
+
+/**
+ * @summary Request one guide-only delivery email
+ */
+export const claimRoutineGuide = async (routineGuideClaimInput: RoutineGuideClaimInput, options?: Parameters<typeof customFetch>[1]): Promise<RoutineGuideClaimResult> => {
+
+  return customFetch<RoutineGuideClaimResult>(getClaimRoutineGuideUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(routineGuideClaimInput)
+  }
+);}
+
+
+
+
+
+export const getClaimRoutineGuideMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimRoutineGuide>>, TError,{data: BodyType<RoutineGuideClaimInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof claimRoutineGuide>>, TError,{data: BodyType<RoutineGuideClaimInput>}, TContext> => {
+
+const mutationKey = ['claimRoutineGuide'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof claimRoutineGuide>>, {data: BodyType<RoutineGuideClaimInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  claimRoutineGuide(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClaimRoutineGuideMutationResult = NonNullable<Awaited<ReturnType<typeof claimRoutineGuide>>>
+    export type ClaimRoutineGuideMutationBody = BodyType<RoutineGuideClaimInput>
+    export type ClaimRoutineGuideMutationError = ErrorType<void>
+
+    /**
+ * @summary Request one guide-only delivery email
+ */
+export const useClaimRoutineGuide = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimRoutineGuide>>, TError,{data: BodyType<RoutineGuideClaimInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof claimRoutineGuide>>,
+        TError,
+        {data: BodyType<RoutineGuideClaimInput>},
+        TContext
+      > => {
+      return useMutation(getClaimRoutineGuideMutationOptions(options));
+    }
+
+export const getListDigitalGuidesUrl = () => {
+
+
+
+
+  return `/api/digital-guides`
+}
+
+/**
+ * @summary Approved free Curated Digital Guides
+ */
+export const listDigitalGuides = async ( options?: Parameters<typeof customFetch>[1]): Promise<RoutineGuideInfo[]> => {
+
+  return customFetch<RoutineGuideInfo[]>(getListDigitalGuidesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListDigitalGuidesQueryKey = () => {
+    return [
+    `/api/digital-guides`
+    ] as const;
+    }
+
+
+export const getListDigitalGuidesQueryOptions = <TData = Awaited<ReturnType<typeof listDigitalGuides>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDigitalGuides>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListDigitalGuidesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listDigitalGuides>>> = ({ signal }) => listDigitalGuides({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listDigitalGuides>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListDigitalGuidesQueryResult = NonNullable<Awaited<ReturnType<typeof listDigitalGuides>>>
+export type ListDigitalGuidesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Approved free Curated Digital Guides
+ */
+
+export function useListDigitalGuides<TData = Awaited<ReturnType<typeof listDigitalGuides>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listDigitalGuides>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListDigitalGuidesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getListPublishedMemberStoriesUrl = () => {
 
@@ -4431,10 +4659,3 @@ export function useGetRecentActivity<TData = Awaited<ReturnType<typeof getRecent
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-
-
-
-
-
-

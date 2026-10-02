@@ -1,11 +1,11 @@
 import { Link, useLocation } from "wouter";
 import { useClerk, useUser } from "@clerk/react";
-import { LayoutDashboard, Library, User, LogOut, MessageSquare, ClipboardCheck, Quote } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarProvider, SidebarTrigger, SidebarFooter } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getListMemberStoryRemovalAlertsQueryKey, useListMemberStoryRemovalAlerts } from "@workspace/api-client-react";
 import { clearAuditDraftOnSignOut } from "@/lib/radiant-audit-draft";
 import { BillingReviewNotice } from "@/components/billing-review-notice";
+import { LayoutDashboard, Library, BookOpen, User, LogOut, MessageSquare, ClipboardCheck, Quote } from "lucide-react";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-transparent.png`;
 
@@ -50,6 +50,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={location.startsWith("/courses")}>
                   <Link href="/courses"><Library /> <span>Courses</span></Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={location === "/guides"}>
+                  <Link href="/guides" data-testid="link-digital-guides"><BookOpen /> <span>Curated Digital Guides</span></Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               {canReview && <SidebarMenuItem>

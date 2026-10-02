@@ -1,12 +1,16 @@
 ---
-name: OpenAPI integer codegen compatibility
-description: Compatibility of generated integer schemas with the installed Zod runtime
+name: OpenAPI Zod target compatibility
+description: Generator auto-detection can disagree with the generated validators' Zod runtime
 ---
 
-The current OpenAPI generator can emit `z.int()` for `type: integer` even though the generated package resolves Zod v3, where that method does not exist.
+Do not assume the API generator's automatic Zod-version detection matches the package that will consume the generated validators.
 
-OpenAPI `format: uuid` has the same compatibility issue: it emits `z.uuid()`. A UUID regex pattern preserves validation without relying on that unavailable top-level method.
+**Why:** Generation has emitted Zod 4 integer, email, and UUID helpers while the generated validator package resolves Zod 3. Detection can fall back to a newer API when it does not resolve the consumer's dependency.
 
-**Why:** Integer and UUID profile-version fields exposed generator defaults targeting a newer Zod API than the installed runtime.
+**How to apply:** Match the generator's explicit target to the consuming package and typecheck generated libraries. Check formatted strings as well as integer fields. Prefer correcting generation over weakening valid API constraints or hand-editing generated code.
 
-**How to apply:** When adding integer fields to the API contract, check generated Zod output and runtime compatibility before relying on the new schema. Prefer fixing generator compatibility over weakening a contract when practical.
+Regenerate clients and validators from the combined contract after merging independently generated API changes, even when Git reports no conflicts in generated files.
+
+**Why:** A conflict-free automatic merge retained duplicate maximum-bound exports from separate generation runs, preventing the API from building. A clean merge is not proof that generated output corresponds to the combined contract.
+
+**How to apply:** Use the complete generation command, including its ordering postprocessor, before diagnosing generated declaration errors or changing valid API bounds.

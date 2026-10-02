@@ -27,6 +27,64 @@ tags:
   - name: method
     description: Personalized beauty method
 paths:
+  /routine-guide:
+    get:
+      operationId: getRoutineGuide
+      tags: [guides]
+      summary: Guide-only request information
+      responses:
+        "200":
+          description: Guide details and consent scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineGuideInfo"
+  /routine-guide/claim:
+    post:
+      operationId: claimRoutineGuide
+      tags: [guides]
+      summary: Request one guide-only delivery email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineGuideClaimInput"
+      responses:
+        "200":
+          description: Guide email accepted by the sending provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineGuideClaimResult"
+        "202":
+          description: An existing request is being processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineGuideClaimResult"
+        "400":
+          description: Valid email and explicit consent required
+        "409":
+          description: Request identifier conflicts with its previous input
+        "429":
+          description: Too many requests
+        "503":
+          description: Sending is unavailable or its result is uncertain
+  /digital-guides:
+    get:
+      operationId: listDigitalGuides
+      tags: [guides]
+      summary: Approved free Curated Digital Guides
+      responses:
+        "200":
+          description: Only guides approved for library publication
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RoutineGuideInfo"
   /member-stories:
     get:
       operationId: listPublishedMemberStories
@@ -1211,6 +1269,49 @@ paths:
 
 components:
   schemas:
+    RoutineGuideInfo:
+      type: object
+      required: [title, consentText, privacyNotice, version, pageCount, available, publishedInLibrary]
+      properties:
+        title:
+          type: string
+        consentText:
+          type: string
+        privacyNotice:
+          type: string
+        version:
+          type: string
+        pageCount:
+          type: number
+        available:
+          type: boolean
+        publishedInLibrary:
+          type: boolean
+    RoutineGuideClaimInput:
+      type: object
+      required: [email, consent, requestId]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        consent:
+          type: boolean
+        requestId:
+          type: string
+          format: uuid
+        website:
+          type: string
+          maxLength: 200
+    RoutineGuideClaimResult:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [sent, processing]
+        message:
+          type: string
     PublicMemberStory:
       type: object
       required: [id, quote, attribution]

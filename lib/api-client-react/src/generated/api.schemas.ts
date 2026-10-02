@@ -5,6 +5,38 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+export interface RoutineGuideInfo {
+  title: string;
+  consentText: string;
+  privacyNotice: string;
+  version: string;
+  pageCount: number;
+  available: boolean;
+  publishedInLibrary: boolean;
+}
+
+export interface RoutineGuideClaimInput {
+  /** @maxLength 254 */
+  email: string;
+  consent: boolean;
+  requestId: string;
+  /** @maxLength 200 */
+  website?: string;
+}
+
+export type RoutineGuideClaimResultStatus = typeof RoutineGuideClaimResultStatus[keyof typeof RoutineGuideClaimResultStatus];
+
+
+export const RoutineGuideClaimResultStatus = {
+  sent: 'sent',
+  processing: 'processing',
+} as const;
+
+export interface RoutineGuideClaimResult {
+  status: RoutineGuideClaimResultStatus;
+  message: string;
+}
+
 export interface PublicMemberStory {
   id: number;
   quote: string;
@@ -906,4 +938,3 @@ limit?: number;
  */
 after?: number;
 };
-

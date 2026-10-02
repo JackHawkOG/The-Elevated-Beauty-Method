@@ -134,7 +134,6 @@ function HomeRedirect() {
     </>
   );
 }
-
 // Import your page components
 import LandingPage from '@/pages/landing';
 import Dashboard from '@/pages/dashboard';
@@ -151,6 +150,9 @@ import PublicStoriesPage from '@/pages/public-stories';
 import RadiantAuditPage, { RadiantAuditCompletePage } from '@/pages/radiant-audit';
 import { readPendingAudit } from '@/lib/radiant-audit-session';
 import { pruneInvalidAuditDraft } from '@/lib/radiant-audit-draft';
+import ElevatedRoutinePage from '@/pages/elevated-routine';
+import GuidePrivacyPage from '@/pages/guide-privacy';
+import GuidesPage from '@/pages/guides';
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   return (
@@ -191,6 +193,9 @@ function Router() {
       <Route path="/" component={HomeRedirect} />
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
+      <Route path="/the-elevated-routine" component={ElevatedRoutinePage} />
+      <Route path="/guide-privacy" component={GuidePrivacyPage} />
+      <Route path="/guides" component={() => <ProtectedRoute component={GuidesPage} />} />
       <Route path="/radiant-audit" component={RadiantAuditPage} />
       <Route path="/radiant-audit/complete" component={() => <ProtectedRoute component={RadiantAuditCompletePage} />} />
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />

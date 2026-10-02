@@ -8,3 +8,4 @@ export * from "./users";
 export * from "./activity";
 export * from "./radiant-audits";
 export * from "./member-stories";
+export * from "./routine-guide";

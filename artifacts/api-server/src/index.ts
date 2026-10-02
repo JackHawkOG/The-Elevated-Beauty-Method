@@ -17,6 +17,7 @@ import { runMigrations } from "stripe-replit-sync";
 import { startCheckoutExpirationRecovery } from "./lib/membership-checkout-expirations";
 import { startMembershipOrphanRecovery } from "./lib/membership-orphan-recovery";
 import { startUntrackedPaidCheckoutRecovery } from "./lib/membership-paid-recovery";
+import { ensureRoutineGuideSchema, startRoutineGuideRateLimitCleanup } from "./lib/ensure-routine-guide-schema";
 
 const rawPort = process.env["PORT"];
 
@@ -39,6 +40,7 @@ await ensureMemberStoriesSchema();
 await ensureProgressSchema();
 await ensureRadiantAuditSchema();
 await ensureMembershipSchema();
+await ensureRoutineGuideSchema();
 const needsPublicationBackfill = await ensurePublicationSchema();
 await ensureMemberJourneyContent(needsPublicationBackfill);
 const announcementRepair = await reconcileAnnouncementActivity();
@@ -73,4 +75,5 @@ app.listen(port, (err) => {
   startCheckoutExpirationRecovery();
   startMembershipOrphanRecovery();
   startUntrackedPaidCheckoutRecovery();
+  startRoutineGuideRateLimitCleanup();
 });

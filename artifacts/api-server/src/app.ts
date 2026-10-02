@@ -13,6 +13,9 @@ import { logger } from "./lib/logger";
 import { handleMembershipWebhook } from "./routes/membership";
 
 const app: Express = express();
+// The server is reached through one trusted Replit proxy hop. This lets
+// req.ip-backed abuse controls use the visitor address rather than the proxy.
+app.set("trust proxy", 1);
 
 app.use(
   pinoHttp({

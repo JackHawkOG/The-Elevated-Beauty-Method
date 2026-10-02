@@ -42,3 +42,8 @@ timeoutMs = 120000
 [nix]
 channel = "stable-25_05"
 packages = ["cairo", "ffmpeg-full", "freetype", "ghostscript", "gobject-introspection", "gtk3", "gumbo", "harfbuzz", "jbig2dec", "libjpeg_turbo", "mupdf", "openjpeg", "pkg-config", "qhull", "swig", "tcl", "tk", "xcbuild"]
+
+[userenv]
+
+[userenv.shared]
+ROUTINE_GUIDE_LIBRARY_PUBLISHED = "true"
