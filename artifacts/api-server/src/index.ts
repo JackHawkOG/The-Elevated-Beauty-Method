@@ -14,6 +14,7 @@ import { ensureProfileSchema } from "./lib/ensure-profile-schema";
 import { getStripeSync, getUncachableStripeClient } from "./lib/stripeClient";
 import { syncStripeStartupBackfill } from "./lib/stripe-startup-backfill";
 import { startMembershipReconciliation } from "./lib/membership-reconciliation";
+import { startMembershipReviewEmails } from "./lib/membership-review-email";
 import { runMigrations } from "stripe-replit-sync";
 import { startCheckoutExpirationRecovery } from "./lib/membership-checkout-expirations";
 import { startMembershipOrphanRecovery } from "./lib/membership-orphan-recovery";
@@ -77,6 +78,7 @@ app.listen(port, (err) => {
   startRadiantAuditReceiptCleanup();
   startRadiantAuditDraftPruning();
   startMembershipReconciliation();
+  startMembershipReviewEmails();
   startCheckoutExpirationRecovery();
   startMembershipOrphanRecovery();
   startUntrackedPaidCheckoutRecovery();

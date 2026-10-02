@@ -61,6 +61,8 @@ import type {
   MembershipOffer,
   MembershipReconciliationAlerts,
   MembershipRedirect,
+  MembershipReviewEmailPreference,
+  MembershipReviewEmailPreferenceInput,
   MembershipReviewNotification,
   MyMembership,
   OwnerMemberStory,
@@ -1392,6 +1394,154 @@ export function useGetPendingMembershipInvoiceHistory<TData = Awaited<ReturnType
 
 
 
+
+export const getGetMembershipReviewEmailPreferenceUrl = () => {
+
+
+
+
+  return `/api/membership/review-email-preference`
+}
+
+/**
+ * @summary Owner-only operational email preference
+ */
+export const getMembershipReviewEmailPreference = async ( options?: Parameters<typeof customFetch>[1]): Promise<MembershipReviewEmailPreference> => {
+
+  return customFetch<MembershipReviewEmailPreference>(getGetMembershipReviewEmailPreferenceUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMembershipReviewEmailPreferenceQueryKey = () => {
+    return [
+    `/api/membership/review-email-preference`
+    ] as const;
+    }
+
+
+export const getGetMembershipReviewEmailPreferenceQueryOptions = <TData = Awaited<ReturnType<typeof getMembershipReviewEmailPreference>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipReviewEmailPreference>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMembershipReviewEmailPreferenceQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMembershipReviewEmailPreference>>> = ({ signal }) => getMembershipReviewEmailPreference({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMembershipReviewEmailPreference>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMembershipReviewEmailPreferenceQueryResult = NonNullable<Awaited<ReturnType<typeof getMembershipReviewEmailPreference>>>
+export type GetMembershipReviewEmailPreferenceQueryError = ErrorType<void>
+
+
+/**
+ * @summary Owner-only operational email preference
+ */
+
+export function useGetMembershipReviewEmailPreference<TData = Awaited<ReturnType<typeof getMembershipReviewEmailPreference>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipReviewEmailPreference>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMembershipReviewEmailPreferenceQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateMembershipReviewEmailPreferenceUrl = () => {
+
+
+
+
+  return `/api/membership/review-email-preference`
+}
+
+/**
+ * @summary Opt in or out of generic service outage emails to the verified owner email
+ */
+export const updateMembershipReviewEmailPreference = async (membershipReviewEmailPreferenceInput: MembershipReviewEmailPreferenceInput, options?: Parameters<typeof customFetch>[1]): Promise<MembershipReviewEmailPreference> => {
+
+  return customFetch<MembershipReviewEmailPreference>(getUpdateMembershipReviewEmailPreferenceUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(membershipReviewEmailPreferenceInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateMembershipReviewEmailPreferenceMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMembershipReviewEmailPreference>>, TError,{data: BodyType<MembershipReviewEmailPreferenceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateMembershipReviewEmailPreference>>, TError,{data: BodyType<MembershipReviewEmailPreferenceInput>}, TContext> => {
+
+const mutationKey = ['updateMembershipReviewEmailPreference'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateMembershipReviewEmailPreference>>, {data: BodyType<MembershipReviewEmailPreferenceInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  updateMembershipReviewEmailPreference(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateMembershipReviewEmailPreferenceMutationResult = NonNullable<Awaited<ReturnType<typeof updateMembershipReviewEmailPreference>>>
+    export type UpdateMembershipReviewEmailPreferenceMutationBody = BodyType<MembershipReviewEmailPreferenceInput>
+    export type UpdateMembershipReviewEmailPreferenceMutationError = ErrorType<void>
+
+    /**
+ * @summary Opt in or out of generic service outage emails to the verified owner email
+ */
+export const useUpdateMembershipReviewEmailPreference = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMembershipReviewEmailPreference>>, TError,{data: BodyType<MembershipReviewEmailPreferenceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateMembershipReviewEmailPreference>>,
+        TError,
+        {data: BodyType<MembershipReviewEmailPreferenceInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateMembershipReviewEmailPreferenceMutationOptions(options));
+    }
 
 export const getGetMembershipReviewNotificationsUrl = () => {
 

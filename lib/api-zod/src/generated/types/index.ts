@@ -59,6 +59,8 @@ export * from './membershipReconciliationAlert';
 export * from './membershipReconciliationAlerts';
 export * from './membershipReconciliationAlertsSweepFailure';
 export * from './membershipRedirect';
+export * from './membershipReviewEmailPreference';
+export * from './membershipReviewEmailPreferenceInput';
 export * from './membershipReviewNotification';
 export * from './memberStoryInput';
 export * from './memberStoryRemovalAlert';

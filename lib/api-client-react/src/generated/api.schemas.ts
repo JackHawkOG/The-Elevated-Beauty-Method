@@ -269,6 +269,15 @@ export interface MembershipReviewNotification {
   createdAt: string;
 }
 
+export interface MembershipReviewEmailPreferenceInput {
+  enabled: boolean;
+}
+
+export interface MembershipReviewEmailPreference {
+  enabled: boolean;
+  available: boolean;
+}
+
 export interface MembershipReconciliationAlert {
   /** Stripe subscription ID for staff investigation */
   subscriptionId: string;

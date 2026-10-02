@@ -13,8 +13,10 @@ import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, restorePa
 import { reconcileUntrackedPaidSessions } from "../lib/membership-paid-recovery";
 import { pendingMembershipInvoiceHistory } from "../lib/membership-invoice-history";
 import { GetPendingMembershipInvoiceHistoryQueryParams, GetPendingMembershipInvoiceHistoryResponse } from "@workspace/api-zod";
+import membershipReviewEmailRouter from "./membership-review-email";
 
 const router = Router();
+router.use(membershipReviewEmailRouter);
 const OPENS = Date.parse("2026-10-01T14:00:00Z"); // 9 AM Central (CDT)
 const CLOSES = Date.parse("2026-10-08T05:00:00Z"); // exclusive; Oct 7 at 11:59 PM Central
 

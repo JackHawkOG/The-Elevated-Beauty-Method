@@ -7,6 +7,7 @@ import { AppLayout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { trackConfirmedMembershipReturn, trackMembershipCheckoutStarted } from "@/lib/analytics";
 import { stripeBillingPortalUrl } from "@/lib/stripe-billing-portal-url";
+import { MembershipReviewEmailPreference } from "@/components/membership-review-email-preference";
 
 function stripeCheckoutUrl(value: unknown): string {
   const message = "Checkout could not be started. Please try again.";
@@ -183,6 +184,7 @@ export default function MembershipPage() {
         </div>}
         <p className="text-sm text-muted-foreground">Checkout is hosted by Stripe. You can manage or cancel your membership from this page afterward.</p>
       </>}
+      <MembershipReviewEmailPreference />
       {error && <p role="alert" className="text-destructive">{error}</p>}
       <Link href="/dashboard" className="text-primary underline">Back to dashboard</Link>
     </div>

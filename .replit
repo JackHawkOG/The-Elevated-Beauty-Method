@@ -47,3 +47,4 @@ packages = ["cairo", "ffmpeg-full", "freetype", "ghostscript", "gobject-introspe
 
 [userenv.shared]
 ROUTINE_GUIDE_LIBRARY_PUBLISHED = "true"
+BILLING_REVIEW_APP_URL = "https://elevatedbeautymethod.com"

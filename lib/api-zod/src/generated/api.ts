@@ -444,6 +444,28 @@ export const GetPendingMembershipInvoiceHistoryResponse = zod.object({
 
 
 /**
+ * @summary Owner-only operational email preference
+ */
+export const GetMembershipReviewEmailPreferenceResponse = zod.object({
+  "enabled": zod.boolean(),
+  "available": zod.boolean()
+})
+
+
+/**
+ * @summary Opt in or out of generic service outage emails to the verified owner email
+ */
+export const UpdateMembershipReviewEmailPreferenceBody = zod.object({
+  "enabled": zod.boolean()
+})
+
+export const UpdateMembershipReviewEmailPreferenceResponse = zod.object({
+  "enabled": zod.boolean(),
+  "available": zod.boolean()
+})
+
+
+/**
  * @summary Private owner notifications for persistent billing review outages
  */
 export const GetMembershipReviewNotificationsResponseItem = zod.object({

@@ -44,6 +44,23 @@ export async function ensureMembershipSchema(): Promise<void> {
   )`);
   await db.execute(sql`ALTER TABLE membership_reconciliation_failures ADD COLUMN IF NOT EXISTS notification_id uuid`);
   await db.execute(sql`ALTER TABLE membership_reconciliation_failures ADD COLUMN IF NOT EXISTS notified_at timestamptz`);
+  await db.execute(sql`ALTER TABLE membership_sweep_health ADD COLUMN IF NOT EXISTS notification_id uuid NOT NULL DEFAULT gen_random_uuid()`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS membership_review_email_preferences (
+    clerk_id text PRIMARY KEY,
+    enabled boolean NOT NULL DEFAULT false
+  )`);
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS membership_review_email_deliveries (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    notification_id uuid NOT NULL,
+    clerk_id text NOT NULL,
+    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'suppressed', 'uncertain')),
+    recipient text,
+    review_url text,
+    first_attempt_at timestamptz,
+    retry_at timestamptz NOT NULL DEFAULT now(),
+    attempts integer NOT NULL DEFAULT 0,
+    UNIQUE(notification_id, clerk_id)
+  )`);
   // Existing persistent outages also need a notice after this upgrade.
   await db.execute(sql`UPDATE membership_reconciliation_failures
     SET notification_id = gen_random_uuid(), notified_at = now()

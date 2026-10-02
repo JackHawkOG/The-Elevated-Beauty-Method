@@ -5,7 +5,8 @@
   "scripts": {
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "check": "pnpm run typecheck && pnpm run test:course-enrollment && pnpm run check:database-test-guards && pnpm run test:progress && pnpm run test:membership && pnpm run test:membership-cleanup && pnpm run test:membership-invoice-history && pnpm run test:profile && pnpm run test:stripe-billing-links && pnpm run test:stripe-startup && pnpm run test:guides",
+    "check": "pnpm run typecheck && pnpm run test:course-enrollment && pnpm run check:database-test-guards && pnpm run test:progress && pnpm run test:membership && pnpm run test:membership-cleanup && pnpm run test:membership-invoice-history && pnpm run test:membership-review-email && pnpm run test:profile && pnpm run test:stripe-billing-links && pnpm run test:stripe-startup && pnpm run test:guides",
+    "test:membership-review-email": "vitest run artifacts/api-server/src/lib/membership-review-email.test.ts artifacts/api-server/src/lib/membership-review-email.integration.test.ts artifacts/api-server/src/routes/membership-review-email.test.ts artifacts/edu-portal/src/components/membership-review-email-preference.test.tsx --maxWorkers=1",
     "test:course-enrollment": "vitest run artifacts/edu-portal/src/pages/course-enrollment.test.tsx --maxWorkers=1",
     "test:membership-invoice-history": "vitest run artifacts/api-server/src/routes/membership-invoice-history.test.ts artifacts/api-server/src/lib/membership-invoice-history.integration.test.ts artifacts/edu-portal/src/pages/membership-invoice-history.test.tsx --maxWorkers=1",
     "test:guides": "vitest run artifacts/api-server/src/routes/routine-guide.test.ts artifacts/edu-portal/src/pages/elevated-routine.test.tsx --maxWorkers=1",

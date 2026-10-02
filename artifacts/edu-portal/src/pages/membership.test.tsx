@@ -45,6 +45,7 @@ vi.mock("@workspace/api-client-react", () => ({
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({ invalidateQueries: state.invalidateQueries }) }));
 vi.mock("@clerk/react", () => ({ useUser: () => ({ user: { publicMetadata: { role: state.role } } }) }));
 vi.mock("@/components/layout", () => ({ AppLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
+vi.mock("@/components/membership-review-email-preference", () => ({ MembershipReviewEmailPreference: () => null }));
 
 import MembershipPage from "./membership";
 

@@ -367,6 +367,42 @@ paths:
           description: Staff access required
         "503":
           description: Staff access or pending records could not be checked
+  /membership/review-email-preference:
+    get:
+      operationId: getMembershipReviewEmailPreference
+      tags: [membership]
+      summary: Owner-only operational email preference
+      responses:
+        "200":
+          description: Current owner preference and availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipReviewEmailPreference"
+        "401": { description: Sign-in required }
+        "403": { description: Owner access required }
+        "503": { description: Preference or owner verification unavailable }
+    put:
+      operationId: updateMembershipReviewEmailPreference
+      tags: [membership]
+      summary: Opt in or out of generic service outage emails to the verified owner email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MembershipReviewEmailPreferenceInput"
+      responses:
+        "200":
+          description: Saved preference
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipReviewEmailPreference"
+        "400": { description: Invalid preference or no verified primary email }
+        "401": { description: Sign-in required }
+        "403": { description: Owner access required }
+        "503": { description: Preference or email configuration unavailable }
   /membership/review-notifications:
     get:
       operationId: getMembershipReviewNotifications
@@ -1477,6 +1513,18 @@ components:
       properties:
         id: { type: string, description: Opaque notification identifier }
         createdAt: { type: string, format: date-time }
+    MembershipReviewEmailPreferenceInput:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    MembershipReviewEmailPreference:
+      type: object
+      required: [enabled, available]
+      properties:
+        enabled: { type: boolean }
+        available: { type: boolean }
     MembershipReconciliationAlert:
       type: object
       required: [subscriptionId, consecutiveFailures, firstFailedAt, lastFailedAt]
