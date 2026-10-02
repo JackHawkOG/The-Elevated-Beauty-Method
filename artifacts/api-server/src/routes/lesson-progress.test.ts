@@ -654,7 +654,7 @@ test("a draft exact duplicate before the published approved lesson cannot block 
   }
 });
 
-test("two published approved copies consistently select the lowest ID for listing, opening, resume, and completion", async () => {
+test("two published approved copies select the lowest ID and switch without inherited progress when it is unpublished", async () => {
   const userId = `test-approved-published-tie-${run}`;
   const actorName = "Approved Published Tie Test";
   const approved = approvedTopicLessons[0];
@@ -716,6 +716,52 @@ test("two published approved copies consistently select the lowest ID for listin
       expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
         .toMatchObject({ lastLessonId: selected.id, totalLessons: 1, completedLessons: 1 });
     }
+
+    // Editorial unpublication leaves the approved content and historical
+    // completion intact. Only publication changes; the other exact copy wins.
+    await db.update(lessonsTable).set({ publishedAt: null }).where(eq(lessonsTable.id, selected.id));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const courseDetail = await request(userId, `/courses/${course.id}`);
+      expect(courseDetail.status).toBe(200);
+      expect(courseDetail.data).toMatchObject({ lessonCount: 1 });
+      expect((courseDetail.data as { lessons: Array<{ id: number }> }).lessons.map(lesson => lesson.id))
+        .toEqual([duplicate.id]);
+      const listing = await request(userId, `/courses/${course.id}/lessons`);
+      expect(listing.status).toBe(200);
+      expect((listing.data as Array<{ id: number }>).map(lesson => lesson.id)).toEqual([duplicate.id]);
+      const direct = await request(userId, `/lessons/${duplicate.id}`);
+      expect(direct.status).toBe(200);
+      expect(direct.data).toMatchObject({ id: duplicate.id, content: approved.content });
+      expect((await request(userId, `/lessons/${selected.id}`)).status).toBe(404);
+
+      const resumed = await request(userId, "/enrollments");
+      expect(resumed.status).toBe(200);
+      expect((resumed.data as Array<{ courseId: number }>).find(row => row.courseId === course.id))
+        .toMatchObject({ lastLessonId: null, totalLessons: 1, completedLessons: 0, completedLessonIds: [] });
+      const reenrolled = await request(userId, "/enrollments", "POST", { courseId: course.id });
+      expect(reenrolled.status).toBe(201);
+      expect(reenrolled.data).toMatchObject({ lastLessonId: null, totalLessons: 1, completedLessons: 0 });
+    }
+    expect((await request(userId, "/dashboard/stats")).data).toMatchObject({ totalLessons: priorTotal + 1 });
+    expect((await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: selected.id })).status)
+      .toBe(400);
+    // Hiding a historical completion must not erase it or transfer it to the
+    // replacement. The replacement gets credit only after its own completion.
+    expect((await db.select().from(lessonCompletionsTable)
+      .where(eq(lessonCompletionsTable.userId, userId))).map(row => row.lessonId)).toEqual([selected.id]);
+    const replacementCompletion = await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: duplicate.id });
+    expect(replacementCompletion.status).toBe(200);
+    expect(replacementCompletion.data).toMatchObject({ lastLessonId: duplicate.id, totalLessons: 1, completedLessons: 1 });
+    const replacementResume = await request(userId, "/enrollments");
+    expect(replacementResume.status).toBe(200);
+    expect((replacementResume.data as Array<{ courseId: number }>).find(row => row.courseId === course.id))
+      .toMatchObject({ lastLessonId: duplicate.id, totalLessons: 1, completedLessons: 1, completedLessonIds: [duplicate.id] });
+    const replacementReenrollment = await request(userId, "/enrollments", "POST", { courseId: course.id });
+    expect(replacementReenrollment.status).toBe(201);
+    expect(replacementReenrollment.data).toMatchObject({ lastLessonId: duplicate.id, totalLessons: 1, completedLessons: 1 });
+    expect((await db.select().from(lessonCompletionsTable)
+      .where(eq(lessonCompletionsTable.userId, userId))).map(row => row.lessonId).sort((a, b) => a - b))
+      .toEqual([selected.id, duplicate.id]);
   } finally {
     if (reviewedCourseId) {
       await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, userId));
