@@ -24,7 +24,8 @@ export function useUser() {
     isSignedIn: !!account,
     user: account ? {
       id: account,
-      publicMetadata: {},
+      // Test-only, account-scoped roles; switching identities never inherits a role.
+      publicMetadata: { role: window.localStorage.getItem(`audit-test-role:${account}`) ?? "member" },
       primaryEmailAddress: {
         emailAddress: `${account}@example.invalid`,
         verification: { status: verified ? "verified" : "unverified" },

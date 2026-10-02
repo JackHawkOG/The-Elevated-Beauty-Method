@@ -5,6 +5,8 @@ import { defineConfig } from "vite";
 // Isolated test server: replaces only Clerk; the page and generated API hooks are real.
 export default defineConfig({
   root: import.meta.dirname,
+  // Do not invalidate the managed app's optimized dependencies (or vice versa).
+  cacheDir: "node_modules/.vite-audit-test",
   plugins: [react()],
   resolve: {
     alias: {
@@ -13,6 +15,6 @@ export default defineConfig({
     },
     dedupe: ["react", "react-dom"],
   },
-  optimizeDeps: { entries: ["tests/audit-harness.html", "tests/membership-harness.html", "tests/lesson-harness.html", "tests/community-harness.html"] },
+  optimizeDeps: { entries: ["tests/audit-harness.html", "tests/membership-harness.html", "tests/lesson-harness.html", "tests/community-harness.html", "tests/billing-notice-harness.html"] },
   server: { host: "127.0.0.1", strictPort: true },
 });
