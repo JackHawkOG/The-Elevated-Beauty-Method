@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { getUncachableStripeClient } from "./stripeClient";
 import { logger } from "./logger";
 import { membershipSweepHealth, type SweepFailure } from "./membership-sweep-health";
+import { initializeSweepResource } from "./membership-sweep-initialization";
 
 const SWEEP_INTERVAL_MS = 15 * 60_000;
 const MAX_HISTORY_RETRY_MS = 24 * 60 * 60_000;
@@ -156,14 +157,14 @@ export async function unresolvedReconciliationAlerts(): Promise<{
 }> {
   try {
     const sweepFailure = await membershipSweepHealth.warning();
-    const result = await pool.query<{
+    const result = await initializeSweepResource(pool.query<{
       subscription_id: string; consecutive_failures: number; first_failed_at: Date; last_failed_at: Date; total: number;
     }>(`SELECT f.stripe_subscription_id AS subscription_id, f.consecutive_failures, f.first_failed_at, f.last_failed_at,
        COUNT(*) OVER ()::int AS total
        FROM membership_reconciliation_failures f
        JOIN membership_checkouts m ON m.stripe_subscription_id = f.stripe_subscription_id
        WHERE m.kind = 'founding' AND m.status = 'confirmed' AND f.consecutive_failures >= 3
-       ORDER BY f.last_failed_at DESC, f.stripe_subscription_id LIMIT 100`);
+       ORDER BY f.last_failed_at DESC, f.stripe_subscription_id LIMIT 100`));
     return {
       total: result.rows[0]?.total ?? 0,
       subscriptionsAvailable: true,
@@ -202,14 +203,38 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
   if (!subscriptionId) sweepRunning = true;
   let client: PoolClient | undefined;
   let failureRecorded = false;
+  let discardClient = false;
+  // Observe a long-running sweep without cancelling database operations or
+  // releasing its running guard/session lock. Each missed scheduled review
+  // advances health through independent storage, never through its busy client.
+  let observation: Promise<void> | undefined;
+  let observationsStarted = 0;
+  const stallTimer = subscriptionId ? undefined : setInterval(() => {
+    if (observation) return;
+    observationsStarted++;
+    const pending = membershipSweepHealth.failed(undefined).catch(() => {
+      logger.error("Could not retain membership sweep stall observation");
+    });
+    observation = pending;
+    void pending.then(() => {
+      if (observation === pending) observation = undefined;
+    });
+  }, SWEEP_INTERVAL_MS);
+  stallTimer?.unref();
+  const stopObserving = async () => {
+    if (stallTimer) clearInterval(stallTimer);
+    // Drain a previously dispatched observation before clearing health, so
+    // a delayed health-store response cannot restore the recovered warning.
+    await observation;
+  };
   try {
-    client = await pool.connect();
+    client = await initializeSweepResource(pool.connect(), lateClient => lateClient.release());
     // Only one server instance sweeps at a time. This session lock is released
     // even if one subscription or the whole sweep fails.
     const lock = await client.query<{ acquired: boolean }>("SELECT pg_try_advisory_lock(20261001, 56) AS acquired");
     if (!lock.rows[0]?.acquired) return;
     try {
-      const stripe = await getUncachableStripeClient();
+      const stripe = await initializeSweepResource(getUncachableStripeClient());
       let after = "0";
       while (true) {
         const batch = await client.query<{ id: string; kind: string; status: string; stripe_subscription_id: string }>(
@@ -245,7 +270,6 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
           }
         }
       }
-      if (!subscriptionId) await membershipSweepHealth.healthy(client);
     } catch (err) {
       if (!subscriptionId) {
         await membershipSweepHealth.failed(client);
@@ -253,14 +277,34 @@ export async function reconcileMemberships(subscriptionId?: string): Promise<voi
       }
       throw err;
     } finally {
-      await client.query("SELECT pg_advisory_unlock(20261001, 56)");
+      try {
+        await client.query("SELECT pg_advisory_unlock(20261001, 56)");
+      } catch (err) {
+        // Never return a possibly still-locked session to the shared pool.
+        discardClient = true;
+        throw err;
+      }
+    }
+    if (!subscriptionId) {
+      // Keep observing through unlock and recovery's database/store operations.
+      // If an observation was dispatched during recovery, drain it and
+      // repeat the idempotent clear so it cannot restore an old warning.
+      let before: number;
+      do {
+        await observation;
+        before = observationsStarted;
+        await membershipSweepHealth.healthy(client);
+      } while (observationsStarted !== before);
+      await stopObserving();
     }
   } catch (err) {
     // Connection/lock failures occur before the inner sweep error handler.
     if (!subscriptionId && !failureRecorded) await membershipSweepHealth.failed(client);
     throw err;
   } finally {
-    client?.release();
+    await stopObserving();
+    if (discardClient) client?.release(true);
+    else client?.release();
     if (!subscriptionId) sweepRunning = false;
   }
 }

@@ -21,6 +21,12 @@ Sweep-wide health must have an observation path that does not depend on the fail
 
 **How to apply:** Use a private independent durable store containing only timestamps and attempt counts, with separate development and production records. Explicitly mark individual checks unavailable, and keep role verification mandatory even on degraded startup. Block normal operations until initialization completes; resolve the warning only after a completed sweep. Do not turn non-database startup failures into degraded database operation.
 
+Bound initialization separately from membership writes; do not apply a generic promise timeout to an entire reconciliation or database lock query.
+
+**Why:** A timed-out promise does not cancel its underlying operation. A late transaction could still change access, or a late session-lock acquisition could leak a lock on a released connection.
+
+**How to apply:** Deadlines are safe before writes when late connections are released and late client initialization cannot resume the sweep. For stalls inside database operations, use actual cancellation or passive health observation without clearing the running guard.
+
 Keep invoice-history recovery for ended founding memberships separate from billing-review failure alerts. Staff inspection is read-only and must never restore forfeited access.
 
 **Why:** An ended subscription can already have lost access while its payment-failure reason remains uncertain because invoice history is unavailable. The user explicitly requested a separate staff view without exposing private billing information to members or restoring access.

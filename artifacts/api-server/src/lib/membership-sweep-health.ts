@@ -2,6 +2,7 @@ import type { PoolClient } from "@workspace/db";
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
 import { independentSweepHealthStore, type SweepHealthStore } from "./membership-health-store";
+import { initializeSweepResource } from "./membership-sweep-initialization";
 
 export type SweepFailure = {
   consecutiveFailures: number;
@@ -86,9 +87,12 @@ export class MembershipSweepHealth {
     } catch {
       logger.error("Could not read independent membership sweep health");
     }
-    const result = await client.query<StoredFailure>(
+    // This read-only lookup can also wait forever for a pooled connection.
+    // A deadline lets callers use the independent warning; unlike a lock or
+    // write, a late SELECT cannot change membership state or leak a lock.
+    const result = await initializeSweepResource(client.query<StoredFailure>(
       "SELECT consecutive_failures, first_failed_at, last_failed_at FROM membership_sweep_health WHERE id = true",
-    );
+    ));
     const row = result.rows[0];
     const stored = row ? fromRow(row) : null;
     const local = this.localWarning();
