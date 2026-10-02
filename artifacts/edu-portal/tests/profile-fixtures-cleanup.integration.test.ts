@@ -4,6 +4,9 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { expect, it, vi } from "vitest";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 import { profileFixturePrivateMetadata } from "./profile-fixtures";
+import { profileCleanupRace } from "./profile-fixtures-cleanup-race";
+
+it("preserves a profile edited after validation and allows safe cleanup retries", profileCleanupRace, 90_000);
 
 const tables = [
   "users", "enrollments", "lesson_completions", "announcements", "member_stories",

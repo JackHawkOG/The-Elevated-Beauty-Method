@@ -36,7 +36,7 @@ async function main() {
     announcementsTable, memberStoriesTable, radiantAuditsTable, radiantAuditDraftsTable,
     radiantAuditHistoryTable, radiantAuditSubmissionsTable,
     activityTable, announcementActivityCorrectionsTable, memberStoryReviewCorrectionsTable,
-  }, { eq, and, or, sql }] = await Promise.all([
+  }, { eq, and, or, sql, getTableColumns }] = await Promise.all([
     import("../../../lib/db/src/index"), import("drizzle-orm"),
   ]);
   try {
@@ -49,7 +49,11 @@ async function main() {
         throw new Error(`Profile fixture identity changed; refusing deletion for ${candidate.id}`);
       }
       await db.transaction(async tx => {
-        const members = await tx.select().from(usersTable).where(eq(usersTable.clerkId, candidate.id));
+        const members = await tx.select({
+          ...getTableColumns(usersTable),
+          // Capture the exact database representation, including timestamp precision.
+          cleanupSnapshot: sql<string>`to_jsonb(${usersTable})::text`,
+        }).from(usersTable).where(eq(usersTable.clerkId, candidate.id));
         if (members.some(member => !profileFixtureMember(member, fixture))) {
           throw new Error(`Non-fixture member row; refusing deletion for ${candidate.id}`);
         }
@@ -83,10 +87,17 @@ async function main() {
           throw new Error(`Related member data exists; refusing deletion for ${candidate.id}`);
         }
         console.log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${candidate.email}): ${members.length} member row(s)`);
-        if (args.length) {
-          await tx.delete(usersTable).where(and(
+        if (args.length && members.length) {
+          const deleted = await tx.delete(usersTable).where(and(
             eq(usersTable.clerkId, candidate.id), eq(usersTable.email, candidate.email),
-          ));
+            or(...members.map(member => and(
+              eq(usersTable.id, member.id),
+              sql`to_jsonb(${usersTable}) = ${member.cleanupSnapshot}::jsonb`,
+            ))),
+          )).returning({ id: usersTable.id });
+          if (deleted.length !== members.length) {
+            throw new Error(`Profile fixture member changed during cleanup; refusing deletion for ${candidate.id}`);
+          }
         }
       });
       // Keep the marked Clerk identity on DB failure so a rerun can finish.

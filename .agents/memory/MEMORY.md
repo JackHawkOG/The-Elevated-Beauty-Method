@@ -50,3 +50,4 @@
 - [Browser write classification](browser-write-classification.md) — UI actions are potential writes; a route mock alone does not prove a spec is isolated.
 - [Audit dialog history tests](audit-dialog-history-tests.md) — synthetic visibility events may not refetch history during a modal; invalidate the test client's query to simulate an external update.
 - [PDF subset fonts](pdf-subset-fonts.md) — extracted PDF fonts may lack glyphs for revised copy; verify both text extraction and rendering.
+- [Profile cleanup concurrency](profile-cleanup-races.md) — exact-row conditional deletion protects edits committed after validation; fixture ownership alone is insufficient.
