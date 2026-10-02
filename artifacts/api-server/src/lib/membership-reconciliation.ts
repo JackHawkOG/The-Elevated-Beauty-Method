@@ -128,6 +128,11 @@ export async function reconcileSubscription(
       "UPDATE membership_checkouts SET status = 'forfeited', failed_months = $2, last_failed_invoice = $3, invoice_history_pending = $4, invoice_history_retry_count = CASE WHEN $4 THEN 1 ELSE 0 END, invoice_history_retry_at = CASE WHEN $4 THEN now() + ($5::bigint * interval '1 millisecond') ELSE NULL END WHERE id = $1 AND status = 'confirmed'",
       [row.id, failed.count, failed.lastId, historyPending, historyRetryDelay(1)],
     );
+    // Different subscriptions lock different checkouts. Serialize their tier
+    // decisions on the shared member, then use a NEW statement snapshot so
+    // NOT EXISTS sees a preceding cancellation's committed forfeiture.
+    // Keep checkout -> member lock order consistent with checkout confirmation.
+    await client.query("SELECT clerk_id FROM users WHERE clerk_id = $1 FOR UPDATE", [row.clerk_id]);
     await client.query(
       "UPDATE users SET membership_tier = 'Free' WHERE clerk_id = $1 AND NOT EXISTS (SELECT 1 FROM membership_checkouts WHERE clerk_id = $1 AND status = 'confirmed')",
       [row.clerk_id],

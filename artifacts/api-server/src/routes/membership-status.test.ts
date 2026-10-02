@@ -55,6 +55,10 @@ vi.mock("@workspace/db", () => {
         checkout.status = "forfeited";
         return { rows: [] };
       }
+      if (sql === "SELECT clerk_id FROM users WHERE clerk_id = $1 FOR UPDATE") {
+        expect(params).toEqual([checkout.clerkId]);
+        return { rows: [{ clerk_id: checkout.clerkId }] };
+      }
       if (sql.startsWith("UPDATE users SET membership_tier = 'Free'")) {
         expect(params).toEqual([checkout.clerkId]);
         checkout.membershipTier = "Free";

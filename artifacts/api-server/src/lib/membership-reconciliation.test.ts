@@ -67,4 +67,8 @@ test("a third distinct failed month cancels once; a later event never restores f
   expect(status).toBe("forfeited");
   expect(tier).toBe("Free");
   expect(queries.filter(sql => sql.startsWith("UPDATE membership_checkouts"))).toHaveLength(1);
+  const memberLock = queries.indexOf("SELECT clerk_id FROM users WHERE clerk_id = $1 FOR UPDATE");
+  const tierDecision = queries.findIndex(sql => sql.startsWith("UPDATE users SET membership_tier = 'Free'"));
+  expect(memberLock).toBeGreaterThan(queries.findIndex(sql => sql.startsWith("UPDATE membership_checkouts")));
+  expect(tierDecision).toBeGreaterThan(memberLock);
 });

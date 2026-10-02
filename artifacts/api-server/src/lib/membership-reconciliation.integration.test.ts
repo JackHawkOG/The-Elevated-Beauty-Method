@@ -287,6 +287,109 @@ test("ending one of two confirmed subscriptions preserves access until the remai
   }
 });
 
+test("concurrent cancellations of two subscriptions end access after both webhooks commit", async () => {
+  const memberClerkId = `billing-concurrent-end-${id}`;
+  const subscriptions = [`sub_billing_concurrent_first_${id}`, `sub_billing_concurrent_second_${id}`];
+  const webhookIds = [`evt_billing_concurrent_first_${id}`, `evt_billing_concurrent_second_${id}`];
+  const retrieve = vi.fn(async (requestedId: string) => {
+    expect(subscriptions).toContain(requestedId);
+    return { status: "canceled", cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+  });
+  const cancel = vi.fn();
+  const list = vi.fn(async (params: { subscription: string; limit: number }) => {
+    expect(subscriptions).toContain(params.subscription);
+    expect(params.limit).toBe(100);
+    return { data: [], has_more: false };
+  });
+  vi.mocked(getStripeSync).mockResolvedValue({ processWebhook: vi.fn().mockResolvedValue(undefined) } as never);
+  vi.mocked(getUncachableStripeClient).mockResolvedValue({
+    subscriptions: { retrieve, cancel }, invoices: { list },
+  } as unknown as Stripe);
+
+  const clients: PoolClient[] = [];
+  const deliveries: Promise<number>[] = [];
+  let connectSpy: ReturnType<typeof vi.spyOn> | undefined;
+  let releaseDecisions!: () => void;
+  const decisionsReleased = new Promise<void>(resolve => { releaseDecisions = resolve; });
+  const forfeitedCheckouts = new Set<string>();
+  await pool.query(
+    "INSERT INTO users (clerk_id, display_name, email, membership_tier) VALUES ($1, $2, $3, 'Elevated')",
+    [memberClerkId, "Concurrent cancellation fixture", `${memberClerkId}@example.invalid`],
+  );
+  try {
+    const inserted = await pool.query<{ id: string }>(
+      "INSERT INTO membership_checkouts (clerk_id, kind, status, stripe_subscription_id) VALUES ($1, 'founding', 'confirmed', $2), ($1, 'founding', 'confirmed', $3) RETURNING id",
+      [memberClerkId, ...subscriptions],
+    );
+    const checkoutIds = inserted.rows.map(row => row.id);
+    for (const subscription of subscriptions) {
+      expect(await state(subscription)).toEqual({
+        status: "confirmed", failed_months: 0, last_failed_invoice: null, membership_tier: "Elevated",
+      });
+    }
+    clients.push(await pool.connect());
+    clients.push(await pool.connect());
+    const leases = clients.map(client => ({
+      async query(sql: string, values?: unknown[]) {
+        const result = await client.query(sql, values);
+        if (sql === "BEGIN") {
+          await client.query("SET LOCAL lock_timeout = '5s'");
+          await client.query("SET LOCAL statement_timeout = '10s'");
+        }
+        if (sql.startsWith("UPDATE membership_checkouts SET status = 'forfeited'") &&
+            checkoutIds.includes(values?.[0] as string)) {
+          expect(result.rowCount).toBe(1);
+          forfeitedCheckouts.add(values![0] as string);
+          // Hold both real SQL transactions after their separate checkout writes
+          // and before either makes the shared account-level tier decision.
+          await decisionsReleased;
+        }
+        return result;
+      },
+      release: vi.fn(), // Real connections stay leased until both handlers settle.
+    } as unknown as PoolClient));
+    connectSpy = vi.spyOn(pool, "connect").mockImplementation(async () => {
+      const lease = leases.shift();
+      if (!lease) throw new Error("Unexpected connection during concurrent webhook fixture");
+      return lease;
+    });
+    for (const [index, subscription] of subscriptions.entries()) {
+      deliveries.push(deliver("customer.subscription.deleted", {
+        object: "subscription", id: subscription, status: "canceled",
+      }, webhookIds[index]));
+    }
+    await vi.waitFor(() => expect(forfeitedCheckouts.size).toBe(2), { timeout: 5000 });
+    releaseDecisions();
+    expect(await Promise.all(deliveries)).toEqual([200, 200]);
+    connectSpy.mockRestore();
+    connectSpy = undefined;
+
+    for (const subscription of subscriptions) {
+      expect(await state(subscription)).toEqual({
+        status: "forfeited", failed_months: 0, last_failed_invoice: null, membership_tier: "Free",
+      });
+    }
+    expect((await pool.query(
+      "SELECT id FROM membership_webhook_events WHERE id = ANY($1::text[])",
+      [webhookIds],
+    )).rowCount).toBe(2);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(cancel).not.toHaveBeenCalled();
+  } finally {
+    // Unblock and await every handler even if a barrier/assertion fails; never
+    // remove rows while an unfinished transaction could recreate or lock them.
+    releaseDecisions();
+    await Promise.allSettled(deliveries);
+    connectSpy?.mockRestore();
+    for (const client of clients) client.release(true);
+    await pool.query("DELETE FROM membership_webhook_events WHERE id = ANY($1::text[])", [webhookIds]);
+    await pool.query("DELETE FROM membership_reconciliation_failures WHERE stripe_subscription_id = ANY($1::text[])", [subscriptions]);
+    await pool.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [memberClerkId]);
+    await pool.query("DELETE FROM users WHERE clerk_id = $1", [memberClerkId]);
+  }
+}, 30000);
+
 test("a renewal paid after invoice history is read keeps the founding place", async () => {
   const march = invoice("review-mar", "2026-03-01", "open");
   const february = invoice("review-feb", "2026-02-01", "open");
