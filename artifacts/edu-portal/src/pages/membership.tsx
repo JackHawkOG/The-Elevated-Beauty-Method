@@ -148,6 +148,7 @@ export default function MembershipPage() {
         </div>}
         <p className="mt-4 text-sm text-muted-foreground">Compare these server-confirmed totals with the browser funnel events <code>membership_checkout_started</code> and <code>membership_enrollment_confirmed</code> in analytics. Checkout-start and confirmed-return event counts are not guaranteed to match these totals: a buyer can close the tab before returning, and browser tracking can be blocked. No member details are sent to analytics.</p>
       </section>}
+      {isOwner && <Link href="/membership/invoice-history" data-testid="link-invoice-history" className="block text-primary underline">Pending invoice history (staff)</Link>}
       {membershipError && <p role="alert" className="text-destructive">Your membership status could not be checked. Please try again later.</p>}
       {!membershipError && mine?.membership ? <div className="rounded-2xl border border-primary/40 bg-card p-6">
         {mine.membership.status === "confirmed" ? <>

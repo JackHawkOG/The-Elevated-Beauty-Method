@@ -43,6 +43,7 @@ import type {
   EditorialLesson,
   Enrollment,
   EnrollmentInput,
+  GetPendingMembershipInvoiceHistoryParams,
   HealthStatus,
   Lesson,
   LessonInput,
@@ -63,6 +64,7 @@ import type {
   MembershipReviewNotification,
   MyMembership,
   OwnerMemberStory,
+  PendingMembershipInvoiceHistory,
   ProfileConflict,
   ProgressUpdate,
   PublicMemberStory,
@@ -1295,6 +1297,90 @@ export function useGetMembershipReconciliationAlerts<TData = Awaited<ReturnType<
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMembershipReconciliationAlertsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetPendingMembershipInvoiceHistoryUrl = (params?: GetPendingMembershipInvoiceHistoryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/membership/pending-invoice-history?${stringifiedParams}` : `/api/membership/pending-invoice-history`
+}
+
+/**
+ * @summary List ended founding memberships awaiting invoice history (owner/admin only)
+ */
+export const getPendingMembershipInvoiceHistory = async (params?: GetPendingMembershipInvoiceHistoryParams, options?: Parameters<typeof customFetch>[1]): Promise<PendingMembershipInvoiceHistory> => {
+
+  return customFetch<PendingMembershipInvoiceHistory>(getGetPendingMembershipInvoiceHistoryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPendingMembershipInvoiceHistoryQueryKey = (params?: GetPendingMembershipInvoiceHistoryParams,) => {
+    return [
+    `/api/membership/pending-invoice-history`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetPendingMembershipInvoiceHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getPendingMembershipInvoiceHistory>>, TError = ErrorType<void>>(params?: GetPendingMembershipInvoiceHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPendingMembershipInvoiceHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPendingMembershipInvoiceHistoryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPendingMembershipInvoiceHistory>>> = ({ signal }) => getPendingMembershipInvoiceHistory(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPendingMembershipInvoiceHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPendingMembershipInvoiceHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getPendingMembershipInvoiceHistory>>>
+export type GetPendingMembershipInvoiceHistoryQueryError = ErrorType<void>
+
+
+/**
+ * @summary List ended founding memberships awaiting invoice history (owner/admin only)
+ */
+
+export function useGetPendingMembershipInvoiceHistory<TData = Awaited<ReturnType<typeof getPendingMembershipInvoiceHistory>>, TError = ErrorType<void>>(
+ params?: GetPendingMembershipInvoiceHistoryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPendingMembershipInvoiceHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPendingMembershipInvoiceHistoryQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

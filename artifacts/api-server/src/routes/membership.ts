@@ -11,6 +11,8 @@ import { GetMyMembershipResponse } from "@workspace/api-zod";
 import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations, retryQueuedCheckoutExpiration } from "../lib/membership-checkout-expirations";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, restorePaidCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
 import { reconcileUntrackedPaidSessions } from "../lib/membership-paid-recovery";
+import { pendingMembershipInvoiceHistory } from "../lib/membership-invoice-history";
+import { GetPendingMembershipInvoiceHistoryQueryParams, GetPendingMembershipInvoiceHistoryResponse } from "@workspace/api-zod";
 
 const router = Router();
 const OPENS = Date.parse("2026-10-01T14:00:00Z"); // 9 AM Central (CDT)
@@ -191,6 +193,33 @@ router.get("/membership/reconciliation-alerts", requireAuth, async (req, res): P
     return;
   }
   res.json(GetMembershipReconciliationAlertsResponse.parse(await unresolvedReconciliationAlerts()));
+});
+
+router.get("/membership/pending-invoice-history", requireAuth, async (req, res): Promise<void> => {
+  res.set("Cache-Control", "private, no-store");
+  let role: unknown;
+  try {
+    role = (await clerkClient.users.getUser(req.userId!)).publicMetadata.role;
+  } catch (error) {
+    req.log.error({ err: error }, "Could not verify invoice history review access");
+    res.status(503).json({ error: "Unable to verify staff access" });
+    return;
+  }
+  if (role !== "owner" && role !== "admin") {
+    res.status(403).json({ error: "Staff access required" });
+    return;
+  }
+  const params = GetPendingMembershipInvoiceHistoryQueryParams.safeParse(req.query);
+  if (!params.success || (params.data.after !== undefined && !Number.isSafeInteger(params.data.after))) {
+    res.status(400).json({ error: "Invalid page cursor" });
+    return;
+  }
+  try {
+    res.json(GetPendingMembershipInvoiceHistoryResponse.parse(await pendingMembershipInvoiceHistory(params.data.after)));
+  } catch (error) {
+    req.log.error({ err: error }, "Could not read pending membership invoice history");
+    res.status(503).json({ error: "Pending invoice history is unavailable. Try again later." });
+  }
 });
 
 router.get("/membership/review-notifications", requireAuth, async (req, res): Promise<void> => {

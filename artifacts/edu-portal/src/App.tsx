@@ -138,6 +138,7 @@ function HomeRedirect() {
 import LandingPage from '@/pages/landing';
 import Dashboard from '@/pages/dashboard';
 import MembershipPage from '@/pages/membership';
+import MembershipInvoiceHistoryPage from '@/pages/membership-invoice-history';
 import CoursesPage from '@/pages/courses';
 import CourseDetailPage from '@/pages/course-detail';
 import LessonPage from '@/pages/lesson';
@@ -199,6 +200,7 @@ function Router() {
       <Route path="/radiant-audit" component={RadiantAuditPage} />
       <Route path="/radiant-audit/complete" component={() => <ProtectedRoute component={RadiantAuditCompletePage} />} />
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
+      <Route path="/membership/invoice-history" component={() => <ProtectedRoute component={MembershipInvoiceHistoryPage} />} />
       <Route path="/membership">
         <Show when="signed-in"><MembershipPage /></Show>
         <Show when="signed-out"><Redirect to="/sign-up?membership=1" /></Show>

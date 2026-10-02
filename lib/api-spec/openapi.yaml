@@ -342,6 +342,31 @@ paths:
           description: Sign-in required
         "403":
           description: Owner or admin access required
+  /membership/pending-invoice-history:
+    get:
+      operationId: getPendingMembershipInvoiceHistory
+      tags: [membership]
+      summary: List ended founding memberships awaiting invoice history (owner/admin only)
+      parameters:
+        - in: query
+          name: after
+          schema: { type: integer, minimum: 0 }
+          description: Last checkout ID from the previous page
+      responses:
+        "200":
+          description: Read-only page of pending invoice history recovery records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingMembershipInvoiceHistory"
+        "400":
+          description: Invalid page cursor
+        "401":
+          description: Authentication required
+        "403":
+          description: Staff access required
+        "503":
+          description: Staff access or pending records could not be checked
   /membership/review-notifications:
     get:
       operationId: getMembershipReviewNotifications
@@ -1428,6 +1453,24 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MembershipCheckoutCleanupAlert"
+    PendingMembershipInvoiceHistoryRecord:
+      type: object
+      required: [checkoutId, memberId, subscriptionId, retryAttempts, nextRetryAt]
+      properties:
+        checkoutId: { type: integer }
+        memberId: { type: string }
+        subscriptionId: { type: string, nullable: true }
+        retryAttempts: { type: integer, minimum: 0 }
+        nextRetryAt: { type: string, format: date-time, nullable: true }
+    PendingMembershipInvoiceHistory:
+      type: object
+      required: [memberships, nextCursor]
+      properties:
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingMembershipInvoiceHistoryRecord"
+        nextCursor: { type: integer, nullable: true }
     MembershipReviewNotification:
       type: object
       required: [id, createdAt]

@@ -417,6 +417,33 @@ export const GetMembershipReconciliationAlertsResponse = zod.object({
 
 
 /**
+ * @summary List ended founding memberships awaiting invoice history (owner/admin only)
+ */
+export const getPendingMembershipInvoiceHistoryQueryAfterMin = 0;
+
+
+
+export const GetPendingMembershipInvoiceHistoryQueryParams = zod.object({
+  "after": zod.coerce.number().int().min(getPendingMembershipInvoiceHistoryQueryAfterMin).optional().describe('Last checkout ID from the previous page')
+})
+
+export const getPendingMembershipInvoiceHistoryResponseMembershipsItemRetryAttemptsMin = 0;
+
+
+
+export const GetPendingMembershipInvoiceHistoryResponse = zod.object({
+  "memberships": zod.array(zod.object({
+  "checkoutId": zod.number().int(),
+  "memberId": zod.string(),
+  "subscriptionId": zod.string().nullable(),
+  "retryAttempts": zod.number().int().min(getPendingMembershipInvoiceHistoryResponseMembershipsItemRetryAttemptsMin),
+  "nextRetryAt": zod.coerce.date().nullable()
+})),
+  "nextCursor": zod.number().int().nullable()
+})
+
+
+/**
  * @summary Private owner notifications for persistent billing review outages
  */
 export const GetMembershipReviewNotificationsResponseItem = zod.object({

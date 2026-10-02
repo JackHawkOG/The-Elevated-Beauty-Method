@@ -249,6 +249,20 @@ export interface MembershipCheckoutCleanupAlerts {
   sessions: MembershipCheckoutCleanupAlert[];
 }
 
+export interface PendingMembershipInvoiceHistoryRecord {
+  checkoutId: number;
+  memberId: string;
+  subscriptionId: string | null;
+  /** @minimum 0 */
+  retryAttempts: number;
+  nextRetryAt: string | null;
+}
+
+export interface PendingMembershipInvoiceHistory {
+  memberships: PendingMembershipInvoiceHistoryRecord[];
+  nextCursor: number | null;
+}
+
 export interface MembershipReviewNotification {
   /** Opaque notification identifier */
   id: string;
@@ -911,6 +925,14 @@ export interface ActivityItem {
   sourceAnnouncementId: number | null;
   createdAt: string;
 }
+
+export type GetPendingMembershipInvoiceHistoryParams = {
+/**
+ * Last checkout ID from the previous page
+ * @minimum 0
+ */
+after?: number;
+};
 
 export type ListCoursesParams = {
 categoryId?: number;
