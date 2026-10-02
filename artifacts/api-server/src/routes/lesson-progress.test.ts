@@ -2,13 +2,14 @@ import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   db, pool, activityTable, categoriesTable, coursesTable, enrollmentsTable,
   lessonCompletionsTable, lessonsTable, usersTable,
 } from "@workspace/db";
 import { ensureEnrollmentSchema } from "../lib/ensure-enrollment-schema";
 import { ensureAnnouncementSchema } from "../lib/ensure-announcement-schema";
+import { ensurePublicationSchema } from "../lib/ensure-publication-schema";
 import { approvedTopicLessons, publishedLessonsForCourse } from "../lib/approved-topic-lessons";
 import { requireDevelopmentDatabase } from "./test-development-database";
 
@@ -70,6 +71,7 @@ beforeAll(async () => {
   fixturesStarted = true;
   await ensureEnrollmentSchema();
   await ensureAnnouncementSchema();
+  await ensurePublicationSchema();
   const { default: coursesRouter } = await import("./courses");
   const { default: enrollmentsRouter } = await import("./enrollments");
   const { default: dashboardRouter } = await import("./dashboard");
@@ -490,9 +492,50 @@ test("resume never exposes a missing, unpublished, or other-course lesson", asyn
   }
 });
 
-test("standalone course resume hides published lessons that no longer match reviewed copy", async () => {
-  const userId = `test-reviewed-resume-${run}`;
+test("legacy review identity is backfilled once and survives changes to every title", async () => {
+  const schema = `review_identity_${run.replaceAll("-", "")}`;
+  await db.transaction(async tx => {
+    await tx.execute(sql.raw(`CREATE SCHEMA "${schema}"`));
+    try {
+      await tx.execute(sql.raw(`SET LOCAL search_path TO "${schema}"`));
+      await tx.execute(sql`CREATE TABLE courses (id integer PRIMARY KEY, title text NOT NULL, published_at timestamptz)`);
+      await tx.execute(sql`CREATE TABLE lessons (id integer PRIMARY KEY, course_id integer, title text, published_at timestamptz)`);
+      const topic = approvedTopicLessons[0];
+      await tx.execute(sql`INSERT INTO courses (id, title) VALUES (1, ${topic.title}), (2, 'Already renamed'), (3, 'Ordinary course')`);
+      await tx.execute(sql`INSERT INTO lessons (id, course_id, title) VALUES (1, 2, ${topic.title}), (2, 3, 'Ordinary lesson')`);
+      expect(await ensurePublicationSchema(tx)).toBe(false);
+      const identities = await tx.execute(sql`SELECT id, approved_topic_key FROM courses ORDER BY id`);
+      expect(identities.rows).toEqual([
+        { id: 1, approved_topic_key: topic.title },
+        { id: 2, approved_topic_key: topic.title },
+        { id: 3, approved_topic_key: null },
+      ]);
+      await tx.execute(sql`UPDATE courses SET title = 'Changed course title' WHERE id IN (1, 2)`);
+      await tx.execute(sql`UPDATE lessons SET title = 'Changed lesson title' WHERE course_id = 2`);
+      expect(await ensurePublicationSchema(tx)).toBe(false);
+      expect((await tx.execute(sql`SELECT id, approved_topic_key FROM courses ORDER BY id`)).rows).toEqual(identities.rows);
+      // A future ordinary lesson with the same title must not create a new
+      // review boundary on every subsequent startup.
+      await tx.execute(sql`UPDATE lessons SET title = ${topic.title} WHERE course_id = 3`);
+      await ensurePublicationSchema(tx);
+      expect((await tx.execute(sql`SELECT approved_topic_key FROM courses WHERE id = 3`)).rows)
+        .toEqual([{ approved_topic_key: null }]);
+    } finally {
+      await tx.execute(sql.raw(`DROP SCHEMA "${schema}" CASCADE`));
+    }
+  });
+});
+
+test("an unknown stored review identity cannot expose ordinary published rows", () => {
+  expect(publishedLessonsForCourse({ title: "Renamed", approvedTopicKey: "Unknown review" }, [
+    { id: 1, title: "Hidden", content: "Not approved", sortOrder: 1 },
+  ])).toEqual([]);
+});
+
+test.each(["before copy changes", "after copy changes"])("renaming a reviewed standalone course %s keeps hidden lessons out of every learner surface", async renameTiming => {
+  const userId = `test-reviewed-resume-${renameTiming.replaceAll(" ", "-")}-${run}`;
   const approved = approvedTopicLessons[0];
+  const renamedTitle = `Renamed reviewed course ${renameTiming} ${run}`;
   let reviewedCourseId: number | undefined;
   try {
     const statsBefore = await request(userId, "/dashboard/stats");
@@ -503,7 +546,7 @@ test("standalone course resume hides published lessons that no longer match revi
       email: `${userId}@example.invalid`, membershipTier: "Elevated",
     });
     const [course] = await db.insert(coursesTable).values({
-      title: approved.title, description: "Reviewed resume fixture", categoryId,
+      title: approved.title, approvedTopicKey: approved.title, description: "Reviewed resume fixture", categoryId,
       instructorName: "Test", accessTier: "Elevated", isFeatured: true, publishedAt: new Date(),
     }).returning();
     reviewedCourseId = course.id;
@@ -511,13 +554,24 @@ test("standalone course resume hides published lessons that no longer match revi
       { courseId: course.id, title: approved.title, content: approved.content, sortOrder: 1, publishedAt: new Date() },
       { courseId: course.id, title: approved.title, content: "Unreviewed copy", sortOrder: 1, publishedAt: new Date() },
     ]).returning();
+    if (renameTiming === "before copy changes") {
+      await db.update(coursesTable).set({ title: renamedTitle }).where(eq(coursesTable.id, course.id));
+    }
     const listing = await request(userId, `/courses/${course.id}/lessons`);
     expect(listing.status).toBe(200);
     expect((listing.data as Array<{ id: number }>).map(lesson => lesson.id)).toEqual([visible.id]);
     expect((await request(userId, `/lessons/${hidden.id}`)).status).toBe(404);
+    expect((await request(userId, `/lessons/${visible.id}`)).data).toMatchObject({ id: visible.id, content: approved.content });
+    expect((await request(userId, `/courses/${course.id}`, "PATCH", {
+      title: "Another rename", description: course.description, categoryId,
+      difficulty: course.difficulty, instructorName: course.instructorName,
+    })).status).toBe(403);
+    expect((await request(userId, `/lessons/${hidden.id}`, "PATCH", {
+      title: approved.title, content: approved.content, sortOrder: 1, durationMinutes: 7,
+    })).status).toBe(403);
     const courseDetail = await request(userId, `/courses/${course.id}`);
     expect(courseDetail.status).toBe(200);
-    expect(courseDetail.data).toMatchObject({ lessonCount: 1 });
+    expect(courseDetail.data).toMatchObject({ lessonCount: 1, lessons: [{ id: visible.id }] });
     const courseList = await request(userId, "/courses");
     expect(courseList.status).toBe(200);
     expect((courseList.data as Array<{ id: number; lessonCount: number }>)
@@ -564,8 +618,23 @@ test("standalone course resume hides published lessons that no longer match revi
     expect((await request(userId, "/enrollments", "POST", { courseId: course.id })).data)
       .toMatchObject({ lastLessonId: visible.id, totalLessons: 1, completedLessons: 1 });
 
-    await db.update(lessonsTable).set({ content: "Changed after approval" }).where(eq(lessonsTable.id, visible.id));
-    expect((await request(userId, `/courses/${course.id}`)).data).toMatchObject({ lessonCount: 0 });
+    await db.update(lessonsTable).set({ title: "Edited lesson title", content: "Changed after approval" }).where(eq(lessonsTable.id, visible.id));
+    if (renameTiming === "after copy changes") {
+      await db.update(coursesTable).set({ title: renamedTitle }).where(eq(coursesTable.id, course.id));
+    }
+    expect((await request(userId, `/courses/${course.id}`)).data).toMatchObject({ title: renamedTitle, lessonCount: 0, lessons: [] });
+    expect((await request(userId, `/courses/${course.id}/lessons`)).data).toEqual([]);
+    for (const lesson of [visible, hidden]) {
+      expect((await request(userId, `/lessons/${lesson.id}`)).status).toBe(404);
+      expect((await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: lesson.id })).status).toBe(404);
+    }
+    expect((await request(userId, `/courses/${course.id}`, "PATCH", {
+      title: renamedTitle, description: "Edited", categoryId,
+      difficulty: course.difficulty, instructorName: course.instructorName,
+    })).status).toBe(403);
+    const editorial = await request(userId, "/editorial/courses");
+    expect(editorial.status).toBe(200);
+    expect((editorial.data as Array<{ id: number }>).some(row => row.id === course.id)).toBe(false);
     const emptyList = await request(userId, "/courses");
     expect((emptyList.data as Array<{ id: number; lessonCount: number }>)
       .find(row => row.id === course.id)?.lessonCount).toBe(0);
@@ -588,7 +657,7 @@ test("standalone course resume hides published lessons that no longer match revi
       await db.delete(coursesTable).where(eq(coursesTable.id, reviewedCourseId));
     }
     await db.delete(activityTable).where(and(
-      eq(activityTable.entityTitle, approved.title), eq(activityTable.actorName, "Reviewed Resume Test"),
+      inArray(activityTable.entityTitle, [approved.title, renamedTitle]), eq(activityTable.actorName, "Reviewed Resume Test"),
     ));
     await db.delete(usersTable).where(eq(usersTable.clerkId, userId));
   }
@@ -679,7 +748,7 @@ test("two published approved copies select the lowest ID and switch without inhe
     expect(selected.id).toBeLessThan(duplicate.id);
     expect((await request(userId, "/dashboard/stats")).data).toMatchObject({ totalLessons: priorTotal + 1 });
     // A tied SQL query may return either order; selection must not depend on it.
-    expect(publishedLessonsForCourse(course.title, [duplicate, selected]).map(lesson => lesson.id))
+    expect(publishedLessonsForCourse(course, [duplicate, selected]).map(lesson => lesson.id))
       .toEqual([selected.id]);
 
     for (let attempt = 0; attempt < 3; attempt++) {

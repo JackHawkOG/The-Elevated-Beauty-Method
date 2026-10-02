@@ -49,11 +49,13 @@ Try a sample or patch-test as directed when possible, especially if your skin re
 // Only the lowest-ID exact, approved lesson in each standalone course is publishable.
 // Choose here rather than relying on the order in which a query returns tied rows.
 export function publishedLessonsForCourse<T extends { id: number; title: string; content: string | null; sortOrder: number }>(
-  courseTitle: string,
+  course: { title: string; approvedTopicKey?: string | null },
   lessons: T[],
 ): T[] {
-  const approved = approvedTopicLessons.find(topic => topic.title === courseTitle);
-  if (!approved) return lessons;
+  if (!isApprovedStandaloneCourse(course)) return lessons;
+  const approved = approvedTopicLessons.find(topic => topic.title === (course.approvedTopicKey ?? course.title));
+  // Unknown stored review identities must fail closed, not become ordinary courses.
+  if (!approved) return [];
   return lessons.filter(lesson =>
     lesson.title === approved.title &&
     lesson.content === approved.content &&
@@ -61,22 +63,24 @@ export function publishedLessonsForCourse<T extends { id: number; title: string;
   ).sort((a, b) => a.id - b.id).slice(0, 1);
 }
 
-export function isApprovedStandaloneCourse(courseTitle: string): boolean {
-  return approvedTopicLessons.some(topic => topic.title === courseTitle);
+export function isApprovedStandaloneCourse(course: string | { title: string; approvedTopicKey?: string | null }): boolean {
+  if (typeof course !== "string" && course.approvedTopicKey != null) return true;
+  const title = typeof course === "string" ? course : course.title;
+  return approvedTopicLessons.some(topic => topic.title === title);
 }
 
 // Fetch once for a page of courses, then apply the same exact-copy rule as the
 // learner's lesson listing. Ordinary course counts still use published rows.
 export async function approvedVisibleLessonIds(
-  courses: { id: number; title: string }[],
+  courses: { id: number; title: string; approvedTopicKey?: string | null }[],
 ): Promise<Map<number, number[]>> {
-  const approvedCourses = courses.filter(course => isApprovedStandaloneCourse(course.title));
+  const approvedCourses = courses.filter(course => isApprovedStandaloneCourse(course));
   if (!approvedCourses.length) return new Map();
   const lessons = await db.select().from(lessonsTable)
     .where(and(inArray(lessonsTable.courseId, approvedCourses.map(course => course.id)), isNotNull(lessonsTable.publishedAt)))
     .orderBy(lessonsTable.sortOrder, lessonsTable.id);
   return new Map(approvedCourses.map(course => [
     course.id,
-    publishedLessonsForCourse(course.title, lessons.filter(lesson => lesson.courseId === course.id)).map(lesson => lesson.id),
+    publishedLessonsForCourse(course, lessons.filter(lesson => lesson.courseId === course.id)).map(lesson => lesson.id),
   ]));
 }

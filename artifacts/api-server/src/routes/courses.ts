@@ -86,6 +86,7 @@ async function buildCourseRow(courseId: number) {
     .select({
       id: coursesTable.id,
       title: coursesTable.title,
+      approvedTopicKey: coursesTable.approvedTopicKey,
       description: coursesTable.description,
       categoryId: coursesTable.categoryId,
       categoryName: categoriesTable.name,
@@ -103,7 +104,7 @@ async function buildCourseRow(courseId: number) {
     .leftJoin(categoriesTable, eq(coursesTable.categoryId, categoriesTable.id))
     .where(eq(coursesTable.id, courseId));
   if (!row) return row;
-  const approvedIds = await approvedVisibleLessonIds([{ id: row.id, title: row.title }]);
+  const approvedIds = await approvedVisibleLessonIds([row]);
   return { ...row, lessonCount: approvedIds.get(row.id)?.length ?? row.lessonCount };
 }
 
@@ -126,6 +127,7 @@ router.get("/courses", async (req, res): Promise<void> => {
     .select({
       id: coursesTable.id,
       title: coursesTable.title,
+      approvedTopicKey: coursesTable.approvedTopicKey,
       description: coursesTable.description,
       categoryId: coursesTable.categoryId,
       categoryName: categoriesTable.name,
@@ -178,7 +180,7 @@ router.patch("/courses/:courseId", requireAuth, requireContentEditor, async (req
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
   const [current] = await db.select().from(coursesTable).where(eq(coursesTable.id, id));
   if (!current) { res.status(404).json({ error: "Not found" }); return; }
-  if (isApprovedStandaloneCourse(current.title) || isApprovedStandaloneCourse(parsed.data.title)) {
+  if (isApprovedStandaloneCourse(current) || isApprovedStandaloneCourse(parsed.data.title)) {
     res.status(403).json({ error: "Approved standalone courses are managed through editorial review" }); return;
   }
   await db.update(coursesTable).set({ ...parsed.data, publishedAt: null }).where(eq(coursesTable.id, id));
@@ -194,7 +196,7 @@ router.post("/courses/:courseId/approve", requireAuth, requireOwner, async (req,
   const result = await db.transaction(async tx => {
     const [current] = await tx.select().from(coursesTable).where(eq(coursesTable.id, id)).for("update");
     if (!current) return "missing";
-    if (isApprovedStandaloneCourse(current.title)) return "reserved";
+    if (isApprovedStandaloneCourse(current)) return "reserved";
     if (current.publishedAt || courseRevision(current) !== parsed.data.revision) return "stale";
     await tx.update(coursesTable).set({ publishedAt: new Date() }).where(eq(coursesTable.id, id));
     return "approved";
@@ -209,13 +211,14 @@ router.post("/courses/:courseId/approve", requireAuth, requireOwner, async (req,
 router.get("/editorial/courses", requireAuth, requireContentEditor, async (_req, res): Promise<void> => {
   const courses = await db.select({
     id: coursesTable.id, title: coursesTable.title,
+    approvedTopicKey: coursesTable.approvedTopicKey,
     accessTier: coursesTable.accessTier, publishedAt: coursesTable.publishedAt,
   }).from(coursesTable).orderBy(coursesTable.createdAt);
   const lessons = await db.select({
     id: lessonsTable.id, courseId: lessonsTable.courseId, title: lessonsTable.title,
     sortOrder: lessonsTable.sortOrder, publishedAt: lessonsTable.publishedAt,
   }).from(lessonsTable).orderBy(lessonsTable.sortOrder);
-  res.json(ListEditorialCoursesResponse.parse(courses.filter(course => !isApprovedStandaloneCourse(course.title)).map(course => {
+  res.json(ListEditorialCoursesResponse.parse(courses.filter(course => !isApprovedStandaloneCourse(course)).map(course => {
     const courseLessons = lessons.filter(lesson => lesson.courseId === course.id);
     return {
       ...course,
@@ -253,7 +256,7 @@ router.get("/courses/:courseId", async (req, res): Promise<void> => {
   if (!row || !course?.publishedAt) { res.status(404).json({ error: "Not found" }); return; }
 
   const lessons = publishedLessonsForCourse(
-    row.title,
+    row,
     await db.select().from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))).orderBy(lessonsTable.sortOrder),
   );
 
@@ -283,7 +286,7 @@ router.get("/courses/:courseId/lessons", requireAuth, jitProvisionUser, async (r
   }
 
   const lessons = publishedLessonsForCourse(
-    course.title,
+    course,
     await db.select().from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))).orderBy(lessonsTable.sortOrder),
   );
   res.json(ListLessonsResponse.parse(lessons.map(l => ({ ...l, content: null, videoUrl: null, createdAt: l.createdAt?.toISOString() }))));
@@ -297,7 +300,7 @@ router.post("/courses/:courseId/lessons", requireAuth, requireContentEditor, asy
 
   const [targetCourse] = await db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1);
   if (!targetCourse) { res.status(404).json({ error: "Not found" }); return; }
-  if (isApprovedStandaloneCourse(targetCourse.title)) {
+  if (isApprovedStandaloneCourse(targetCourse)) {
     res.status(403).json({ error: "Approved standalone lesson copy cannot be changed through this route" });
     return;
   }
@@ -320,7 +323,7 @@ router.patch("/lessons/:lessonId", requireAuth, requireContentEditor, async (req
   const [lesson] = await db.select().from(lessonsTable).where(eq(lessonsTable.id, id));
   if (!lesson) { res.status(404).json({ error: "Not found" }); return; }
   const [course] = await db.select().from(coursesTable).where(eq(coursesTable.id, lesson.courseId));
-  if (course && isApprovedStandaloneCourse(course.title)) {
+  if (course && isApprovedStandaloneCourse(course)) {
     res.status(403).json({ error: "Approved standalone copy is managed through editorial review" }); return;
   }
   const updated = await db.transaction(async tx => {
@@ -346,7 +349,7 @@ router.post("/lessons/:lessonId/approve", requireAuth, requireOwner, async (req,
     const [lesson] = await tx.select().from(lessonsTable).where(eq(lessonsTable.id, id)).for("update");
     if (!lesson) return { status: "missing" as const };
     const [course] = await tx.select().from(coursesTable).where(eq(coursesTable.id, lesson.courseId));
-    if (!course || isApprovedStandaloneCourse(course.title)) return { status: "reserved" as const };
+    if (!course || isApprovedStandaloneCourse(course)) return { status: "reserved" as const };
     if (lesson.publishedAt || lessonRevision(lesson) !== parsed.data.revision) return { status: "stale" as const };
     const [updated] = await tx.update(lessonsTable).set({ publishedAt: new Date() }).where(eq(lessonsTable.id, id)).returning();
     return { status: "approved" as const, updated };
@@ -390,11 +393,11 @@ router.get("/lessons/:lessonId", requireAuth, jitProvisionUser, async (req, res)
     return;
   }
 
-  if (isApprovedStandaloneCourse(course.title)) {
+  if (isApprovedStandaloneCourse(course)) {
     const courseLessons = await db.select().from(lessonsTable)
       .where(and(eq(lessonsTable.courseId, course.id), isNotNull(lessonsTable.publishedAt)))
       .orderBy(lessonsTable.sortOrder);
-    if (publishedLessonsForCourse(course.title, courseLessons)[0]?.id !== lesson.id) {
+    if (publishedLessonsForCourse(course, courseLessons)[0]?.id !== lesson.id) {
       res.status(404).json({ error: "Lesson not published" });
       return;
     }

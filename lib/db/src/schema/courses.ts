@@ -6,6 +6,8 @@ import { categoriesTable } from "./categories";
 export const coursesTable = pgTable("courses", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
+  // Server-owned review identity; never changed with editorial/display copy.
+  approvedTopicKey: text("approved_topic_key"),
   description: text("description").notNull(),
   categoryId: integer("category_id").notNull().references(() => categoriesTable.id),
   difficulty: text("difficulty").notNull().default("Beginner"),
@@ -18,6 +20,6 @@ export const coursesTable = pgTable("courses", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const insertCourseSchema = createInsertSchema(coursesTable).omit({ id: true, createdAt: true, publishedAt: true });
+export const insertCourseSchema = createInsertSchema(coursesTable).omit({ id: true, createdAt: true, publishedAt: true, approvedTopicKey: true });
 export type InsertCourse = z.infer<typeof insertCourseSchema>;
 export type Course = typeof coursesTable.$inferSelect;

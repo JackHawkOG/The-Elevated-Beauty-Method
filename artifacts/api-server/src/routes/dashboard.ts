@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db, categoriesTable, coursesTable, lessonsTable, enrollmentsTable, announcementsTable, activityTable } from "@workspace/db";
-import { eq, desc, and, inArray, isNotNull } from "drizzle-orm";
+import { eq, desc, and, inArray, isNotNull, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
   GetDashboardStatsResponse,
@@ -24,6 +24,7 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
     db.select({
       id: coursesTable.id,
       title: coursesTable.title,
+      approvedTopicKey: coursesTable.approvedTopicKey,
       publishedLessonCount: sql<number>`count(${lessonsTable.id})::int`,
     }).from(coursesTable)
       .leftJoin(lessonsTable, and(
@@ -32,7 +33,7 @@ router.get("/dashboard/stats", async (req, res): Promise<void> => {
       ))
       .where(and(
         isNotNull(coursesTable.publishedAt),
-        inArray(coursesTable.title, approvedTopicLessons.map(topic => topic.title)),
+        or(isNotNull(coursesTable.approvedTopicKey), inArray(coursesTable.title, approvedTopicLessons.map(topic => topic.title))),
       ))
       .groupBy(coursesTable.id, coursesTable.title),
   ]);
@@ -57,6 +58,7 @@ router.get("/dashboard/featured", async (req, res): Promise<void> => {
     .select({
       id: coursesTable.id,
       title: coursesTable.title,
+      approvedTopicKey: coursesTable.approvedTopicKey,
       description: coursesTable.description,
       categoryId: coursesTable.categoryId,
       categoryName: categoriesTable.name,

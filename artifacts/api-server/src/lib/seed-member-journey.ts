@@ -101,10 +101,11 @@ export async function ensureMemberJourneyContent(backfillLegacy = false) {
       [topicCategory] = await db.insert(categoriesTable).values(topic.category).returning();
     }
 
-    let [topicCourse] = await db.select().from(coursesTable).where(eq(coursesTable.title, topic.title)).limit(1);
+    let [topicCourse] = await db.select().from(coursesTable).where(eq(coursesTable.approvedTopicKey, topic.title)).limit(1);
     if (!topicCourse) {
       [topicCourse] = await db.insert(coursesTable).values({
         title: topic.title,
+        approvedTopicKey: topic.title,
         description: topic.description,
         categoryId: topicCategory.id,
         difficulty: "Beginner",

@@ -18,12 +18,9 @@ const router = Router();
 // Enrollment pointers are stored even if editorial review later hides the lesson.
 // Check them against the same ordered, published set used by the lesson listings.
 async function visibleResumeRows<T extends { courseId: number; courseTitle: string | null; lastLessonId: number | null }>(
-  rows: T[], approvedIds?: Map<number, number[]>,
+  rows: T[], approvedIds: Map<number, number[]>,
 ): Promise<T[]> {
-  const approvedRows = rows.filter(row => row.lastLessonId != null && row.courseTitle != null && isApprovedStandaloneCourse(row.courseTitle));
-  if (!approvedRows.length) return rows;
-
-  const visibleByCourse = approvedIds ?? await approvedVisibleLessonIds(approvedRows.map(row => ({ id: row.courseId, title: row.courseTitle! })));
+  const visibleByCourse = approvedIds;
   return rows.map(row => visibleByCourse.has(row.courseId) && !visibleByCourse.get(row.courseId)?.includes(row.lastLessonId!)
     ? { ...row, lastLessonId: null }
     : row);
@@ -37,6 +34,7 @@ router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
       id: enrollmentsTable.id,
       courseId: enrollmentsTable.courseId,
       courseTitle: coursesTable.title,
+      approvedTopicKey: coursesTable.approvedTopicKey,
       userId: enrollmentsTable.userId,
       completedLessons: enrollmentsTable.completedLessons,
       completedLessonIds: sql<number[]>`coalesce((select array_agg(lc.lesson_id order by lc.lesson_id) from lesson_completions lc inner join lessons l on l.id = lc.lesson_id where lc.user_id = ${enrollmentsTable.userId} and l.course_id = ${enrollmentsTable.courseId} and l.published_at is not null), ARRAY[]::integer[])`,
@@ -54,7 +52,7 @@ router.get("/enrollments", requireAuth, async (req, res): Promise<void> => {
     .where(and(eq(enrollmentsTable.userId, userId), isNotNull(coursesTable.publishedAt)));
 
   const approvedIds = await approvedVisibleLessonIds(rows.filter((row): row is typeof row & { courseTitle: string } => row.courseTitle != null)
-    .map(row => ({ id: row.courseId, title: row.courseTitle })));
+    .map(row => ({ id: row.courseId, title: row.courseTitle, approvedTopicKey: row.approvedTopicKey })));
   const visibleRows = await visibleResumeRows(rows, approvedIds);
   res.json(ListEnrollmentsResponse.parse(visibleRows.map(r => {
     const ids = approvedIds.get(r.courseId);
@@ -118,7 +116,7 @@ router.post("/enrollments", requireAuth, async (req, res): Promise<void> => {
     return inserted;
   });
   if (!enrollment) throw new Error("Enrollment missing after conflict");
-  const approvedIds = await approvedVisibleLessonIds([{ id: courseId, title: course.title }]);
+  const approvedIds = await approvedVisibleLessonIds([course]);
   const [totalRow] = approvedIds.has(courseId) ? [] : await db.select({ count: sql<number>`count(*)::int` }).from(lessonsTable).where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)));
   const [availableLesson] = enrollment.lastLessonId == null ? [] : await db.select({ id: lessonsTable.id })
     .from(lessonsTable)
@@ -166,11 +164,11 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
   if (!course?.publishedAt || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
     res.status(403).json({ error: "Membership required" }); return;
   }
-  if (isApprovedStandaloneCourse(course.title)) {
+  if (isApprovedStandaloneCourse(course)) {
     const courseLessons = await db.select().from(lessonsTable)
       .where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
       .orderBy(lessonsTable.sortOrder);
-    if (publishedLessonsForCourse(course.title, courseLessons)[0]?.id !== lessonId) {
+    if (publishedLessonsForCourse(course, courseLessons)[0]?.id !== lessonId) {
       res.status(404).json({ error: "Lesson not published" }); return;
     }
   }
@@ -189,7 +187,7 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
       .onConflictDoNothing();
     let totalLessons: number;
     let completedCount: number;
-    if (isApprovedStandaloneCourse(course.title)) {
+    if (isApprovedStandaloneCourse(course)) {
       const [publishedLessons, completions] = await Promise.all([
         tx.select().from(lessonsTable)
           .where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
@@ -198,7 +196,7 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
           .innerJoin(lessonsTable, eq(lessonCompletionsTable.lessonId, lessonsTable.id))
           .where(and(eq(lessonCompletionsTable.userId, userId), eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt))),
       ]);
-      const visibleIds = new Set(publishedLessonsForCourse(course.title, publishedLessons).map(row => row.id));
+      const visibleIds = new Set(publishedLessonsForCourse(course, publishedLessons).map(row => row.id));
       totalLessons = visibleIds.size;
       completedCount = completions.filter(row => visibleIds.has(row.lessonId)).length;
     } else {
