@@ -974,6 +974,133 @@ test("an aged post-signup Audit waits for account-specific review and explicit c
   }
 });
 
+test("a first-time real member reviews an expired pending Audit before explicitly creating their own Audit", async ({ page }) => {
+  test.setTimeout(180_000);
+  requireAuditDevelopment();
+  await clerkSetup();
+  const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const tag = randomUUID().replaceAll("-", "").slice(0, 12);
+  const memberEmail = auditFixtureEmail("a", tag);
+  const otherEmail = auditFixtureEmail("b", tag);
+  const pendingAnswers = reflections(`first-aged-${tag}`);
+  const created: string[] = [];
+  const writes: Array<{ body: string; status?: number }> = [];
+  const pendingKey = "tebm:radiant-audit:pending";
+  const oldId = randomUUID();
+  const oldTime = Date.now() - 8 * 24 * 60 * 60 * 1000;
+
+  try {
+    await setupClerkTestingToken({ page });
+    for (const email of [memberEmail, otherEmail]) {
+      const user = await client.users.createUser({
+        emailAddress: [email],
+        skipPasswordRequirement: true,
+        privateMetadata: auditFixturePrivateMetadata,
+      });
+      created.push(user.id);
+      expect(user.primaryEmailAddress?.verification.status).toBe("verified");
+    }
+    const [{ db, radiantAuditsTable, radiantAuditHistoryTable, radiantAuditSubmissionsTable }, { eq }] =
+      await Promise.all([import("../../../lib/db/src/index"), import("drizzle-orm")]);
+    const expectNoSavedAudit = async (id: string) => {
+      expect(await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, id))).toEqual([]);
+      expect(await db.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, id))).toEqual([]);
+      expect(await db.select().from(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, id))).toEqual([]);
+    };
+    for (const id of created) await expectNoSavedAudit(id);
+    page.on("request", request => {
+      if (request.method() !== "PUT" || new URL(request.url()).pathname !== "/api/users/me/radiant-audit") return;
+      const write = { body: request.postData() ?? "", status: undefined as number | undefined };
+      writes.push(write);
+      void request.response().then(response => { write.status = response?.status(); });
+    });
+
+    // Stage through the visitor UI, then expire the attempt away from the form
+    // so its draft effects cannot overwrite the pending fixture.
+    await page.goto("/radiant-audit");
+    await page.locator('label[for="routine-skincare-consistency"]').click();
+    await page.locator('label[for="values-quality-over-price"]').click();
+    await page.locator("#beauty-trend").fill(pendingAnswers.beautyTrend);
+    await page.locator("#mastery-goal").fill(pendingAnswers.masteryGoal);
+    await page.locator("#research-time").fill(pendingAnswers.researchTime);
+    await page.getByLabel("Email address").fill(memberEmail);
+    await page.getByRole("button", { name: /continue|save my audit/i }).click();
+    await expect(page).toHaveURL(/\/sign-up(?:\/|$)/);
+    await page.evaluate(({ key, oldId, oldTime }) => {
+      const pending = JSON.parse(sessionStorage.getItem(key)!);
+      sessionStorage.setItem(key, JSON.stringify({ ...pending, submissionId: oldId, stagedAt: oldTime }));
+    }, { key: pendingKey, oldId, oldTime });
+    const agedPending = await page.evaluate(key => sessionStorage.getItem(key), pendingKey);
+
+    await page.goto("/sign-in");
+    await signInThroughClerk(page, memberEmail);
+    const confirm = page.getByRole("button", { name: "Save as a new Audit", exact: true });
+    await expect(page.getByRole("heading", { name: "Review your pending Audit" })).toBeVisible();
+    await expect(page.locator("main")).toContainText(
+      "There is no current Audit on this account. Saving these pending answers will create a new Audit.",
+    );
+    await expect(confirm).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Save as a new retake" })).toHaveCount(0);
+    const readCurrent = () => page.evaluate(async () => {
+      const response = await fetch("/api/users/me/radiant-audit");
+      return { status: response.status, audit: await response.json() };
+    });
+    expect(await readCurrent()).toEqual({ status: 200, audit: null });
+    expect(writes).toHaveLength(0);
+    for (const id of created) await expectNoSavedAudit(id);
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Review your pending Audit" })).toBeVisible();
+    await expect(page.locator("main")).toContainText("Saving these pending answers will create a new Audit.");
+    await expect(confirm).toBeEnabled();
+    expect(await page.evaluate(key => sessionStorage.getItem(key), pendingKey)).toBe(agedPending);
+    expect(await readCurrent()).toEqual({ status: 200, audit: null });
+    expect(writes).toHaveLength(0);
+    for (const id of created) await expectNoSavedAudit(id);
+
+    await confirm.click();
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    await expect(page.locator("main")).toContainText(pendingAnswers.masteryGoal);
+    await expect.poll(() => writes[0]?.status).toBe(200);
+    expect(writes).toHaveLength(1);
+    const payload = JSON.parse(writes[0].body);
+    expect(payload).toMatchObject({
+      routineChecks: ["skincare-consistency"], valuesChecks: ["quality-over-price"],
+      email: memberEmail, ...pendingAnswers,
+    });
+    expect(payload.submissionId).toEqual(expect.any(String));
+    expect(payload.submissionId).not.toBe(oldId);
+    const saved = await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0]));
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      clerkId: created[0], routineChecks: ["skincare-consistency"],
+      valuesChecks: ["quality-over-price"], ...pendingAnswers,
+    });
+    expect(await db.select().from(radiantAuditHistoryTable).where(eq(radiantAuditHistoryTable.clerkId, created[0]))).toEqual([]);
+    const receipts = await db.select().from(radiantAuditSubmissionsTable).where(eq(radiantAuditSubmissionsTable.clerkId, created[0]));
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].submissionId).toBe(payload.submissionId);
+    await expectNoSavedAudit(created[1]);
+    expect(await page.evaluate(key => sessionStorage.getItem(key), pendingKey)).toBeNull();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    await expect(page.locator("main")).toContainText(pendingAnswers.masteryGoal);
+    expect(writes).toHaveLength(1);
+
+    await clerk.signOut({ page });
+    await signIn(page, otherEmail);
+    expect(await readCurrent()).toEqual({ status: 200, audit: null });
+    for (const answer of Object.values(pendingAnswers)) {
+      await expect(page.locator("body")).not.toContainText(answer);
+    }
+    await expectNoSavedAudit(created[1]);
+    expect(writes).toHaveLength(1);
+  } finally {
+    await page.close();
+    await cleanUpAccounts(client, created);
+  }
+});
+
 test("a wrong sign-in code leaves staged answers untouched until the existing account is verified", async ({ page }) => {
   test.setTimeout(120_000);
   requireAuditDevelopment();
