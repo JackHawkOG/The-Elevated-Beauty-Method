@@ -15,6 +15,117 @@ const env = {
   DATABASE_URL: "postgresql://dev:password@development.db:5432/development?sslmode=require",
 };
 
+it("resumes after a Clerk deletion outage without deleting unrelated identities or database rows", async () => {
+  requireAuditDevelopment();
+  const { db, pool, categoriesTable, coursesTable, lessonsTable, enrollmentsTable, lessonCompletionsTable, usersTable } =
+    await import("../../../lib/db/src/index");
+  const { eq, inArray } = await import("drizzle-orm");
+  const tag = newCourseSwitchTag();
+  const unrelatedTag = newCourseSwitchTag();
+  const ids = [0, 1, 2, 3].map(() => `course-switch-retry-${randomUUID()}`);
+  const identities = ids.map((id, index) => ({
+    id, emailAddresses: [{ emailAddress: courseSwitchEmail(index % 2 ? "b" : "a", index < 2 ? tag : unrelatedTag) }],
+    privateMetadata: index === 2 ? {} : courseSwitchPrivateMetadata, publicMetadata: {},
+    firstName: null, lastName: null, createdAt: index === 3 ? now : old.getTime(),
+  }));
+  let listed = [...identities];
+  const categoryIds: number[] = [];
+  const courseIds: number[] = [];
+  const lessonIds: number[] = [];
+  const snapshot = async (group: number) => ({
+    categories: await db.select().from(categoriesTable).where(eq(categoriesTable.id, categoryIds[group])),
+    courses: await db.select().from(coursesTable).where(eq(coursesTable.id, courseIds[group])),
+    lessons: await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, courseIds[group])).orderBy(lessonsTable.id),
+    enrollments: await db.select().from(enrollmentsTable).where(eq(enrollmentsTable.courseId, courseIds[group])),
+    completions: await db.select().from(lessonCompletionsTable).where(eq(lessonCompletionsTable.lessonId, lessonIds[group])),
+    users: await db.select().from(usersTable).where(inArray(usersTable.clerkId, ids.slice(group * 2, group * 2 + 2))).orderBy(usersTable.id),
+  });
+  const emptySnapshot = { categories: [], courses: [], lessons: [], enrollments: [], completions: [], users: [] };
+  const outage = new Error("Simulated Clerk deletion outage");
+  let failDeletion = true;
+  const client = {
+    getUserList: vi.fn(async () => ({ data: [...listed], totalCount: listed.length })),
+    getUser: vi.fn(async (id: string) => {
+      const user = listed.find(item => item.id === id);
+      if (!user) throw new Error("Unknown identity");
+      return user;
+    }),
+    deleteUser: vi.fn(async (id: string) => {
+      // Query through the real DB connection, outside cleanup's transaction:
+      // all owned rows must already be committed away before Clerk is touched.
+      expect(await snapshot(0)).toEqual(emptySnapshot);
+      if (id === ids[1] && failDeletion) throw outage;
+      listed = listed.filter(item => item.id !== id);
+    }),
+  };
+  try {
+    await db.insert(usersTable).values(identities.map(identity => ({
+      clerkId: identity.id, email: identity.emailAddresses[0].emailAddress,
+      displayName: "New Learner", createdAt: old,
+    })));
+    // The unrelated graph looks like a fixture too, but its identities are
+    // unmarked / young. Neither pass may claim it based on titles alone.
+    for (const [group, groupTag] of [tag, unrelatedTag].entries()) {
+      const title = courseSwitchTitle(groupTag);
+      const [category] = await db.insert(categoriesTable).values({
+        name: title, slug: `course-switch-${groupTag}`, createdAt: old,
+      }).returning();
+      categoryIds.push(category.id);
+      const [course] = await db.insert(coursesTable).values({
+        categoryId: category.id, title, description: title, instructorName: "Test learner",
+        accessTier: "Free", publishedAt: old, createdAt: old,
+      }).returning();
+      courseIds.push(course.id);
+      const [lesson] = await db.insert(lessonsTable).values({
+        courseId: course.id, title: `${title} lesson 1`, sortOrder: 0,
+        publishedAt: old, createdAt: old,
+      }).returning();
+      lessonIds.push(lesson.id);
+      await db.insert(enrollmentsTable).values({
+        userId: ids[group * 2], courseId: course.id, completedLessons: 1,
+        lastLessonId: lesson.id, enrolledAt: old,
+      });
+      await db.insert(lessonCompletionsTable).values({
+        userId: ids[group * 2], lessonId: lesson.id, completedAt: old,
+      });
+    }
+    const unrelatedBefore = await snapshot(1);
+    expect(Object.values(unrelatedBefore).every(rows => rows.length > 0)).toBe(true);
+
+    await expect(cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now })).rejects.toBe(outage);
+    expect(await snapshot(0)).toEqual(emptySnapshot);
+    expect(await snapshot(1)).toEqual(unrelatedBefore);
+    expect(client.deleteUser.mock.calls).toEqual([[ids[0]], [ids[1]]]);
+    expect(listed).toEqual(identities.slice(1));
+
+    failDeletion = false;
+    client.getUser.mockClear();
+    client.deleteUser.mockClear();
+    await cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now });
+    expect(client.getUser.mock.calls).toEqual([[ids[1]], [ids[1]]]);
+    expect(client.deleteUser.mock.calls).toEqual([[ids[1]]]);
+    expect(listed).toEqual(identities.slice(2));
+    expect(await snapshot(0)).toEqual(emptySnapshot);
+    expect(await snapshot(1)).toEqual(unrelatedBefore);
+
+    // A further run is a no-op, including for the unmarked and young accounts.
+    client.getUser.mockClear();
+    client.deleteUser.mockClear();
+    await cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now });
+    expect(client.getUser).not.toHaveBeenCalled();
+    expect(client.deleteUser).not.toHaveBeenCalled();
+    expect(listed).toEqual(identities.slice(2));
+    expect(await snapshot(1)).toEqual(unrelatedBefore);
+  } finally {
+    await pool.query("DELETE FROM lesson_completions WHERE lesson_id = ANY($1::int[])", [lessonIds]);
+    await pool.query("DELETE FROM enrollments WHERE course_id = ANY($1::int[])", [courseIds]);
+    await pool.query("DELETE FROM lessons WHERE course_id = ANY($1::int[])", [courseIds]);
+    await pool.query("DELETE FROM courses WHERE id = ANY($1::int[])", [courseIds]);
+    await pool.query("DELETE FROM categories WHERE id = ANY($1::int[])", [categoryIds]);
+    await pool.query("DELETE FROM users WHERE clerk_id = ANY($1::text[])", [ids]);
+  }
+}, 30_000);
+
 describe("course-switch fixture ownership", () => {
   const identity = {
     id: "test-id", emailAddresses: [{ emailAddress: courseSwitchEmail("a", "abcdef123456") }],
