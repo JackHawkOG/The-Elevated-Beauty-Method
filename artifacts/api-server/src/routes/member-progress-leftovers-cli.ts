@@ -4,6 +4,7 @@
 // Import the clients only after validating the development environment.
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { progressBrowserEnvironment, progressLeftoversEnvironment } from "./member-progress-browser-environment";
 import {
   activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate,
@@ -137,7 +138,8 @@ export async function inspectProgressLeftovers(
       throw new Error("Category contains non-fixture curriculum; refusing deletion");
     }
     const course = courseRows[0];
-    const lessons = course ? await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id)) : [];
+    const lessons = course ? await db.select().from(lessonsTable)
+      .where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.id) : [];
     if (course && course.createdAt.getTime() > cutoff ||
         lessons.some(lesson => lesson.createdAt.getTime() > cutoff)) {
       throw new Error("Curriculum includes recent records; refusing deletion");
@@ -176,7 +178,22 @@ export async function inspectProgressLeftovers(
         if (removed.length !== 1) throw new Error("Member changed during cleanup; refusing partial deletion");
       }
       if (course) {
-        await tx.delete(lessonsTable).where(eq(lessonsTable.courseId, course.id));
+        // Compare the complete selected snapshots, including nullable editorial
+        // fields and timestamps. Locks keep another edit from landing between
+        // this recheck and deletion; the course lock also blocks new FK children.
+        const [currentCourse] = await tx.select().from(coursesTable)
+          .where(eq(coursesTable.id, course.id)).for("update");
+        if (!isDeepStrictEqual(currentCourse, course)) {
+          throw new Error("Course changed during cleanup; refusing partial deletion");
+        }
+        const currentLessons = await tx.select().from(lessonsTable)
+          .where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.id).for("update");
+        if (!isDeepStrictEqual(currentLessons, lessons)) {
+          throw new Error("Lessons changed during cleanup; refusing partial deletion");
+        }
+        for (const lesson of lessons) {
+          await tx.delete(lessonsTable).where(eq(lessonsTable.id, lesson.id));
+        }
         await tx.delete(coursesTable).where(eq(coursesTable.id, course.id));
       }
       if (category) await tx.delete(categoriesTable).where(eq(categoriesTable.id, Number(category.id)));

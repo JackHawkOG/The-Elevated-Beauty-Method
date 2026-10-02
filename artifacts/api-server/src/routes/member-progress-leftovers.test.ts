@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
-import { activityTable, db, usersTable } from "@workspace/db";
+import {
+  activityTable, categoriesTable, coursesTable, db, enrollmentsTable,
+  lessonCompletionsTable, lessonsTable, usersTable,
+} from "@workspace/db";
 import { expect, test } from "vitest";
 import { activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate } from "./member-progress-leftovers";
 import { inspectProgressLeftovers, progressLeftoverArgs, runProgressLeftovers } from "./member-progress-leftovers-cli";
@@ -263,6 +266,149 @@ test.each(["changed", "unchanged"] as const)(
     } finally {
       if (activityIds.length) await db.delete(activityTable).where(inArray(activityTable.id, activityIds));
       if (memberIds.length) await db.delete(usersTable).where(inArray(usersTable.clerkId, memberIds));
+    }
+  },
+);
+
+test.each([
+  "course-title", "course-description", "course-instructor", "course-tier",
+  "course-created-at", "course-thumbnail", "lesson-title", "lesson-content",
+  "lesson-order", "lesson-created-at", "lesson-video", "added-lesson", "unchanged",
+] as const)(
+  "database curriculum cleanup guards a %s change after inspection",
+  async change => {
+    requireDevelopmentDatabase();
+    const fixtureRun = randomUUID();
+    const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const identity = {
+      id: `progress-curriculum-${fixtureRun}`,
+      email: `progress-0-${fixtureRun}@example.com`,
+      name: `Progress Elevated ${fixtureRun}`, createdAt,
+    };
+    let categoryId: number | undefined;
+    let courseId: number | undefined;
+    const lessonIds: number[] = [];
+    const activityIds: number[] = [];
+    const deletedIdentities: string[] = [];
+    const output: string[] = [];
+    try {
+      await db.insert(usersTable).values({
+        clerkId: identity.id, email: identity.email, displayName: identity.name, createdAt,
+      });
+      const [category] = await db.insert(categoriesTable).values({
+        slug: `browser-progress-${fixtureRun}`, name: `Browser progress ${fixtureRun}`, createdAt,
+      }).returning();
+      categoryId = category.id;
+      const [course] = await db.insert(coursesTable).values({
+        categoryId, title: "The Beauty Mindset Accelerator",
+        description: "Temporary browser progress check", instructorName: "Progress Check",
+        accessTier: "Elevated", createdAt,
+      }).returning();
+      courseId = course.id;
+      for (let sortOrder = 1; sortOrder <= 2; sortOrder++) {
+        const [lesson] = await db.insert(lessonsTable).values({
+          courseId, sortOrder, title: `Browser progress module ${sortOrder} ${fixtureRun}`,
+          content: `Private lesson for browser check ${sortOrder} ${fixtureRun}`, createdAt,
+        }).returning();
+        lessonIds.push(lesson.id);
+      }
+      const [enrollment] = await db.insert(enrollmentsTable).values({
+        userId: identity.id, courseId,
+      }).returning();
+      await db.insert(lessonCompletionsTable).values({ userId: identity.id, lessonId: lessonIds[0] });
+      const [activity] = await db.insert(activityTable).values({
+        actorName: identity.name, entityTitle: course.title,
+        type: "enrollment", description: "enrolled in a course", createdAt,
+      }).returning();
+      activityIds.push(activity.id);
+      let expectedCourse = course;
+      let expectedLessons = await db.select().from(lessonsTable)
+        .where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.id);
+      const cleanup = inspectProgressLeftovers(
+        fixtureRun, [identity], async id => { deletedIdentities.push(id); },
+        message => output.push(message),
+        async () => {
+          // Commit through a separate connection after the inspector's snapshot,
+          // before its transaction. No real identity-provider users are created.
+          const courseChanges = {
+            "course-title": { title: "Edited course" },
+            "course-description": { description: "Real course content" },
+            "course-instructor": { instructorName: "Real instructor" },
+            "course-tier": { accessTier: "Free" },
+            "course-created-at": { createdAt: new Date() },
+            "course-thumbnail": { thumbnailUrl: "https://example.com/edited.png" },
+          };
+          const lessonChanges = {
+            "lesson-title": { title: "Edited lesson" },
+            "lesson-content": { content: "Real lesson content" },
+            "lesson-order": { sortOrder: 4 },
+            "lesson-created-at": { createdAt: new Date() },
+            "lesson-video": { videoUrl: "https://example.com/edited.mp4" },
+          };
+          if (change in courseChanges) {
+            await db.update(coursesTable).set(courseChanges[change as keyof typeof courseChanges])
+              .where(eq(coursesTable.id, course.id));
+          } else if (change in lessonChanges) {
+            // Edit the second lesson: the first must not be partially removed.
+            await db.update(lessonsTable).set(lessonChanges[change as keyof typeof lessonChanges])
+              .where(eq(lessonsTable.id, lessonIds[1]));
+          } else if (change === "added-lesson") {
+            const [added] = await db.insert(lessonsTable).values({
+              courseId: course.id, title: "Real new lesson", content: "New content",
+            }).returning();
+            lessonIds.push(added.id);
+          }
+          [expectedCourse] = await db.select().from(coursesTable).where(eq(coursesTable.id, course.id));
+          expectedLessons = await db.select().from(lessonsTable)
+            .where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.id);
+        },
+      );
+      if (change !== "unchanged") {
+        await expect(cleanup).rejects.toThrow(
+          change.startsWith("course-")
+            ? /Course changed during cleanup; refusing partial deletion/
+            : /Lessons changed during cleanup; refusing partial deletion/,
+        );
+        expect(deletedIdentities).toEqual([]);
+        expect(output).toEqual([]);
+        expect(await db.select().from(coursesTable).where(eq(coursesTable.id, course.id)))
+          .toEqual([expectedCourse]);
+        expect(await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id))
+          .orderBy(lessonsTable.id)).toEqual(expectedLessons);
+        expect(await db.select().from(categoriesTable).where(eq(categoriesTable.id, category.id)))
+          .toEqual([category]);
+        expect(await db.select({ clerkId: usersTable.clerkId }).from(usersTable)
+          .where(eq(usersTable.clerkId, identity.id))).toEqual([{ clerkId: identity.id }]);
+        expect(await db.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, enrollment.id)))
+          .toEqual([enrollment]);
+        expect(await db.select().from(lessonCompletionsTable)
+          .where(eq(lessonCompletionsTable.userId, identity.id))).toHaveLength(1);
+        expect(await db.select().from(activityTable).where(eq(activityTable.id, activity.id)))
+          .toEqual([activity]);
+      } else {
+        await cleanup;
+        expect(deletedIdentities).toEqual([identity.id]);
+        expect(output).toEqual([
+          `Removed confirmed disposable records for ${fixtureRun}. Re-run dry run to check for remaining Clerk users.`,
+        ]);
+        expect(await db.select().from(coursesTable).where(eq(coursesTable.id, course.id))).toEqual([]);
+        expect(await db.select().from(lessonsTable).where(inArray(lessonsTable.id, lessonIds))).toEqual([]);
+        expect(await db.select().from(categoriesTable).where(eq(categoriesTable.id, category.id))).toEqual([]);
+        expect(await db.select().from(usersTable).where(eq(usersTable.clerkId, identity.id))).toEqual([]);
+        expect(await db.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, enrollment.id))).toEqual([]);
+        expect(await db.select().from(lessonCompletionsTable)
+          .where(eq(lessonCompletionsTable.userId, identity.id))).toEqual([]);
+        expect(await db.select().from(activityTable).where(eq(activityTable.id, activity.id))).toEqual([]);
+      }
+    } finally {
+      // Only IDs from this test's inserts, in dependency order, even on failure.
+      if (activityIds.length) await db.delete(activityTable).where(inArray(activityTable.id, activityIds));
+      await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, identity.id));
+      await db.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, identity.id));
+      if (lessonIds.length) await db.delete(lessonsTable).where(inArray(lessonsTable.id, lessonIds));
+      if (courseId !== undefined) await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
+      if (categoryId !== undefined) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
+      await db.delete(usersTable).where(eq(usersTable.clerkId, identity.id));
     }
   },
 );
