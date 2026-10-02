@@ -2,12 +2,19 @@ import { randomUUID } from "node:crypto";
 import { createClerkClient } from "@clerk/backend";
 import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { checkLessonAccountSwitch } from "./lesson-account-switch-live";
 import { auditFixtureEmail, auditFixturePrivateMetadata, courseSwitchEmail, courseSwitchPrivateMetadata, courseSwitchTitle, newCourseSwitchTag, requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 const reflections = (marker: string) => ({
   beautyTrend: `trend ${marker}`,
   masteryGoal: `goal ${marker}`,
   researchTime: `research ${marker}`,
+});
+
+test("lesson completion and continuation stay private after a delayed former-member enrollment response", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await checkLessonAccountSwitch(page);
 });
 
 async function signIn(page: Page, email: string) {

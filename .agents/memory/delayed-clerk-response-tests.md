@@ -20,3 +20,13 @@ For a late profile mutation, hold the return of the page's own `fetch` after the
 **Why:** Replaying an authenticated write through `route.fetch()` can lose its Clerk session; delaying the request itself can also prevent the server-side save being tested.
 
 **How to apply:** Verify the server committed before switching identities in the same tab; release the held browser response only after the new member is active. Clerk's test sign-in may land on the dashboard, so reach the profile by an in-app link rather than reloading the document while the response is held.
+
+Keep post-switch navigation in the same document when testing a delayed response
+against the new account's query cache.
+
+**Why:** A full browser navigation discards the query client and can make the
+privacy assertion pass without exercising the cache boundary.
+
+**How to apply:** Use actual in-app links where available. For direct lesson
+routes, Wouter observes `history.pushState`; use that rather than `page.goto`
+while the response is held, then exercise the visible navigation controls.

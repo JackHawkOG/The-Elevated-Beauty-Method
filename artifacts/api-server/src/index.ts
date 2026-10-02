@@ -11,7 +11,8 @@ import { reconcileAnnouncementActivity } from "./lib/reconcile-announcement-acti
 import { reportAfterFirstHealthcheck } from "./routes/health";
 import { ensureMemberStoriesSchema } from "./lib/ensure-member-stories-schema";
 import { ensureProfileSchema } from "./lib/ensure-profile-schema";
-import { getStripeSync } from "./lib/stripeClient";
+import { getStripeSync, getUncachableStripeClient } from "./lib/stripeClient";
+import { syncStripeStartupBackfill } from "./lib/stripe-startup-backfill";
 import { startMembershipReconciliation } from "./lib/membership-reconciliation";
 import { runMigrations } from "stripe-replit-sync";
 import { startCheckoutExpirationRecovery } from "./lib/membership-checkout-expirations";
@@ -60,7 +61,11 @@ if (!process.env.DATABASE_URL || !process.env.REPLIT_DOMAINS?.split(",")[0]) {
 await runMigrations({ databaseUrl: process.env.DATABASE_URL });
 const stripeSync = await getStripeSync();
 await stripeSync.findOrCreateManagedWebhook(`https://${process.env.REPLIT_DOMAINS.split(",")[0]}/api/stripe/webhook`);
-await stripeSync.syncBackfill({ object: "all" });
+await syncStripeStartupBackfill(
+  stripeSync,
+  async id => (await getUncachableStripeClient()).customers.retrieve(id),
+  customerId => logger.warn({ customerId }, "Repaired a verified deleted Stripe customer during startup backfill"),
+);
 
 app.listen(port, (err) => {
   if (err) {
