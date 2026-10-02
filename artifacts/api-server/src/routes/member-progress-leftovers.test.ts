@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
   activityTable, categoriesTable, coursesTable, db, enrollmentsTable,
   lessonCompletionsTable, lessonsTable, usersTable,
@@ -145,6 +145,114 @@ test("database dry run and confirmed cleanup isolate stale activity-only progres
     if (createdIds.length) {
       await db.delete(activityTable).where(inArray(activityTable.id, createdIds));
     }
+  }
+});
+
+test("activity-only confirmed cleanup leaves matching members and curriculum unchanged", async () => {
+  requireDevelopmentDatabase();
+  const fixtureRun = randomUUID();
+  const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const clerkId = `progress-activity-only-${fixtureRun}`;
+  const actorName = `Progress Elevated ${fixtureRun}`;
+  let memberId: number | undefined;
+  let categoryId: number | undefined;
+  let courseId: number | undefined;
+  let lessonId: number | undefined;
+  let enrollmentId: number | undefined;
+  let completionCreated = false;
+  const activityIds: number[] = [];
+  let clerkLoads = 0;
+  const unavailableClerk = async (): Promise<never> => {
+    clerkLoads++;
+    throw new Error("Clerk is unavailable");
+  };
+  const withoutClerkConfig = {
+    ...process.env, CLERK_SECRET_KEY: undefined, CLERK_PUBLISHABLE_KEY: undefined,
+    VITE_CLERK_PUBLISHABLE_KEY: undefined, REPLIT_DEV_DOMAIN: undefined,
+    CHROMIUM_PATH: "/nonexistent/chromium",
+  };
+  try {
+    // Every non-feed fixture is eligible for full cleanup of this same run.
+    // A recent feed row must survive alongside the exact non-feed snapshots.
+    const [member] = await db.insert(usersTable).values({
+      clerkId, email: `progress-0-${fixtureRun}@example.com`, displayName: actorName, createdAt,
+    }).returning();
+    memberId = member.id;
+    const [category] = await db.insert(categoriesTable).values({
+      slug: `browser-progress-${fixtureRun}`, name: `Browser progress ${fixtureRun}`, createdAt,
+    }).returning();
+    categoryId = category.id;
+    const [course] = await db.insert(coursesTable).values({
+      categoryId, title: "The Beauty Mindset Accelerator",
+      description: "Temporary browser progress check", instructorName: "Progress Check",
+      accessTier: "Elevated", createdAt,
+    }).returning();
+    courseId = course.id;
+    const [lesson] = await db.insert(lessonsTable).values({
+      courseId, sortOrder: 1, title: `Browser progress module 1 ${fixtureRun}`,
+      content: `Private lesson for browser check 1 ${fixtureRun}`, createdAt,
+    }).returning();
+    lessonId = lesson.id;
+    const [enrollment] = await db.insert(enrollmentsTable).values({ userId: clerkId, courseId }).returning();
+    enrollmentId = enrollment.id;
+    const [completion] = await db.insert(lessonCompletionsTable).values({
+      userId: clerkId, lessonId,
+    }).returning();
+    completionCreated = true;
+    for (const timestamp of [createdAt, new Date()]) {
+      const [activity] = await db.insert(activityTable).values({
+        actorName, entityTitle: course.title, type: "enrollment",
+        description: "enrolled in a course", createdAt: timestamp,
+      }).returning({ id: activityTable.id });
+      activityIds.push(activity.id);
+    }
+    const [recentActivity] = await db.select().from(activityTable)
+      .where(eq(activityTable.id, activityIds[1]));
+    const output: string[] = [];
+    await runProgressLeftovers(
+      ["--activity-only", "--delete", fixtureRun, fixtureRun],
+      unavailableClerk, message => output.push(message), withoutClerkConfig,
+    );
+    expect(clerkLoads).toBe(0);
+    expect(output).toEqual([
+      `Removed confirmed disposable activity rows for ${fixtureRun}. Clerk identities and curriculum were not checked.`,
+    ]);
+    expect(await db.select().from(activityTable)
+      .where(inArray(activityTable.id, activityIds))).toEqual([recentActivity]);
+    expect(await db.select().from(usersTable).where(eq(usersTable.id, member.id))).toEqual([member]);
+    expect(await db.select().from(categoriesTable).where(eq(categoriesTable.id, category.id))).toEqual([category]);
+    expect(await db.select().from(coursesTable).where(eq(coursesTable.id, course.id))).toEqual([course]);
+    expect(await db.select().from(lessonsTable).where(eq(lessonsTable.id, lesson.id))).toEqual([lesson]);
+    expect(await db.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, enrollment.id)))
+      .toEqual([enrollment]);
+    expect(await db.select().from(lessonCompletionsTable).where(and(
+      eq(lessonCompletionsTable.userId, completion.userId),
+      eq(lessonCompletionsTable.lessonId, completion.lessonId),
+    )))
+      .toEqual([completion]);
+
+    // The database-only exception must not allow full confirmed cleanup to
+    // bypass the identity provider. No real Clerk users are created or deleted.
+    await expect(runProgressLeftovers(
+      ["--delete", fixtureRun, fixtureRun], unavailableClerk, () => {}, {
+        ...process.env, CLERK_SECRET_KEY: "sk_test_mock", CLERK_PUBLISHABLE_KEY: "pk_test_mock",
+        VITE_CLERK_PUBLISHABLE_KEY: "pk_test_mock", REPLIT_DEV_DOMAIN: "example.replit.dev",
+        CHROMIUM_PATH: process.execPath,
+      },
+    )).rejects.toThrow(/Clerk is unavailable/);
+    expect(clerkLoads).toBe(1);
+  } finally {
+    // Guarded development DB only; remove only IDs returned by this test's
+    // inserts, in dependency order, including when setup fails partway through.
+    if (activityIds.length) await db.delete(activityTable).where(inArray(activityTable.id, activityIds));
+    if (completionCreated && lessonId !== undefined) await db.delete(lessonCompletionsTable).where(and(
+      eq(lessonCompletionsTable.userId, clerkId), eq(lessonCompletionsTable.lessonId, lessonId),
+    ));
+    if (enrollmentId !== undefined) await db.delete(enrollmentsTable).where(eq(enrollmentsTable.id, enrollmentId));
+    if (lessonId !== undefined) await db.delete(lessonsTable).where(eq(lessonsTable.id, lessonId));
+    if (courseId !== undefined) await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
+    if (categoryId !== undefined) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
+    if (memberId !== undefined) await db.delete(usersTable).where(eq(usersTable.id, memberId));
   }
 });
 
