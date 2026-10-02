@@ -144,6 +144,12 @@ it("resumes after Clerk deletion fails without touching unmarked, young, or unre
     }),
     deleteUser: vi.fn(async (id: string) => {
       if (id !== oldId) throw new Error(`Unexpected Clerk deletion: ${id}`);
+      // Query committed rows through the pool, not the cleanup transaction:
+      // both attempts must reach Clerk only after database cleanup has finished.
+      const remaining = await rows();
+      expect(remaining.members).not.toContain(oldId);
+      expect(remaining.posts).not.toContain(postIds[0]);
+      expect(remaining.activities).not.toContain(postIds[0]);
       if (failDeletion) {
         failDeletion = false;
         throw new Error("Simulated Clerk outage");
@@ -166,6 +172,15 @@ it("resumes after Clerk deletion fails without touching unmarked, young, or unre
       posts: posts.rows.map(row => row.id),
       activities: activities.rows.map(row => row.source_announcement_id),
     };
+  }
+
+  async function unrelatedRows() {
+    const [members, posts, activities] = await Promise.all([
+      pool.query("SELECT * FROM users WHERE clerk_id = $1", [unrelatedId]),
+      pool.query("SELECT * FROM announcements WHERE actor_id = $1 ORDER BY id", [unrelatedId]),
+      pool.query("SELECT * FROM activity WHERE source_announcement_id = $1 ORDER BY id", [postIds[3]]),
+    ]);
+    return { members: members.rows, posts: posts.rows, activities: activities.rows };
   }
 
   try {
@@ -199,6 +214,10 @@ it("resumes after Clerk deletion fails without touching unmarked, young, or unre
     );
     const initial = await rows();
     expect(initial).toEqual({ members: [...ids].sort(), posts: [...postIds].sort((a, b) => a - b), activities: [...postIds].sort((a, b) => a - b) });
+    const unrelatedBefore = await unrelatedRows();
+    expect(unrelatedBefore.members).toHaveLength(1);
+    expect(unrelatedBefore.posts).toHaveLength(1);
+    expect(unrelatedBefore.activities).toHaveLength(1);
 
     await expect(cleanupCommunityFixtures({ client, db, deleteRows: true })).rejects.toThrow("Simulated Clerk outage");
     const survivors = {
@@ -207,12 +226,17 @@ it("resumes after Clerk deletion fails without touching unmarked, young, or unre
       activities: postIds.slice(1).sort((a, b) => a - b),
     };
     expect(await rows()).toEqual(survivors);
+    expect(await unrelatedRows()).toEqual(unrelatedBefore);
     expect([...clerkUsers.keys()].sort()).toEqual([oldId, unmarkedId, youngId].sort());
+    expect(clerkUsers.get(oldId)).toMatchObject({ privateMetadata: communityFixturePrivateMetadata });
     expect(client.deleteUser).toHaveBeenCalledExactlyOnceWith(oldId);
 
     await cleanupCommunityFixtures({ client, db, deleteRows: true });
     expect(await rows()).toEqual(survivors);
+    expect(await unrelatedRows()).toEqual(unrelatedBefore);
     expect([...clerkUsers.keys()].sort()).toEqual([unmarkedId, youngId].sort());
+    expect(client.getUserList).toHaveBeenCalledTimes(2);
+    expect(client.getUserList).toHaveBeenNthCalledWith(2, { limit: 100, offset: 0 });
     expect(client.getUser).toHaveBeenCalledTimes(2);
     expect(client.getUser).toHaveBeenCalledWith(oldId);
     expect(client.deleteUser).toHaveBeenCalledTimes(2);
