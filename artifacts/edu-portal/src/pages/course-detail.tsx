@@ -3,23 +3,20 @@ import { AppLayout } from "@/components/layout";
 import { 
   useGetCourse, 
   getGetCourseQueryKey,
-  useEnrollInCourse,
   useListEnrollments,
-  getListEnrollmentsQueryKey
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { BookOpen, Users, Clock, PlayCircle, Lock, ArrowLeft, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCourseEnrollment, enrollmentErrorNotice } from "@/hooks/use-course-enrollment";
 import { format } from "date-fns";
 
 export default function CourseDetailPage() {
   const [, params] = useRoute("/courses/:courseId");
   const courseId = Number(params?.courseId);
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   const { data: course, isLoading } = useGetCourse(courseId, { 
     query: { queryKey: getGetCourseQueryKey(courseId) } 
@@ -31,20 +28,14 @@ export default function CourseDetailPage() {
   const completedIds = new Set(enrollment?.completedLessonIds ?? []);
   const nextLesson = course?.lessons?.find(lesson => !completedIds.has(lesson.id)) ?? course?.lessons?.[0];
 
-  const enrollMutation = useEnrollInCourse({
-    mutation: {
-      onSuccess: () => {
-        queryClient.invalidateQueries({ queryKey: getListEnrollmentsQueryKey() });
-        toast({ title: "Enrolled successfully", description: "You can now access all lessons." });
-      },
-      onError: () => {
-        toast({ title: "Membership upgrade required", description: `This pathway is included with ${course?.accessTier ?? "a higher"} membership.`, variant: "destructive" });
-      }
-    }
+  const enrollMutation = useCourseEnrollment(() => {
+    toast({ title: "Enrolled successfully", description: "You can now access all lessons." });
   });
 
   const handleEnroll = () => {
-    enrollMutation.mutate({ data: { courseId } });
+    enrollMutation.mutate({ data: { courseId } }, {
+      onError: (error) => toast(enrollmentErrorNotice(error)),
+    });
   };
 
   if (isLoading) {

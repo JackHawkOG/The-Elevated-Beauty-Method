@@ -4,8 +4,7 @@ import { AppLayout } from "@/components/layout";
 import { 
   useListCourses, 
   getListCoursesQueryKey,
-  useListCategories, 
-  useEnrollInCourse 
+  useListCategories,
 } from "@workspace/api-client-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,15 +13,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Search, Library, BookOpen, Users, ChevronRight, Loader2, Lock, Unlock, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useQueryClient } from "@tanstack/react-query";
-import { getListEnrollmentsQueryKey } from "@workspace/api-client-react";
+import { useCourseEnrollment, enrollmentErrorNotice } from "@/hooks/use-course-enrollment";
 
 export default function CoursesPage() {
   const [search, setSearch] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | undefined>();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   const { data: categories, isLoading: categoriesLoading } = useListCategories();
   
@@ -32,23 +29,17 @@ export default function CoursesPage() {
     { query: { queryKey: getListCoursesQueryKey(courseParams) } }
   );
 
-  const enrollMutation = useEnrollInCourse({
-    mutation: {
-      onSuccess: (data) => {
-        queryClient.invalidateQueries({ queryKey: getListEnrollmentsQueryKey() });
-        toast({ title: "Enrolled successfully", description: `You are now enrolled in ${data.courseTitle}.` });
-        setLocation(`/courses/${data.courseId}`);
-      },
-      onError: () => {
-        toast({ title: "Enrollment failed", description: "You might already be enrolled or there was an error.", variant: "destructive" });
-      }
-    }
+  const enrollMutation = useCourseEnrollment((data) => {
+    toast({ title: "Enrolled successfully", description: `You are now enrolled in ${data.courseTitle}.` });
+    setLocation(`/courses/${data.courseId}`);
   });
 
   const handleEnroll = (courseId: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    enrollMutation.mutate({ data: { courseId } });
+    enrollMutation.mutate({ data: { courseId } }, {
+      onError: (error) => toast(enrollmentErrorNotice(error)),
+    });
   };
 
   return (
