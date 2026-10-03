@@ -36,6 +36,42 @@ test("verified deletion uses library upsert and completes full backfill before r
   expect(report).toHaveBeenCalledExactlyOnceWith("cus_deleted");
 });
 
+test("two verified stale customers are repaired before full backfill succeeds", async () => {
+  const { sync, retrieve, report } = fixtures();
+  sync.syncBackfill
+    .mockRejectedValueOnce(missing("cus_first"))
+    .mockRejectedValueOnce(missing("cus_second"));
+  retrieve.mockImplementation(async (id: string) => deleted(id));
+  await syncStripeStartupBackfill(sync, retrieve, report);
+  expect(sync.syncBackfill).toHaveBeenCalledTimes(3);
+  for (const call of sync.syncBackfill.mock.calls) expect(call).toEqual([{ object: "all" }]);
+  expect(sync.upsertCustomers.mock.calls).toEqual([
+    [[deleted("cus_first")], "acct_current"],
+    [[deleted("cus_second")], "acct_current"],
+  ]);
+  expect(report.mock.calls).toEqual([["cus_first"], ["cus_second"]]);
+});
+
+test("account lookup failure cannot write a verified deletion into an unknown account", async () => {
+  const { sync, retrieve, report } = fixtures();
+  sync.syncBackfill.mockRejectedValueOnce(missing());
+  const outage = new Error("Stripe account lookup unavailable");
+  sync.getAccountId.mockRejectedValueOnce(outage);
+  await expect(syncStripeStartupBackfill(sync, retrieve, report)).rejects.toBe(outage);
+  expect(sync.upsertCustomers).not.toHaveBeenCalled();
+  expect(report).not.toHaveBeenCalled();
+  expect(sync.syncBackfill).toHaveBeenCalledOnce();
+});
+
+test("a real Stripe outage after a successful cache repair still blocks startup", async () => {
+  const { sync, retrieve, report } = fixtures();
+  const outage = Object.assign(new Error("Stripe unavailable"), { statusCode: 503 });
+  sync.syncBackfill.mockRejectedValueOnce(missing()).mockRejectedValueOnce(outage);
+  await expect(syncStripeStartupBackfill(sync, retrieve, report)).rejects.toBe(outage);
+  expect(sync.upsertCustomers).toHaveBeenCalledOnce();
+  expect(sync.syncBackfill).toHaveBeenCalledTimes(2);
+});
+
 test.each([
   new Error("connection unavailable"),
   Object.assign(missing(), { code: "api_key_expired" }),
