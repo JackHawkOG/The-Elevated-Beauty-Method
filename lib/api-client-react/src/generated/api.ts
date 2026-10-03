@@ -29,6 +29,7 @@ import type {
   AnnouncementActivityLink,
   AnnouncementActivityReview,
   AnnouncementInput,
+  AnnouncementReconciliationRun,
   BeautyDiagnosticInput,
   BeautyMethod,
   Category,
@@ -47,6 +48,7 @@ import type {
   HealthStatus,
   Lesson,
   LessonInput,
+  ListAnnouncementReconciliationRunsParams,
   ListAnnouncementsParams,
   ListCoursesParams,
   MemberStoryInput,
@@ -3472,6 +3474,90 @@ export function useGetAnnouncement<TData = Awaited<ReturnType<typeof getAnnounce
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnnouncementQueryOptions(announcementId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getListAnnouncementReconciliationRunsUrl = (params?: ListAnnouncementReconciliationRunsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/announcements/reconciliation-runs?${stringifiedParams}` : `/api/announcements/reconciliation-runs`
+}
+
+/**
+ * @summary Read archived startup outcomes (owner or admin only; never reruns repairs)
+ */
+export const listAnnouncementReconciliationRuns = async (params?: ListAnnouncementReconciliationRunsParams, options?: Parameters<typeof customFetch>[1]): Promise<AnnouncementReconciliationRun[]> => {
+
+  return customFetch<AnnouncementReconciliationRun[]>(getListAnnouncementReconciliationRunsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAnnouncementReconciliationRunsQueryKey = (params?: ListAnnouncementReconciliationRunsParams,) => {
+    return [
+    `/api/announcements/reconciliation-runs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListAnnouncementReconciliationRunsQueryOptions = <TData = Awaited<ReturnType<typeof listAnnouncementReconciliationRuns>>, TError = ErrorType<void>>(params?: ListAnnouncementReconciliationRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementReconciliationRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAnnouncementReconciliationRunsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAnnouncementReconciliationRuns>>> = ({ signal }) => listAnnouncementReconciliationRuns(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementReconciliationRuns>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListAnnouncementReconciliationRunsQueryResult = NonNullable<Awaited<ReturnType<typeof listAnnouncementReconciliationRuns>>>
+export type ListAnnouncementReconciliationRunsQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read archived startup outcomes (owner or admin only; never reruns repairs)
+ */
+
+export function useListAnnouncementReconciliationRuns<TData = Awaited<ReturnType<typeof listAnnouncementReconciliationRuns>>, TError = ErrorType<void>>(
+ params?: ListAnnouncementReconciliationRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listAnnouncementReconciliationRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListAnnouncementReconciliationRunsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -48,6 +48,7 @@ async function initialize(): Promise<void> {
   const needsPublicationBackfill = await ensurePublicationSchema();
   await ensureMemberJourneyContent(needsPublicationBackfill);
   const announcementRepair = await reconcileAnnouncementActivity();
+  // The exact result is already archived atomically with the repairs.
   // Deployment logs may not index pre-listen output. The configured startup
   // health check runs after the server is accepting requests; report the
   // committed result once there rather than rerunning a non-repeatable repair.

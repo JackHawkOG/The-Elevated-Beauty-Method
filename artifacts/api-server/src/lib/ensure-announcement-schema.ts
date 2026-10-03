@@ -29,4 +29,12 @@ export async function ensureAnnouncementSchema(): Promise<void> {
   )`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "announcement_activity_corrections_activity_idx"
     ON "announcement_activity_corrections" ("activity_id")`);
+  // Keep in sync with 0026_announcement_reconciliation_runs.sql.
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS "announcement_reconciliation_runs" (
+    "id" serial PRIMARY KEY,
+    "recorded_at" timestamptz NOT NULL DEFAULT now(),
+    "version" integer NOT NULL DEFAULT 1,
+    "repaired_ids" jsonb NOT NULL,
+    "review" jsonb NOT NULL
+  )`);
 }

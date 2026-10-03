@@ -975,6 +975,30 @@ paths:
         "404":
           description: Announcement not found
 
+  /announcements/reconciliation-runs:
+    get:
+      operationId: listAnnouncementReconciliationRuns
+      tags: [announcements]
+      summary: Read archived startup outcomes (owner or admin only; never reruns repairs)
+      parameters:
+        - name: beforeId
+          in: query
+          required: false
+          description: Read older outcomes using the last ID from the previous page
+          schema: { type: integer, minimum: 1, maximum: 2147483647 }
+      responses:
+        "200":
+          description: Up to 50 outcomes, newest first; retained without automatic expiry
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnnouncementReconciliationRun"
+        "400": { description: Invalid cursor }
+        "401": { description: Sign-in required }
+        "403": { description: Staff access required }
+        "503": { description: Staff access could not be verified }
   /announcements/activity-review:
     get:
       operationId: listAnnouncementActivityReview
@@ -1893,6 +1917,29 @@ components:
         pinned:
           type: boolean
 
+    AnnouncementReconciliationReview:
+      type: object
+      required: [announcementId, activityIds, reason]
+      properties:
+        announcementId: { type: integer }
+        activityIds:
+          type: array
+          items: { type: integer }
+        reason: { type: string }
+    AnnouncementReconciliationRun:
+      type: object
+      required: [id, recordedAt, version, repairedIds, review]
+      properties:
+        id: { type: integer }
+        recordedAt: { type: string }
+        version: { type: integer }
+        repairedIds:
+          type: array
+          items: { type: integer }
+        review:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnnouncementReconciliationReview"
     AnnouncementActivityCandidate:
       type: object
       required: [id, actorName, entityTitle, description, createdAt, sourceAnnouncementId]

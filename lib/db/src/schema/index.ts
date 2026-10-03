@@ -4,6 +4,7 @@ export * from "./lessons";
 export * from "./enrollments";
 export * from "./lesson-completions";
 export * from "./announcements";
+export * from "./announcement-reconciliation-runs";
 export * from "./users";
 export * from "./activity";
 export * from "./radiant-audits";

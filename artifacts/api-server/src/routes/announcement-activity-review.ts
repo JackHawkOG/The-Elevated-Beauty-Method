@@ -18,7 +18,7 @@ import { planAnnouncementActivityRepair } from "../lib/reconcile-announcement-ac
 
 const router = Router();
 
-async function requireStaff(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function requireStaff(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const user = await clerkClient.users.getUser(req.userId!);
     if (user.publicMetadata.role !== "owner" && user.publicMetadata.role !== "admin") {

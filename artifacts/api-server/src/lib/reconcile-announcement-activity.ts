@@ -1,4 +1,4 @@
-import { activityTable, announcementsTable, announcementActivityCorrectionsTable, db } from "@workspace/db";
+import { activityTable, announcementsTable, announcementActivityCorrectionsTable, announcementReconciliationRunsTable, db } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 
 type AnnouncementRow = {
@@ -73,8 +73,8 @@ export function planAnnouncementActivityRepair(
   return { missing, review };
 }
 
-export async function reconcileAnnouncementActivity(): Promise<AnnouncementActivityRepairResult> {
-  return db.transaction(async tx => {
+export async function reconcileAnnouncementActivity(database: Omit<typeof db, "$client"> = db): Promise<AnnouncementActivityRepairResult> {
+  return database.transaction(async tx => {
     // Serialize startup repairs across server instances; reread after acquiring
     // the lock so a second startup sees the first one's newly inserted rows.
     await tx.execute(sql`select pg_advisory_xact_lock(750075)`);
@@ -93,6 +93,10 @@ export async function reconcileAnnouncementActivity(): Promise<AnnouncementActiv
         createdAt: announcement.createdAt,
       });
     }
-    return { repairedIds: plan.missing.map(row => row.id), review: plan.review };
+    const result = { repairedIds: plan.missing.map(row => row.id), review: plan.review };
+    // Archive every outcome in the repair transaction. If this insert fails,
+    // all repairs roll back; no later empty run can overwrite earlier evidence.
+    await tx.insert(announcementReconciliationRunsTable).values(result);
+    return result;
   });
 }

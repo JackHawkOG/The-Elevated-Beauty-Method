@@ -586,6 +586,20 @@ export interface AnnouncementInput {
   pinned?: boolean;
 }
 
+export interface AnnouncementReconciliationReview {
+  announcementId: number;
+  activityIds: number[];
+  reason: string;
+}
+
+export interface AnnouncementReconciliationRun {
+  id: number;
+  recordedAt: string;
+  version: number;
+  repairedIds: number[];
+  review: AnnouncementReconciliationReview[];
+}
+
 export interface AnnouncementActivityCandidate {
   id: number;
   actorName: string;
@@ -997,4 +1011,13 @@ limit?: number;
  * @maximum 2147483647
  */
 after?: number;
+};
+
+export type ListAnnouncementReconciliationRunsParams = {
+/**
+ * Read older outcomes using the last ID from the previous page
+ * @minimum 1
+ * @maximum 2147483647
+ */
+beforeId?: number;
 };

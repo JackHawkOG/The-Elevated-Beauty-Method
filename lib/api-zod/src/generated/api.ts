@@ -1052,6 +1052,31 @@ export const GetAnnouncementResponse = zod.object({
 
 
 /**
+ * @summary Read archived startup outcomes (owner or admin only; never reruns repairs)
+ */
+export const listAnnouncementReconciliationRunsQueryBeforeIdMax = 2147483647;
+
+
+
+export const ListAnnouncementReconciliationRunsQueryParams = zod.object({
+  "beforeId": zod.coerce.number().int().min(1).max(listAnnouncementReconciliationRunsQueryBeforeIdMax).optional().describe('Read older outcomes using the last ID from the previous page')
+})
+
+export const ListAnnouncementReconciliationRunsResponseItem = zod.object({
+  "id": zod.number().int(),
+  "recordedAt": zod.string(),
+  "version": zod.number().int(),
+  "repairedIds": zod.array(zod.number().int()),
+  "review": zod.array(zod.object({
+  "announcementId": zod.number().int(),
+  "activityIds": zod.array(zod.number().int()),
+  "reason": zod.string()
+}))
+})
+export const ListAnnouncementReconciliationRunsResponse = zod.array(ListAnnouncementReconciliationRunsResponseItem)
+
+
+/**
  * @summary Staff-only ambiguous legacy feed links
  */
 export const ListAnnouncementActivityReviewResponseItem = zod.object({
