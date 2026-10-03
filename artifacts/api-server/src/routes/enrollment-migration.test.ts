@@ -658,6 +658,215 @@ test("waiting startup repair recovers after a SQL migration fails and rolls back
   }
 }, 20000);
 
+test("waiting SQL migration recovers after startup repair fails and rolls back", async () => {
+  requireDevelopmentDatabase();
+
+  const schemaName = `enrollment_migration_${randomUUID().replaceAll("-", "")}`;
+  const admin = await pool.connect();
+  let repairClient: PoolClient | undefined;
+  let migrationClient: PoolClient | undefined;
+  let repairRun: Promise<unknown> | undefined;
+  let migrationRun: Promise<unknown> | undefined;
+  let resumeRepair: (() => void) | undefined;
+  let gateHeld = false;
+  let created = false;
+  const withinDeadline = async (promise: Promise<unknown>) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Enrollment repair coordination timed out")), 4000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    await admin.query("SET statement_timeout = '8s'");
+    await admin.query(`CREATE SCHEMA "${schemaName}"`);
+    created = true;
+    await admin.query(`
+      CREATE TABLE "${schemaName}".enrollments (
+        id integer PRIMARY KEY,
+        user_id text NOT NULL,
+        course_id integer NOT NULL,
+        completed_lessons integer NOT NULL DEFAULT 0,
+        last_lesson_id integer,
+        enrolled_at timestamp NOT NULL
+      );
+      CREATE TABLE "${schemaName}".lessons (
+        id integer PRIMARY KEY, course_id integer NOT NULL, published_at timestamp
+      );
+      INSERT INTO "${schemaName}".lessons (id, course_id, published_at)
+      VALUES (31, 7, '2022-01-01');
+      INSERT INTO "${schemaName}".enrollments
+        (id, user_id, course_id, completed_lessons, last_lesson_id, enrolled_at)
+      VALUES (1, 'member', 7, 1, NULL, '2022-01-01'),
+             (2, 'member', 7, 4, 31, '2023-01-01');
+      CREATE INDEX legacy_enrollment_progress ON "${schemaName}".enrollments (completed_lessons)
+    `);
+    const rows = async () => (await admin.query(`
+      SELECT id, user_id, course_id, completed_lessons, last_lesson_id,
+        enrolled_at::date::text AS enrolled_at
+      FROM "${schemaName}".enrollments ORDER BY id
+    `)).rows;
+    const indexes = async () => (await admin.query(`
+      SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = $1 ORDER BY indexname
+    `, [schemaName])).rows;
+    const originalRows = await rows();
+    const originalIndexes = await indexes();
+
+    // BEFORE UPDATE gates the unchanged SQL script before its first tuple
+    // write, after it acquires the table lock released by the failed repair.
+    await admin.query(`
+      CREATE FUNCTION "${schemaName}".pause_migration_before_update() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF current_setting('enrollment_test.pause_migration', true) = 'on' THEN
+          IF OLD.completed_lessons <> 1 OR NEW.completed_lessons <> 4
+             OR OLD.last_lesson_id IS NOT NULL OR NEW.last_lesson_id IS DISTINCT FROM 31 THEN
+            RAISE EXCEPTION 'migration did not see original progress after repair rollback';
+          END IF;
+          PERFORM pg_advisory_xact_lock(hashtext(TG_TABLE_SCHEMA));
+        END IF;
+        RETURN NEW;
+      END
+      $$;
+      CREATE TRIGGER pause_migration_before_update BEFORE UPDATE ON "${schemaName}".enrollments
+      FOR EACH ROW EXECUTE FUNCTION "${schemaName}".pause_migration_before_update()
+    `);
+    await admin.query("SELECT pg_advisory_lock(hashtext($1))", [schemaName]);
+    gateHeld = true;
+
+    repairClient = await pool.connect();
+    migrationClient = await pool.connect();
+    for (const client of [repairClient, migrationClient]) {
+      // No public fallback: both production repair paths see only private
+      // fixtures. Timeouts also bound SQL waits during failure cleanup.
+      await client.query("SELECT set_config('search_path', $1, false)", [schemaName]);
+      await client.query("SET statement_timeout = '8s'");
+    }
+    await migrationClient.query("SET enrollment_test.pause_migration = 'on'");
+    const { rows: [{ pid: adminPid }] } = await admin.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const { rows: [{ pid: repairPid }] } = await repairClient.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const { rows: [{ pid: migrationPid }] } = await migrationClient.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const waitUntilBlockedBy = async (pid: number, blocker: number) => {
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const { rows: [activity] } = await admin.query<{ waiting: boolean }>(`
+          SELECT wait_event_type = 'Lock' AND $2::int = ANY(pg_blocking_pids(pid)) AS waiting
+          FROM pg_stat_activity WHERE pid = $1
+        `, [pid, blocker]);
+        if (activity?.waiting) return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
+    };
+
+    let signalRepairUpdate!: () => void;
+    const repairUpdated = new Promise<void>((resolve) => { signalRepairUpdate = resolve; });
+    const pauseRepair = new Promise<void>((resolve) => { resumeRepair = resolve; });
+    let repairStatements = 0;
+    const repairDb = drizzle(repairClient, { schema });
+    const failingRepairDb: Pick<typeof db, "transaction"> = {
+      transaction: ((callback: Parameters<typeof db.transaction>[0]) =>
+        repairDb.transaction((tx) => callback(new Proxy(tx, {
+          get(target, property, receiver) {
+            if (property !== "execute") return Reflect.get(target, property, receiver);
+            return async (statement: Parameters<typeof tx.execute>[0]) => {
+              const result = await target.execute(statement);
+              if (++repairStatements === 2) {
+                // Prove the real merge wrote progress inside this transaction,
+                // rather than merely pausing before the UPDATE was executed.
+                expect((await repairClient!.query(`
+                  SELECT id, completed_lessons, last_lesson_id FROM enrollments ORDER BY id
+                `)).rows).toEqual([
+                  { id: 1, completed_lessons: 4, last_lesson_id: 31 },
+                  { id: 2, completed_lessons: 4, last_lesson_id: 31 },
+                ]);
+                signalRepairUpdate();
+                await withinDeadline(pauseRepair);
+                throw new Error("injected startup repair failure after enrollment merge");
+              }
+              return result;
+            };
+          },
+        })))) as typeof db.transaction,
+    };
+    repairRun = ensureEnrollmentSchema(failingRepairDb).then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    await withinDeadline(Promise.race([
+      repairUpdated,
+      repairRun.then(() => { throw new Error("Startup repair ended before its merge update"); }),
+    ]));
+    migrationRun = migrationClient.query(await readFile(migrationUrl, "utf8")).then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    expect(await waitUntilBlockedBy(migrationPid, repairPid),
+      "SQL migration must wait on startup repair's table lock").toBe(true);
+
+    resumeRepair!();
+    expect(await withinDeadline(repairRun)).toMatchObject({
+      status: "rejected",
+      error: { message: "injected startup repair failure after enrollment merge" },
+    });
+    expect(await waitUntilBlockedBy(migrationPid, adminPid),
+      "migration must acquire the released table lock but pause before writing").toBe(true);
+    expect(await rows()).toEqual(originalRows);
+    expect(await indexes()).toEqual(originalIndexes);
+
+    await admin.query("SELECT pg_advisory_unlock(hashtext($1))", [schemaName]);
+    gateHeld = false;
+    expect(await withinDeadline(migrationRun)).toEqual({ status: "fulfilled" });
+    expect(await rows()).toEqual([{
+      id: 1, user_id: "member", course_id: 7, completed_lessons: 4,
+      last_lesson_id: 31, enrolled_at: "2022-01-01",
+    }]);
+    expect(await indexes()).toEqual([
+      ...originalIndexes,
+      { indexname: "enrollments_user_id_course_id_unique", indexdef: expect.stringContaining("UNIQUE INDEX") },
+    ].sort((a, b) => a.indexname.localeCompare(b.indexname)));
+    expect((await admin.query(`
+      SELECT l.id FROM "${schemaName}".enrollments e
+      JOIN "${schemaName}".lessons l ON l.id = e.last_lesson_id AND l.course_id = e.course_id
+      WHERE l.published_at IS NOT NULL
+    `)).rows).toEqual([{ id: 31 }]);
+    await expect(admin.query(`
+      INSERT INTO "${schemaName}".enrollments (id, user_id, course_id, enrolled_at)
+      VALUES (3, 'member', 7, '2024-01-01')
+    `)).rejects.toMatchObject({ code: "23505", constraint: "enrollments_user_id_course_id_unique" });
+  } finally {
+    resumeRepair?.();
+    try {
+      if (gateHeld) await admin.query("SELECT pg_advisory_unlock(hashtext($1))", [schemaName]);
+    } finally {
+      try {
+        await Promise.allSettled([repairRun, migrationRun].filter((promise) => promise !== undefined));
+        // The SQL script can leave an aborted transaction on failure. Roll
+        // back before dropping fixtures; destroy sessions so settings cannot
+        // leak to later tests even if a reset or rollback query fails.
+        await Promise.allSettled(
+          [repairClient, migrationClient].filter((client) => client !== undefined)
+            .map((client) => client.query("ROLLBACK")),
+        );
+      } finally {
+        repairClient?.release(true);
+        migrationClient?.release(true);
+        try {
+          if (created) await admin.query(`DROP SCHEMA "${schemaName}" CASCADE`);
+        } finally {
+          admin.release(true);
+        }
+      }
+    }
+  }
+}, 30000);
+
 test("two startup repairs serialize on the same legacy enrollments", async () => {
   requireDevelopmentDatabase();
 
