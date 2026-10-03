@@ -22,3 +22,16 @@ be mistaken for unverifiable legacy member accounts.
 
 **How to apply:** Verify the independent evidence, recheck it before removal,
 and refuse removal when linked member data exists or the evidence changes.
+
+Independent profile cleanup integration ownership may also authorize a separate
+opt-in recovery, but only for a supplied run UUID and exact identity IDs. It must
+not widen the ordinary discovery rules; reject extra or conflicting private
+ownership, changed fixture shapes, young accounts, and linked member data.
+
+**Why:** Interrupted negative tests deliberately lack the normal fixture marker
+while retaining independent run ownership. Treating email patterns as ownership
+would put unrelated accounts at risk.
+
+**How to apply:** Recheck independent ownership through the same database
+snapshot and external-deletion fence as ordinary cleanup. Recovery must never
+enumerate identities or assume lookup failures mean an account is absent.

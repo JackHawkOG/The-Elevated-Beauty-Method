@@ -35,6 +35,20 @@ export function possibleUnmarkedProfileFixture(
   return user.privateMetadata.profileLiveFixture === undefined ? profileShape(user, now) : undefined;
 }
 
+// Integration-run ownership is independent of the ordinary fixture marker.
+// Only an explicit recovery scope may use it, never the normal discovery scan.
+export function recoverableProfileFixture(
+  user: Parameters<typeof profileShape>[0], run: string, now = Date.now(),
+) {
+  const metadata = user.privateMetadata;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(run) ||
+      metadata.profileCleanupIntegrationRun !== run ||
+      (metadata.profileLiveFixture !== undefined && metadata.profileLiveFixture !== marker) ||
+      Object.keys(metadata).some(key =>
+        key !== "profileCleanupIntegrationRun" && key !== "profileLiveFixture")) return;
+  return profileShape(user, now);
+}
+
 export function profileFixtureMember(
   member: {
     email: string; displayName: string; bio: string | null; avatarUrl: string | null;

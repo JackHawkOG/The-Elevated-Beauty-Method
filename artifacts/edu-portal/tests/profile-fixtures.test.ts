@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   possibleUnmarkedProfileFixture, profileFixtureMember, profileFixturePrivateMetadata,
-  requireProfileDevelopment, staleProfileFixture,
+  requireProfileDevelopment, staleProfileFixture, recoverableProfileFixture,
 } from "./profile-fixtures";
+import { profileCleanupArguments } from "./profile-fixtures-recovery";
 
 const now = Date.now();
 const tag = "abcdef123456";
@@ -26,6 +27,43 @@ const env = {
 };
 
 describe("profile fixture cleanup boundaries", () => {
+  it("requires explicit independent run ownership for aged recovery identities", () => {
+    const run = "aabbccdd-1234-4321-8123-abcdef123456";
+    const owned = { ...identity, privateMetadata: { profileCleanupIntegrationRun: run } };
+    expect(recoverableProfileFixture(owned, run, now)).toEqual({ role: "a", tag, email });
+    expect(staleProfileFixture(owned, now)).toBeUndefined();
+    for (const privateMetadata of [
+      {}, { profileCleanupIntegrationRun: "another-run" },
+      { profileCleanupIntegrationRun: run, profileLiveFixture: "another-fixture" },
+      { profileCleanupIntegrationRun: run, otherOwner: "other-suite" },
+    ]) {
+      expect(recoverableProfileFixture({ ...owned, privateMetadata }, run, now)).toBeUndefined();
+    }
+    expect(recoverableProfileFixture(owned, "", now)).toBeUndefined();
+    expect(recoverableProfileFixture({ ...owned, createdAt: now }, run, now)).toBeUndefined();
+    expect(recoverableProfileFixture({ ...owned, publicMetadata: { role: "member" } }, run, now)).toBeUndefined();
+    expect(recoverableProfileFixture({ ...owned, firstName: "Changed" }, run, now)).toBeUndefined();
+    expect(recoverableProfileFixture({ ...owned, privateMetadata: {
+      ...profileFixturePrivateMetadata, profileCleanupIntegrationRun: run,
+    } }, run, now)).toBeDefined();
+  });
+
+  it("never enables recovery without a valid run and explicit unique IDs", () => {
+    const run = "aabbccdd-1234-4321-8123-abcdef123456";
+    expect(profileCleanupArguments([])).toEqual({ deleteRows: false, recovery: undefined });
+    expect(profileCleanupArguments(["--delete"])).toEqual({ deleteRows: true, recovery: undefined });
+    expect(profileCleanupArguments(["--recover-run", run, "--id", "user_123", "--id", "user_456"])).toEqual({
+      deleteRows: false, recovery: { run, ids: ["user_123", "user_456"] },
+    });
+    for (const args of [
+      ["--recover-run", run], ["--id", "user_123"], ["--recover-run", "bad", "--id", "user_123"],
+      ["--recover-run", run, "--id"], ["--recover-run", run, "--id", "*"],
+      ["--recover-run", run, "--id", "user_123", "--id", "user_123"],
+      ["--delete", "--delete"], ["--recover-run", run, "--recover-run", run, "--id", "user_123"],
+      ["--recover-run", run, "--id", email],
+    ]) expect(() => profileCleanupArguments(args)).toThrow(/Usage/);
+  });
+
   it("requires an old, explicitly marked identity with the exact test shape", () => {
     expect(staleProfileFixture(identity, now)).toEqual({ role: "a", tag, email });
     expect(staleProfileFixture({

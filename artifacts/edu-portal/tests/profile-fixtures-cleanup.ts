@@ -1,26 +1,46 @@
 // From the workspace root: pnpm run cleanup:profile-fixtures [--delete]
-// Dry run by default; older unmarked accounts are never eligible for automated deletion.
+// Dry run by default; unmarked accounts require an explicit independently owned recovery scope.
+// After reviewing the interrupted run's private ownership and exact account IDs:
+// pnpm run cleanup:profile-fixtures --recover-run RUN_UUID --id user_ID [--id user_ID ...]
+// Add --delete only after the dry run; never substitute an email match for run ownership.
 import { createClerkClient } from "@clerk/backend";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 import {
-  possibleUnmarkedProfileFixture, profileFixtureMember, staleProfileFixture,
+  possibleUnmarkedProfileFixture, profileFixtureMember, staleProfileFixture, recoverableProfileFixture,
 } from "./profile-fixtures";
+import { profileCleanupArguments } from "./profile-fixtures-recovery";
 
 async function main() {
-  const args = process.argv.slice(2);
-  if (args.length > 1 || (args.length === 1 && args[0] !== "--delete")) {
-    throw new Error("Usage: pnpm run cleanup:profile-fixtures [--delete]");
-  }
   requireAuditDevelopment();
+  const { deleteRows, recovery } = profileCleanupArguments(process.argv.slice(2));
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+  const eligible = (user: Parameters<typeof staleProfileFixture>[0]) =>
+    recovery ? recoverableProfileFixture(user, recovery.run) : staleProfileFixture(user);
   const candidates: Array<{ id: string; email: string; role: "a" | "b"; tag: string }> = [];
   const legacy: Array<{ id: string; email: string }> = [];
-  for (let offset = 0; ; offset += 100) {
+  if (recovery) {
+    // Review every requested identity before any database write. An explicit
+    // not-found is safe on retry; network/auth failures are not absence.
+    for (const id of recovery.ids) {
+      requireAuditDevelopment();
+      let user;
+      try { user = await client.users.getUser(id); }
+      catch (error) {
+        if ((error as { status?: number }).status === 404) continue;
+        throw error;
+      }
+      const fixture = eligible(user);
+      if (user.id !== id || !fixture) {
+        throw new Error(`Recovery ownership or aged fixture shape refused for ${id}`);
+      }
+      candidates.push({ id, ...fixture });
+    }
+  } else for (let offset = 0; ; offset += 100) {
     const page = await client.users.getUserList({ limit: 100, offset });
     for (const user of page.data) {
       const fixture = staleProfileFixture(user);
       if (fixture) candidates.push({ id: user.id, ...fixture });
-      else if (!args.length) {
+      else if (!deleteRows) {
         const possible = possibleUnmarkedProfileFixture(user);
         if (possible) legacy.push({ id: user.id, email: possible.email });
       }
@@ -43,8 +63,8 @@ async function main() {
     for (const candidate of candidates) {
       requireAuditDevelopment();
       const user = await client.users.getUser(candidate.id);
-      const fixture = staleProfileFixture(user);
-      if (!fixture || fixture.email !== candidate.email ||
+      const fixture = eligible(user);
+      if (user.id !== candidate.id || !fixture || fixture.email !== candidate.email ||
           fixture.tag !== candidate.tag || fixture.role !== candidate.role) {
         throw new Error(`Profile fixture identity changed; refusing deletion for ${candidate.id}`);
       }
@@ -89,8 +109,8 @@ async function main() {
         if (await relatedData(tx)) {
           throw new Error(`Related member data exists; refusing deletion for ${candidate.id}`);
         }
-        console.log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${candidate.email}): ${members.length} member row(s)`);
-        if (args.length && members.length) {
+        console.log(`${deleteRows ? "Removing" : "Would remove"} ${candidate.id} (${candidate.email}): ${members.length} member row(s)`);
+        if (deleteRows && members.length) {
           const deleted = await tx.delete(usersTable).where(and(
             eq(usersTable.clerkId, candidate.id), eq(usersTable.email, candidate.email),
             or(...members.map(member => and(
@@ -105,7 +125,7 @@ async function main() {
         return members;
       });
       // Keep the marked Clerk identity on DB failure so a rerun can finish.
-      if (args.length) {
+      if (deleteRows) {
         const restore = async (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => {
           // Never overwrite a newly recreated member. JSON preserves precision.
           for (const member of removedMembers) {
@@ -137,8 +157,8 @@ async function main() {
               return refusal;
             }
             const currentUser = await client.users.getUser(candidate.id);
-            const currentFixture = staleProfileFixture(currentUser);
-            const identityChanged = !currentFixture || currentFixture.email !== candidate.email ||
+            const currentFixture = eligible(currentUser);
+            const identityChanged = currentUser.id !== candidate.id || !currentFixture || currentFixture.email !== candidate.email ||
               currentFixture.tag !== candidate.tag || currentFixture.role !== candidate.role;
             if (identityChanged) {
               await restore(tx);
@@ -168,7 +188,7 @@ async function main() {
         if (refusal) throw new Error(refusal);
       }
     }
-    if (!args.length) {
+    if (!deleteRows) {
       for (const possible of legacy) {
         const members = await db.select({ id: usersTable.id, email: usersTable.email })
           .from(usersTable).where(eq(usersTable.clerkId, possible.id));
@@ -179,7 +199,7 @@ async function main() {
         }));
       }
     }
-    if (!args.length) console.log("Dry run; nothing deleted. Pass --delete to remove marked, aged fixtures.");
+    if (!deleteRows) console.log("Dry run; nothing deleted. Pass --delete to remove eligible, aged fixtures.");
   } finally {
     await pool.end();
   }

@@ -58,6 +58,7 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
 
   async function execute(ids: string[], deleteRows: boolean, options: {
     afterList?: () => Promise<void>; failDelete?: boolean;
+    recoveryRun?: string; afterRecoveryDiscovery?: () => Promise<void>;
   } = {}) {
     requireAuditDevelopment();
     if (ids.some(id => !owned.has(id))) throw new Error("Non-owned cleanup scope");
@@ -75,11 +76,13 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
       finish();
     });
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let recoveryDiscovered = false;
     vi.resetModules();
     vi.doMock("@clerk/backend", () => ({
       createClerkClient: () => ({
         users: {
           getUserList: async ({ limit, offset }: { limit: number; offset: number }) => {
+            if (options.recoveryRun) throw new Error("Recovery must never enumerate identities");
             // Real development Clerk calls, narrowed to THIS run. Never enumerate other users.
             const page = await clerkCall(() => clerk.users.getUserList({ userId: ids, limit, offset }));
             if (page.data.some(user => !owned.has(user.id))) throw new Error("Clerk scope escaped");
@@ -87,8 +90,13 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
             return page;
           },
           getUser: async (id: string) => {
-            if (!owned.has(id)) throw new Error("Non-owned Clerk lookup");
-            return clerkCall(() => clerk.users.getUser(id));
+            if (!owned.has(id) || !ids.includes(id)) throw new Error("Non-owned Clerk lookup");
+            const user = await clerkCall(() => clerk.users.getUser(id));
+            if (options.recoveryRun && !recoveryDiscovered) {
+              recoveryDiscovered = true;
+              await options.afterRecoveryDiscovery?.();
+            }
+            return user;
           },
           deleteUser: async (id: string) => {
             requireAuditDevelopment();
@@ -109,7 +117,8 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
       // The CLI owns its pool in production use, not this test's borrowed connection.
       pool: { end: async () => { setTimeout(finish, 0); } },
     }));
-    process.argv = ["node", "profile-fixtures-cleanup.ts", ...(deleteRows ? ["--delete"] : [])];
+    process.argv = ["node", "profile-fixtures-cleanup.ts", ...(deleteRows ? ["--delete"] : []),
+      ...(options.recoveryRun ? ["--recover-run", options.recoveryRun, ...ids.flatMap(id => ["--id", id])] : [])];
     try {
       await import("./profile-fixtures-cleanup");
       await Promise.race([
@@ -133,11 +142,11 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
     }
   }
 
-  async function refused(ids: string[], message: RegExp) {
+  async function refused(ids: string[], message: RegExp, recoveryRun?: string) {
     const outcomes = [];
     for (const deleteRows of [false, true]) {
       const before = await snapshot();
-      const result = await execute(ids, deleteRows);
+      const result = await execute(ids, deleteRows, { recoveryRun });
       outcomes.push({ deleteRows, before, result, after: await snapshot() });
     }
     for (const outcome of outcomes) {
@@ -198,6 +207,46 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
     }
     await connection.query("UPDATE pg_temp.users SET bio = 'Edited non-fixture profile' WHERE clerk_id = $1", [fixture("changed-member").id]);
     await refused([fixture("changed-member").id], /Non-fixture member row/);
+    await refused([fixture("changed-member").id], /Non-fixture member row/, run);
+    await refused([fixture("young").id], /Recovery ownership or aged fixture shape refused/, run);
+
+    // Matching email alone, another run, a conflicting ordinary marker, or
+    // another private owner must all refuse both recovery modes without writes.
+    const unmarked = fixture("unmarked");
+    for (const privateMetadata of [
+      { profileCleanupIntegrationRun: null },
+      { profileCleanupIntegrationRun: randomUUID() },
+      { profileCleanupIntegrationRun: run, profileLiveFixture: "different-owner" },
+      { profileCleanupIntegrationRun: run, otherOwner: "other-suite" },
+    ]) {
+      try {
+        await clerkCall(() => clerk.users.updateUser(unmarked.id, { privateMetadata }));
+        await refused([unmarked.id], /Recovery ownership or aged fixture shape refused/, run);
+      } finally {
+        await clerkCall(() => clerk.users.updateUser(unmarked.id, {
+          privateMetadata: { profileCleanupIntegrationRun: run },
+        }));
+      }
+    }
+    for (const deleteRows of [false, true]) {
+      try {
+        const result = await execute([unmarked.id], deleteRows, {
+          recoveryRun: run,
+          afterRecoveryDiscovery: async () => {
+            await clerkCall(() => clerk.users.updateUser(unmarked.id, {
+              privateMetadata: { profileCleanupIntegrationRun: randomUUID() },
+            }));
+          },
+        });
+        expect(result.errors.map(String).join("\n")).toMatch(/identity changed/);
+        expect(result.deleted).toEqual([]);
+        expect((await connection.query("SELECT id FROM pg_temp.users WHERE clerk_id = $1", [unmarked.id])).rowCount).toBe(1);
+      } finally {
+        await clerkCall(() => clerk.users.updateUser(unmarked.id, {
+          privateMetadata: { profileCleanupIntegrationRun: run },
+        }));
+      }
+    }
 
     const linked = fixture("linked");
     const bystander = fixture("bystander");
@@ -232,6 +281,7 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
       await connection.query(content.sql, content.values);
       try {
         await refused([linked.id], /Related member data exists/);
+        await refused([linked.id], /Related member data exists/, run);
       } catch (error) {
         throw new Error(`Linked-content guard failed for ${content.table}: ${content.sql}`, { cause: error });
       } finally {
@@ -280,6 +330,22 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
     expect(await snapshot()).toEqual(afterDelete);
     expect(await remoteIds(protectedIds)).toEqual([...protectedIds].sort());
     expect((await connection.query("SELECT clerk_id FROM pg_temp.users WHERE clerk_id = ANY($1::text[])", [protectedIds])).rowCount).toBe(3);
+
+    // Simulate teardown stopping before it deletes the intentionally unmarked
+    // negative fixture. Its independent run marker survives the interruption.
+    const beforeRecovery = await snapshot();
+    expect(await execute([unmarked.id], false, { recoveryRun: run })).toEqual({ errors: [], deleted: [] });
+    expect(await snapshot()).toEqual(beforeRecovery);
+    const interrupted = await execute([unmarked.id], true, { recoveryRun: run, failDelete: true });
+    expect(interrupted.errors.map(String).join("\n")).toMatch(/Injected development Clerk deletion outage/);
+    expect(interrupted.deleted).toEqual([unmarked.id]);
+    expect((await connection.query("SELECT id FROM pg_temp.users WHERE clerk_id = $1", [unmarked.id])).rowCount).toBe(0);
+    expect(await remoteIds([unmarked.id])).toEqual([unmarked.id]);
+    expect(await execute([unmarked.id], true, { recoveryRun: run })).toEqual({ errors: [], deleted: [unmarked.id] });
+    const recovered = await snapshot();
+    expect(await execute([unmarked.id], true, { recoveryRun: run })).toEqual({ errors: [], deleted: [] });
+    expect(await snapshot()).toEqual(recovered);
+    expect(await remoteIds([bystander.id])).toEqual([bystander.id]);
   } finally {
     // Each fixture is exact-ID scoped and has an independent run-ownership marker.
     // Attempt EVERY cleanup even if one remote deletion fails.
