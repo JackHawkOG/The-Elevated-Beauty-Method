@@ -2,7 +2,9 @@ import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import ts from "typescript";
+import { discoverLiveBrowserTests } from "./discover-live-browser-tests.mjs";
 
+const workspaceRoot = fileURLToPath(new URL("../../", import.meta.url));
 const apiSource = fileURLToPath(new URL("../../artifacts/api-server/src/", import.meta.url));
 const browserTests = fileURLToPath(new URL("../../artifacts/edu-portal/tests/", import.meta.url));
 const suiteDirectories = ["routes", "lib"];
@@ -556,8 +558,7 @@ async function main() {
       for (const issue of issues) failures.push(`${path.relative(process.cwd(), filename)}: ${issue}`);
     }
   }
-  for (const name of (await readdir(browserTests)).filter(name => /-live\.spec\.tsx?$/.test(name))) {
-    const filename = path.join(browserTests, name);
+  for (const filename of await discoverLiveBrowserTests(workspaceRoot)) {
     const issues = checkLiveSuite(await readFile(filename, "utf8"), filename);
     for (const issue of issues) failures.push(`${path.relative(process.cwd(), filename)}: ${issue}`);
   }

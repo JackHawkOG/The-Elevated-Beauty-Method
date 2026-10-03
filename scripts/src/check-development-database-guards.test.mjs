@@ -1,6 +1,173 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { copyFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { checkLiveSuite, checkMaintenanceCommand, checkSuite } from "./check-development-database-guards.mjs";
+import { discoverLiveBrowserTests } from "./discover-live-browser-tests.mjs";
+
+async function safetyFixture(t, files) {
+  const root = await mkdtemp(path.join(tmpdir(), "browser-guard-discovery-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const folder of ["scripts/src", "artifacts/api-server/src/routes", "artifacts/api-server/src/lib",
+    "artifacts/edu-portal/tests"]) await mkdir(path.join(root, folder), { recursive: true });
+  for (const name of ["check-development-database-guards.mjs", "discover-live-browser-tests.mjs"]) {
+    await copyFile(new URL(name, import.meta.url), path.join(root, "scripts/src", name));
+  }
+  await symlink(fileURLToPath(new URL("../../node_modules", import.meta.url)), path.join(root, "node_modules"), "dir");
+  for (const [name, source] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(root, name)), { recursive: true });
+    await writeFile(path.join(root, name), source);
+  }
+  return {
+    root,
+    run: () => spawnSync(process.execPath, ["scripts/src/check-development-database-guards.mjs"],
+      { cwd: root, encoding: "utf8" }),
+  };
+}
+
+const browserFixtureDir = "artifacts/edu-portal/tests/";
+const liveConfigFixture = `import { defineConfig } from "@playwright/test";
+  export default defineConfig({ testDir: "${browserFixtureDir}", testMatch: ["**/*.spec.ts", "**/*.spec.tsx"] });`;
+
+test("safety command rejects differently named live writes, including nested TSX specs", async t => {
+  for (const name of ["profile-edit.spec.ts", "nested/checkout.spec.tsx"]) {
+    const f = await safetyFixture(t, {
+      "playwright.account-live.config.ts": liveConfigFixture,
+      [browserFixtureDir + name]: `import { test } from "@playwright/test";
+        test("write", async ({ request }) => { await request.post("/api/users"); });`,
+    });
+    const result = f.run();
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(result.stderr.includes(name));
+    assert.match(result.stderr, /development database guard/);
+  }
+});
+
+test("discovery follows inherited selections, regexes and projects without executing configs", async t => {
+  const f = await safetyFixture(t, {
+    "playwright.base.config.ts": `export default {
+      testDir: "${browserFixtureDir}", testMatch: /profile-edit\\.spec\\.tsx?$/,
+      testIgnore: "**/ignored/**"
+    };`,
+    "playwright.account-live.config.ts": `import base from "./playwright.base.config";
+      throw new Error("Do not execute configuration");
+      export default { ...base, projects: [{}, { testMatch: "nested/payment.spec.tsx" }] };`,
+    [browserFixtureDir + "profile-edit.spec.ts"]: "",
+    [browserFixtureDir + "ignored/profile-edit.spec.ts"]: "",
+    [browserFixtureDir + "nested/payment.spec.tsx"]: "",
+    [browserFixtureDir + "mock-ui.spec.ts"]: "",
+    [browserFixtureDir + "orphan-live.spec.ts"]: "",
+  });
+  assert.deepEqual((await discoverLiveBrowserTests(f.root)).map(filename => path.relative(f.root, filename)), [
+    browserFixtureDir + "nested/payment.spec.tsx",
+    browserFixtureDir + "orphan-live.spec.ts",
+    browserFixtureDir + "profile-edit.spec.ts",
+  ]);
+});
+
+test("differently named mock-only and guarded live specs still pass the command", async t => {
+  const f = await safetyFixture(t, {
+    "playwright.account-live.config.ts": liveConfigFixture,
+    [browserFixtureDir + "mock-ui.spec.ts"]: `import { test } from "@playwright/test";
+      test("mock", async ({ page }) => {
+        await page.route("**/api/**", route => route.fulfill({ json: {} }));
+        await page.getByRole("button").click();
+      });`,
+    [browserFixtureDir + "profile-edit.spec.ts"]: `import { test } from "@playwright/test";
+      import { requireAuditDevelopment } from "./radiant-audit-fixtures";
+      test("write", async ({ request }) => {
+        requireAuditDevelopment(); await request.post("/api/users");
+      });`,
+  });
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /safety check passed/);
+});
+
+test("a partial mock cannot exempt an unguarded differently named UI write", async t => {
+  const f = await safetyFixture(t, {
+    "playwright.account-live.config.ts": liveConfigFixture,
+    [browserFixtureDir + "profile-edit.spec.ts"]: `import { test } from "@playwright/test";
+      test("write", async ({ page }) => {
+        await page.route("**/api/users", route => route.fulfill({ json: {} }));
+        await page.getByRole("button").click();
+      });`,
+  });
+  const result = f.run();
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /profile-edit\.spec\.ts.*guard/);
+});
+
+test("unresolved live selections fail the command instead of silently skipping specs", async t => {
+  const f = await safetyFixture(t, {
+    "playwright.account-live.config.ts": `export default { testMatch: process.env.LIVE_SPECS };`,
+  });
+  const result = f.run();
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Cannot safely discover live browser tests/);
+});
+
+test("live configurations can select writes outside the legacy browser directory", async t => {
+  const f = await safetyFixture(t, {
+    "playwright.account-live.config.ts": `export default { testDir: "other-browser-tests" };`,
+    "other-browser-tests/account-edit.test.ts": `import { test } from "@playwright/test";
+      test("write", async ({ request }) => { await request.patch("/api/users/me"); });`,
+  });
+  const result = f.run();
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /other-browser-tests\/account-edit\.test\.ts.*guard/);
+});
+
+test("malformed live configurations fail discovery", async t => {
+  const f = await safetyFixture(t, {
+    "playwright.account-live.config.ts": `export default { testMatch: ["profile-edit.spec.ts"`,
+  });
+  await assert.rejects(discoverLiveBrowserTests(f.root), /Cannot safely parse live configuration/);
+});
+
+test("command uses Playwright's case-insensitive globs and includes dot-directories", async t => {
+  const names = ["Profile.SPEC.ts", ".fixtures/profile.spec.ts"];
+  const f = await safetyFixture(t, {
+    "playwright.account-live.config.ts": liveConfigFixture,
+    ...Object.fromEntries(names.map(name => [browserFixtureDir + name, `import { test } from "@playwright/test";
+      test("write", async ({ request }) => { await request.post("/api/users"); });`])),
+  });
+  const result = f.run();
+  assert.equal(result.status, 1, result.stderr);
+  for (const name of names) assert.ok(result.stderr.includes(name), result.stderr);
+});
+
+test("command covers all Playwright default module TSX and JSX extensions", async t => {
+  const names = ["profile.spec.mtsx", "profile.spec.ctsx", "profile.spec.mjsx", "profile.spec.cjsx"];
+  const f = await safetyFixture(t, {
+    "playwright.account-live.config.ts": `export default { testDir: "${browserFixtureDir}" };`,
+    ...Object.fromEntries(names.map(name => [browserFixtureDir + name, `import { test } from "@playwright/test";
+      test("write", async ({ request }) => { await request.post("/api/users"); });`])),
+  });
+  const result = f.run();
+  assert.equal(result.status, 1, result.stderr);
+  for (const name of names) assert.ok(result.stderr.includes(name), result.stderr);
+});
+
+test("command resolves inherited test directories against the entry configuration", async t => {
+  const f = await safetyFixture(t, {
+    "configs/browser-base.ts": `export default { testDir: "browser-tests", testMatch: "*.spec.ts" };`,
+    "playwright.account-live.config.ts": `import base from "./configs/browser-base";
+      export default { ...base };`,
+    // Both directories exist: inspecting the wrong one would silently pass.
+    "configs/browser-tests/profile-edit.spec.ts": `import { test } from "@playwright/test";
+      test("read", async ({ page }) => { await page.goto("/profile"); });`,
+    "browser-tests/profile-edit.spec.ts": `import { test } from "@playwright/test";
+      test("write", async ({ request }) => { await request.post("/api/users"); });`,
+  });
+  const result = f.run();
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /browser-tests\/profile-edit\.spec\.ts.*guard/);
+  assert.ok(!result.stderr.includes("configs/browser-tests"));
+});
 
 const imports = `import { db, pool } from "@workspace/db";
 import { requireDevelopmentDatabase } from "./test-development-database";`;

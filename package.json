@@ -56,6 +56,7 @@
   },
   "devDependencies": {
     "jsdom": "^26.1.0",
+    "minimatch": "^10.2.5",
     "playwright": "^1.63.0",
     "prettier": "^3.9.6",
     "typescript": "~5.9.3",
