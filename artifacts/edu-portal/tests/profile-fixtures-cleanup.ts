@@ -16,7 +16,7 @@ async function main() {
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
   const eligible = (user: Parameters<typeof staleProfileFixture>[0]) =>
     recovery ? recoverableProfileFixture(user, recovery.run) : staleProfileFixture(user);
-  const candidates: Array<{ id: string; email: string; role: "a" | "b"; tag: string }> = [];
+  const candidates: Array<{ id: string } & NonNullable<ReturnType<typeof staleProfileFixture>>> = [];
   const legacy: Array<{ id: string; email: string }> = [];
   if (recovery) {
     // Review every requested identity before any database write. An explicit

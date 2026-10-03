@@ -27,6 +27,69 @@ const env = {
 };
 
 describe("profile fixture cleanup boundaries", () => {
+  const scenarios = [
+    { role: "a", firstName: "Member A", states: [
+      { displayName: "Member A", bio: null },
+      { displayName: `Saved A ${tag}`, bio: `Private A ${tag}` },
+    ] },
+    { role: "b", firstName: `Member B ${tag}`, states: [
+      { displayName: `Member B ${tag}`, bio: null },
+    ] },
+    { role: "refresh", firstName: `Profile ${tag}`, states: [
+      { displayName: `Profile ${tag}`, bio: null },
+      { displayName: `Saved name ${tag}`, bio: `Saved bio ${tag}` },
+      { displayName: `New saved name ${tag}`, bio: `New saved bio ${tag}` },
+    ] },
+    { role: "order", firstName: `Member ${tag}`, states: [
+      { displayName: `Member ${tag}`, bio: null },
+      { displayName: `Earlier ${tag}`, bio: `Earlier bio ${tag}` },
+      { displayName: `Latest ${tag}`, bio: `Latest bio ${tag}` },
+    ] },
+  ] as const;
+
+  it.each(scenarios)("recognizes only owned, aged $role initial and saved states", scenario => {
+    const email = `profile-${scenario.role}-${tag}+clerk_test@example.com`;
+    const owned = { ...identity, firstName: scenario.firstName, emailAddresses: [{ emailAddress: email }] };
+    const fixture = staleProfileFixture(owned, now)!;
+    expect(fixture).toEqual({ role: scenario.role, tag, email });
+    for (const state of scenario.states) {
+      const saved = { ...member, email, ...state };
+      expect(profileFixtureMember(saved, fixture, now)).toBe(true);
+      for (const change of [
+        { email: "real@example.com" }, { membershipTier: "Elevated" },
+        { displayName: "Real member" }, { bio: "Real bio" },
+        { avatarUrl: "https://example.com/avatar.png" }, { skinType: "Dry" },
+        { undertone: "Warm" }, { featureNeeds: ["Eyes"] },
+        { lifeStage: "Adult" }, { visibilityGoal: "Real goal" },
+        { createdAt: new Date(now) },
+      ]) expect(profileFixtureMember({ ...saved, ...change }, fixture, now)).toBe(false);
+    }
+    for (const change of [
+      { privateMetadata: {} }, { privateMetadata: { profileLiveFixture: "other-suite" } },
+      { publicMetadata: { role: "member" } }, { createdAt: now },
+      { firstName: "Real member" }, { lastName: "Real surname" },
+      { emailAddresses: [...owned.emailAddresses, { emailAddress: "real@example.com" }] },
+      { emailAddresses: [{ emailAddress: email.replace(tag, "abcdef12-345") }] },
+    ]) expect(staleProfileFixture({ ...owned, ...change }, now)).toBeUndefined();
+    // Unmarked email/name matches may be reviewed, but cannot be deleted.
+    expect(possibleUnmarkedProfileFixture({ ...owned, privateMetadata: {} }, now)).toEqual(fixture);
+  });
+
+  it.each(scenarios)("refuses mixed or cross-scenario saved states for $role", scenario => {
+    const email = `profile-${scenario.role}-${tag}+clerk_test@example.com`;
+    const fixture = { role: scenario.role, tag, email };
+    for (const other of scenarios) for (const name of other.states) for (const bio of other.states) {
+      const expected = scenario.states.some(state =>
+        state.displayName === name.displayName && state.bio === bio.bio);
+      expect(profileFixtureMember({
+        ...member, email, displayName: name.displayName, bio: bio.bio,
+      }, fixture, now)).toBe(expected);
+    }
+    expect(profileFixtureMember({
+      ...member, email, displayName: `Unsaved name ${tag}`, bio: `Unsaved bio ${tag}`,
+    }, fixture, now)).toBe(false);
+  });
+
   it("requires explicit independent run ownership for aged recovery identities", () => {
     const run = "aabbccdd-1234-4321-8123-abcdef123456";
     const owned = { ...identity, privateMetadata: { profileCleanupIntegrationRun: run } };

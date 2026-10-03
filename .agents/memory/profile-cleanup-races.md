@@ -26,3 +26,9 @@ Verify remote deletion through the exact Clerk identity endpoint with bounded pr
 **Why:** A development list response briefly retained a deleted identity with its email addresses already removed, causing an otherwise successful cleanup regression to fail.
 
 **How to apply:** Accept only an explicit not-found response as deletion confirmation; propagate authorization, rate-limit, and other errors rather than treating them as absence.
+
+Do not retroactively authorize abandoned profile checks from their email or display name when adding new recoverable fixture shapes.
+
+**Why:** Older response-order checks were created without private ownership markers, and older UUID prefixes contain hyphens. Their resemblance to newer owned fixtures does not prove they are disposable.
+
+**How to apply:** Fix ownership and tag generation for future runs, keep recognized persisted states narrowly scoped to each scenario, and leave historical unowned accounts for explicit ownership review.

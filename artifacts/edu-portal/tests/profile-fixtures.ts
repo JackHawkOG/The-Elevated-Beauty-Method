@@ -2,24 +2,47 @@ import type { User } from "@clerk/backend";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 const marker = "profile-live-v1";
-const emailPattern = /^profile-([ab])-([0-9a-f]{12})\+clerk_test@example\.com$/;
+const emailPattern = /^profile-(a|b|refresh|order)-([0-9a-f]{12})\+clerk_test@example\.com$/;
 const staleAfterMs = 24 * 60 * 60 * 1000;
 
+export type ProfileFixtureRole = "a" | "b" | "refresh" | "order";
 export const profileFixturePrivateMetadata = { profileLiveFixture: marker };
 export const requireProfileDevelopment = requireAuditDevelopment;
+
+// Keep each scenario's identity and persisted states separate. An email match
+// alone is never ownership, and arbitrary edits are never fixture data.
+function profileFixtureStates(role: ProfileFixtureRole, tag: string) {
+  switch (role) {
+    case "a": return [
+      { displayName: "Member A", bio: null },
+      { displayName: `Saved A ${tag}`, bio: `Private A ${tag}` },
+    ];
+    case "b": return [{ displayName: `Member B ${tag}`, bio: null }];
+    case "refresh": return [
+      { displayName: `Profile ${tag}`, bio: null },
+      { displayName: `Saved name ${tag}`, bio: `Saved bio ${tag}` },
+      { displayName: `New saved name ${tag}`, bio: `New saved bio ${tag}` },
+    ];
+    case "order": return [
+      { displayName: `Member ${tag}`, bio: null },
+      { displayName: `Earlier ${tag}`, bio: `Earlier bio ${tag}` },
+      { displayName: `Latest ${tag}`, bio: `Latest bio ${tag}` },
+    ];
+  }
+}
 
 function profileShape(
   user: Pick<User, "emailAddresses" | "privateMetadata" | "publicMetadata" | "createdAt" | "firstName" | "lastName">,
   now: number,
-): { role: "a" | "b"; tag: string; email: string } | undefined {
+): { role: ProfileFixtureRole; tag: string; email: string } | undefined {
   if (user.emailAddresses.length !== 1) return;
   const email = user.emailAddresses[0].emailAddress;
   const match = emailPattern.exec(email);
   if (!match || Object.keys(user.publicMetadata).length !== 0 ||
-      user.firstName !== (match[1] === "a" ? "Member A" : `Member B ${match[2]}`) ||
+      user.firstName !== profileFixtureStates(match[1] as ProfileFixtureRole, match[2])[0].displayName ||
       user.lastName !== null || !Number.isFinite(user.createdAt) ||
       user.createdAt > now - staleAfterMs) return;
-  return { role: match[1] as "a" | "b", tag: match[2], email };
+  return { role: match[1] as ProfileFixtureRole, tag: match[2], email };
 }
 
 export function staleProfileFixture(
@@ -56,16 +79,14 @@ export function profileFixtureMember(
     featureNeeds: string[] | null; lifeStage: string | null; visibilityGoal: string | null;
     createdAt: Date;
   },
-  fixture: { role: "a" | "b"; tag: string; email: string },
+  fixture: { role: ProfileFixtureRole; tag: string; email: string },
   now = Date.now(),
 ): boolean {
   return member.email === fixture.email && member.membershipTier === "Free" &&
     Number.isFinite(member.createdAt.getTime()) &&
     member.createdAt.getTime() <= now - staleAfterMs &&
-    (fixture.role === "a"
-      ? ["Member A", `Saved A ${fixture.tag}`].includes(member.displayName) &&
-        [null, `Private A ${fixture.tag}`].includes(member.bio)
-      : member.displayName === `Member B ${fixture.tag}` && member.bio === null) &&
+    profileFixtureStates(fixture.role, fixture.tag).some(state =>
+      member.displayName === state.displayName && member.bio === state.bio) &&
     member.avatarUrl === null && member.skinType === null && member.undertone === null &&
     member.featureNeeds === null && member.lifeStage === null && member.visibilityGoal === null;
 }

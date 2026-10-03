@@ -10,8 +10,8 @@ test("two signed-in tabs refresh saved name and bio without replacing an open dr
   requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-  const marker = randomUUID().slice(0, 12);
-  const email = `profile-a-${marker}+clerk_test@example.com`;
+  const marker = randomUUID().replaceAll("-", "").slice(0, 12);
+  const email = `profile-refresh-${marker}+clerk_test@example.com`;
   let userId: string | undefined;
   const second = await context.newPage();
   try {
@@ -91,7 +91,7 @@ test("a completed profile save cannot update the next member when its response a
   requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-  const marker = randomUUID().slice(0, 12);
+  const marker = randomUUID().replaceAll("-", "").slice(0, 12);
   const a = { email: `profile-a-${marker}+clerk_test@example.com`, name: `Saved A ${marker}`, bio: `Private A ${marker}` };
   const b = { email: `profile-b-${marker}+clerk_test@example.com`, name: `Member B ${marker}` };
   const created: string[] = [];
@@ -207,7 +207,7 @@ test("an earlier profile response cannot replace a newer save for the same membe
   requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
-  const marker = randomUUID().slice(0, 12);
+  const marker = randomUUID().replaceAll("-", "").slice(0, 12);
   const email = `profile-order-${marker}+clerk_test@example.com`;
   const first = { name: `Earlier ${marker}`, bio: `Earlier bio ${marker}` };
   const latest = { name: `Latest ${marker}`, bio: `Latest bio ${marker}` };
@@ -216,6 +216,7 @@ test("an earlier profile response cannot replace a newer save for the same membe
     const user = await client.users.createUser({
       emailAddress: [email],
       firstName: `Member ${marker}`,
+      privateMetadata: profileFixturePrivateMetadata,
       skipPasswordRequirement: true,
     });
     userId = user.id;
