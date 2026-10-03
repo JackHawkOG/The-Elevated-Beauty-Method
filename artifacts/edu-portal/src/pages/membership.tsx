@@ -49,7 +49,7 @@ export default function MembershipPage() {
   const canBuy = offer?.phase !== "upcoming" && Boolean(offer);
 
   useEffect(() => {
-    if (!membershipError) trackConfirmedMembershipReturn(mine?.membership);
+    if (!membershipError) void trackConfirmedMembershipReturn(mine?.membership);
   }, [mine?.membership?.kind, mine?.membership?.status, mine?.membership?.checkoutSessionId, membershipError]);
 
   useEffect(() => {

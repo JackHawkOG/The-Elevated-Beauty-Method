@@ -58,6 +58,8 @@ import type {
   MembershipCheckoutCleanupAlerts,
   MembershipCheckoutCleanupRetryResult,
   MembershipCheckoutInput,
+  MembershipConversionInput,
+  MembershipConversionReceipt,
   MembershipOffer,
   MembershipReconciliationAlerts,
   MembershipRedirect,
@@ -1002,6 +1004,71 @@ export function useGetMembershipOffer<TData = Awaited<ReturnType<typeof getMembe
 
 
 
+
+export const getClaimMembershipConversionUrl = () => {
+
+
+
+
+  return `/api/membership/conversion-receipt`
+}
+
+export const claimMembershipConversion = async (membershipConversionInput: MembershipConversionInput, options?: Parameters<typeof customFetch>[1]): Promise<MembershipConversionReceipt> => {
+
+  return customFetch<MembershipConversionReceipt>(getClaimMembershipConversionUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(membershipConversionInput)
+  }
+);}
+
+
+
+
+
+export const getClaimMembershipConversionMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimMembershipConversion>>, TError,{data: BodyType<MembershipConversionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof claimMembershipConversion>>, TError,{data: BodyType<MembershipConversionInput>}, TContext> => {
+
+const mutationKey = ['claimMembershipConversion'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof claimMembershipConversion>>, {data: BodyType<MembershipConversionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  claimMembershipConversion(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClaimMembershipConversionMutationResult = NonNullable<Awaited<ReturnType<typeof claimMembershipConversion>>>
+    export type ClaimMembershipConversionMutationBody = BodyType<MembershipConversionInput>
+    export type ClaimMembershipConversionMutationError = ErrorType<void>
+
+    export const useClaimMembershipConversion = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimMembershipConversion>>, TError,{data: BodyType<MembershipConversionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof claimMembershipConversion>>,
+        TError,
+        {data: BodyType<MembershipConversionInput>},
+        TContext
+      > => {
+      return useMutation(getClaimMembershipConversionMutationOptions(options));
+    }
 
 export const getGetMyMembershipUrl = () => {
 

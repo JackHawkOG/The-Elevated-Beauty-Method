@@ -20,6 +20,7 @@ export async function ensureMembershipSchema(): Promise<void> {
     )
   `);
   await db.execute(sql`ALTER TABLE membership_checkouts ADD COLUMN IF NOT EXISTS invoice_history_pending boolean NOT NULL DEFAULT false`);
+  await db.execute(sql`ALTER TABLE membership_checkouts ADD COLUMN IF NOT EXISTS conversion_claimed boolean NOT NULL DEFAULT false`);
   await db.execute(sql`ALTER TABLE membership_checkouts ADD COLUMN IF NOT EXISTS invoice_history_retry_count integer NOT NULL DEFAULT 0`);
   await db.execute(sql`ALTER TABLE membership_checkouts ADD COLUMN IF NOT EXISTS invoice_history_retry_at timestamptz`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS membership_checkouts_clerk_idx ON membership_checkouts(clerk_id)`);

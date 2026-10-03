@@ -344,6 +344,19 @@ export const GetMembershipOfferResponse = zod.object({
 })
 
 
+export const claimMembershipConversionBodyCheckoutSessionIdMax = 255;
+
+
+
+export const ClaimMembershipConversionBody = zod.object({
+  "checkoutSessionId": zod.string().min(1).max(claimMembershipConversionBodyCheckoutSessionIdMax).describe('Private checkout correlation. Never forward to analytics.')
+})
+
+export const ClaimMembershipConversionResponse = zod.object({
+  "kind": zod.union([zod.literal('founding'),zod.literal('standard'),zod.literal(null)]).nullable().describe('Non-null only for the first authenticated claim of the current confirmed checkout.')
+})
+
+
 /**
  * @summary Current membership
  */

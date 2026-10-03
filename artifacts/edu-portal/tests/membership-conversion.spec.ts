@@ -246,12 +246,14 @@ for (const kind of ["founding", "standard"] as const) {
     const events: Event[] = [];
     let status: "pending" | "confirmed" = "pending";
     let membership: { kind: Kind; status: "pending" | "confirmed" } | null = null;
+    let claimed = false;
+    let claimRequests = 0;
     const checkoutUrl = `https://checkout.stripe.com/session/${kind}`;
 
-    await page.exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
+    await page.context().exposeBinding("__recordMembershipEvent", (_source, event: Event) => {
       events.push(event);
     });
-    await page.addInitScript(() => {
+    await page.context().addInitScript(() => {
       localStorage.setItem("audit-test-account", "membership-test-member");
       Object.defineProperty(window, "sessionStorage", { get() { throw new Error("Storage blocked"); } });
       (window as unknown as { umami: { track: (name: string, data?: Record<string, string>) => void } }).umami = {
@@ -267,6 +269,14 @@ for (const kind of ["founding", "standard"] as const) {
     await page.route("**/api/membership/me", route => route.fulfill({
       json: { membership: membership && { ...membership, status, checkoutSessionId: status === "confirmed" ? `cs_${kind}` : null } },
     }));
+    await page.context().route("**/api/membership/conversion-receipt", async route => {
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().postDataJSON()).toEqual({ checkoutSessionId: `cs_${kind}` });
+      claimRequests++;
+      const approved = !claimed && status === "confirmed";
+      claimed ||= approved;
+      await route.fulfill({ json: { kind: approved ? kind : null } });
+    });
     await page.route("**/api/membership/checkout", async route => {
       expect(route.request().method()).toBe("POST");
       expect(route.request().postDataJSON()).toEqual({ kind });
@@ -287,6 +297,7 @@ for (const kind of ["founding", "standard"] as const) {
 
     await page.goto(`/tests/membership-harness.html?checkout=success#checkout_session_id=cs_${kind}`);
     await expect(page.getByText("Your checkout is awaiting payment confirmation.")).toBeVisible();
+    expect(claimRequests).toBe(0);
     expect(events).toEqual([{ name: "membership_checkout_started", data: { kind } }]);
     await expect(page).toHaveURL(/checkout=success/);
 
@@ -301,6 +312,26 @@ for (const kind of ["founding", "standard"] as const) {
 
     await page.reload();
     await expect(page.getByText(/membership is active/)).toBeVisible();
+    expect(claimRequests).toBe(1);
+
+    // Reopening the original link, including in another tab with blocked storage,
+    // asks the same durable server receipt and cannot produce a second event.
+    const originalLink = `/tests/membership-harness.html?checkout=success#checkout_session_id=cs_${kind}`;
+    await page.goto(originalLink);
+    await expect.poll(() => claimRequests).toBe(2);
+    await expect(page).toHaveURL(/\/tests\/membership-harness\.html$/);
+    const secondTab = await page.context().newPage();
+    await secondTab.route("**/api/membership/offer", route => route.fulfill({
+      json: { phase: "open", foundingAvailable: true, foundingPrice: 24, standardPrice: 48 },
+    }));
+    await secondTab.route("**/api/membership/me", route => route.fulfill({
+      json: { membership: { kind, status: "confirmed", checkoutSessionId: `cs_${kind}` } },
+    }));
+    await secondTab.goto(originalLink);
+    await expect.poll(() => claimRequests).toBe(3);
+    await expect(secondTab).toHaveURL(/\/tests\/membership-harness\.html$/);
+    await expect(secondTab.getByText(/membership is active/)).toBeVisible();
+    await secondTab.close();
     expect(events).toEqual([
       { name: "membership_checkout_started", data: { kind } },
       { name: "membership_enrollment_confirmed", data: { kind } },

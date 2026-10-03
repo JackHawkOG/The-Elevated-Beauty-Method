@@ -7,7 +7,7 @@ import { GetConfirmedMembershipCountsResponse, GetMembershipCheckoutCleanupAlert
 import { requireAuth, jitProvisionUser } from "../middlewares/requireAuth";
 import { getStripeSync, getUncachableStripeClient } from "../lib/stripeClient";
 import { isSubscriptionEnded, reconcileSubscription, scheduledCancellationTimestamp, unresolvedReconciliationAlerts, outstandingReviewNotifications } from "../lib/membership-reconciliation";
-import { GetMyMembershipResponse } from "@workspace/api-zod";
+import { GetMyMembershipResponse, ClaimMembershipConversionBody, ClaimMembershipConversionResponse } from "@workspace/api-zod";
 import { queueCheckoutExpiration, recoverCheckoutExpiration, overdueCheckoutExpirations, retryQueuedCheckoutExpiration } from "../lib/membership-checkout-expirations";
 import { lockMembershipCapacity, hasFoundingCapacity, confirmCheckout, restorePaidCheckout, expireCheckout, checkoutExpiry } from "../lib/membership-reservations";
 import { reconcileUntrackedPaidSessions } from "../lib/membership-paid-recovery";
@@ -107,6 +107,30 @@ router.get("/membership/me", requireAuth, jitProvisionUser, async (req, res): Pr
   res.json(GetMyMembershipResponse.parse({
     membership: { kind: row.kind, status: row.status, cancellationDate: end === null ? null : new Date(end * 1000).toISOString(), checkoutSessionId: row.stripe_session_id ?? null },
   }));
+});
+
+// This is an at-most-once tracking attempt, not a delivery acknowledgement.
+// Keep the receipt on the existing checkout so cleanup removes it with the account.
+router.post("/membership/conversion-receipt", requireAuth, jitProvisionUser, async (req, res): Promise<void> => {
+  res.set("Cache-Control", "private, no-store");
+  const parsed = ClaimMembershipConversionBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid checkout correlation" });
+    return;
+  }
+  const result = await pool.query<{ kind: "founding" | "standard" }>(
+    `UPDATE membership_checkouts SET conversion_claimed = true
+     WHERE clerk_id = $1 AND stripe_session_id = $2 AND status = 'confirmed'
+       AND conversion_claimed = false
+       AND id = (
+         SELECT id FROM membership_checkouts WHERE clerk_id = $1
+           AND status IN ('pending', 'confirmed', 'forfeited')
+         ORDER BY CASE WHEN status IN ('pending', 'confirmed') THEN 0 ELSE 1 END, id DESC LIMIT 1
+       )
+     RETURNING kind`,
+    [req.userId, parsed.data.checkoutSessionId],
+  );
+  res.json(ClaimMembershipConversionResponse.parse({ kind: result.rows[0]?.kind ?? null }));
 });
 
 router.get("/membership/confirmed-counts", requireAuth, async (req, res): Promise<void> => {

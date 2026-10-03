@@ -1,3 +1,5 @@
+import { claimMembershipConversion } from "@workspace/api-client-react";
+
 type AnalyticsData = Record<string, string | number | boolean>;
 
 declare global {
@@ -75,9 +77,9 @@ export function trackMembershipEnrollmentConfirmed(kind: "founding" | "standard"
   trackEvent("membership_enrollment_confirmed", { kind });
 }
 
-export function trackConfirmedMembershipReturn(
+export async function trackConfirmedMembershipReturn(
   membership: { kind: "founding" | "standard"; status: "pending" | "confirmed" | "forfeited"; checkoutSessionId?: string | null } | null | undefined,
-): void {
+): Promise<void> {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   const returnType = url.searchParams.get("checkout");
@@ -98,5 +100,15 @@ export function trackConfirmedMembershipReturn(
     // Fail closed if the private correlation cannot be removed before tracking.
     return;
   }
-  if (matches) trackMembershipEnrollmentConfirmed(membership.kind);
+  if (!matches || !sessionId || !window.umami) return;
+  try {
+    const receipt = await claimMembershipConversion({ checkoutSessionId: sessionId });
+    // Server-derived fixed kinds only; never forward receipt or checkout identity.
+    if (receipt.kind === membership.kind && (receipt.kind === "founding" || receipt.kind === "standard")) {
+      trackMembershipEnrollmentConfirmed(receipt.kind);
+    }
+  } catch {
+    // A lost response may have consumed the receipt. Never assume permission.
+    // Analytics failure must not interfere with membership access.
+  }
 }

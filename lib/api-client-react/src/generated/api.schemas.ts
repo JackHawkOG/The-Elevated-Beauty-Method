@@ -5,6 +5,35 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+export interface MembershipConversionInput {
+  /**
+     * Private checkout correlation. Never forward to analytics.
+     * @minLength 1
+     * @maxLength 255
+     */
+  checkoutSessionId: string;
+}
+
+/**
+ * Non-null only for the first authenticated claim of the current confirmed checkout.
+ * @nullable
+ */
+export type MembershipConversionReceiptKind = typeof MembershipConversionReceiptKind[keyof typeof MembershipConversionReceiptKind] | null;
+
+
+export const MembershipConversionReceiptKind = {
+  founding: 'founding',
+  standard: 'standard',
+} as const;
+
+export interface MembershipConversionReceipt {
+  /**
+     * Non-null only for the first authenticated claim of the current confirmed checkout.
+     * @nullable
+     */
+  kind: MembershipConversionReceiptKind;
+}
+
 export interface RoutineGuideInfo {
   title: string;
   consentText: string;

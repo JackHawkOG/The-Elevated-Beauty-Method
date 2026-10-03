@@ -1,4 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
+const { claim } = vi.hoisted(() => ({ claim: vi.fn(async () => ({ kind: "founding" as string | null })) }));
+vi.mock("@workspace/api-client-react", () => ({ claimMembershipConversion: claim }));
 import {
   clearAuditVerification, rememberAuditVerification, trackAuditResumptionIfRequested,
   trackAuditVerificationAction, trackConfirmedMembershipReturn, trackMembershipCheckoutStarted,
@@ -7,6 +9,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  claim.mockClear();
 });
 
 test("Audit analytics sends only the fixed completion kind", () => {
@@ -96,7 +99,7 @@ test("analytics being missing or throwing cannot interrupt checkout", () => {
   expect(() => trackMembershipEnrollmentConfirmed("standard")).not.toThrow();
 });
 
-test("a success redirect counts only its server-confirmed session without browser storage", () => {
+test("a success redirect counts only its server-confirmed session without browser storage", async () => {
   const track = vi.fn();
   const replaceState = vi.fn();
   vi.stubGlobal("window", {
@@ -106,10 +109,11 @@ test("a success redirect counts only its server-confirmed session without browse
     get sessionStorage() { throw new Error("blocked"); },
   });
 
-  trackConfirmedMembershipReturn({ kind: "founding", status: "pending", checkoutSessionId: "cs_new" });
+  await trackConfirmedMembershipReturn({ kind: "founding", status: "pending", checkoutSessionId: "cs_new" });
   expect(track).not.toHaveBeenCalled();
   expect(replaceState).not.toHaveBeenCalled();
-  trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed", checkoutSessionId: "cs_new" });
+  await trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed", checkoutSessionId: "cs_new" });
+  expect(claim).toHaveBeenCalledWith({ checkoutSessionId: "cs_new" });
   expect(track).toHaveBeenCalledWith("membership_enrollment_confirmed", { kind: "founding" });
   expect(replaceState).toHaveBeenCalledWith(null, "", "/membership");
   expect(replaceState.mock.invocationCallOrder[0]).toBeLessThan(track.mock.invocationCallOrder[0]);
@@ -121,6 +125,28 @@ test("a success redirect counts only its server-confirmed session without browse
   });
   trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed", checkoutSessionId: "cs_new" });
   expect(track).toHaveBeenCalledTimes(1);
+});
+
+test.each(["denied", "outage", "wrong-kind"])("a %s receipt cannot count a return", async failure => {
+  const track = vi.fn();
+  vi.stubGlobal("window", {
+    location: { href: "https://example.com/membership?checkout=success#checkout_session_id=cs_new" },
+    history: { state: null, replaceState: vi.fn() },
+    umami: { track },
+  });
+  if (failure === "outage") claim.mockRejectedValueOnce(new Error("offline"));
+  else claim.mockResolvedValueOnce({ kind: failure === "wrong-kind" ? "standard" : null });
+  await trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed", checkoutSessionId: "cs_new" });
+  expect(track).not.toHaveBeenCalled();
+});
+
+test("an absent tracker does not consume the server receipt", async () => {
+  vi.stubGlobal("window", {
+    location: { href: "https://example.com/membership?checkout=success#checkout_session_id=cs_new" },
+    history: { state: null, replaceState: vi.fn() },
+  });
+  await trackConfirmedMembershipReturn({ kind: "founding", status: "confirmed", checkoutSessionId: "cs_new" });
+  expect(claim).not.toHaveBeenCalled();
 });
 
 test.each(["", "#checkout_session_id=cs_old"])("a stale success link %s cannot count an unrelated confirmed membership even with an old marker", hash => {
