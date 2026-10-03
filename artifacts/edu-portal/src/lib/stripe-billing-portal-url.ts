@@ -6,8 +6,15 @@ export function stripeBillingPortalUrl(value: unknown): string {
   }
   try {
     const url = new URL(value);
+    // Stripe documents both a path token and /p/session?secret=TOKEN.
+    // https://docs.stripe.com/api/customer_portal/sessions/create
+    // A bare session path still grants no destination approval.
+    const secrets = url.searchParams.getAll("secret");
+    const querySession = url.pathname === "/p/session" && secrets.length === 1
+      && /^[A-Za-z0-9_-]+$/.test(secrets[0]);
+    const pathSession = /^\/p\/session\/[^/]+\/?$/.test(url.pathname);
     if (url.protocol === "https:" && url.hostname === "billing.stripe.com" && !url.port && !url.username && !url.password
-      && /^\/p\/session\/[^/]+\/?$/.test(url.pathname)) {
+      && !url.hash && (pathSession || querySession)) {
       return url.href;
     }
   } catch {

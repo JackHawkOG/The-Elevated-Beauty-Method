@@ -5,6 +5,7 @@ import { stripeBillingPortalUrl } from "../../artifacts/edu-portal/src/lib/strip
 
 vi.mock("./stripeClient", () => ({ getTestStripeClient: vi.fn() }));
 const url = "https://billing.stripe.com/p/session/test_secret?locale=en";
+const queryUrl = "https://billing.stripe.com/p/session?secret=test_fixture_token";
 const stripe = {
   customers: {
     create: vi.fn(), del: vi.fn(),
@@ -40,6 +41,16 @@ it("checks the real session response with the same validator and cleans up only 
 });
 
 it.each([
+  queryUrl,
+  "https://billing.stripe.com/p/session?secret=fixture_token&locale=en",
+])("accepts Stripe's documented query-secret session format without rewriting it (%#)", async value => {
+  stripe.billingPortal.sessions.create.mockResolvedValue({ url: value });
+  await expect(checkStripeBillingLinks()).resolves.toBeUndefined();
+  expect(stripeBillingPortalUrl(value)).toBe(value);
+  expect(stripe.customers.del).toHaveBeenCalledWith("cus_fixture");
+});
+
+it.each([
   "http://billing.stripe.com/p/session/test",
   "https://billing.stripe.com.evil.example/p/session/test",
   "https://user@billing.stripe.com/p/session/test",
@@ -48,6 +59,24 @@ it.each([
   "https://billing.stripe.com/p/session/",
   "https://billing.stripe.com/p/session",
   "https://billing.stripe.com/p/session/test/extra",
+  "http://billing.stripe.com/p/session?secret=test_fixture_token",
+  "https://billing.stripe.com.evil.example/p/session?secret=test_fixture_token",
+  "https://user@billing.stripe.com/p/session?secret=test_fixture_token",
+  "https://billing.stripe.com:444/p/session?secret=test_fixture_token",
+  "https://billing.stripe.com/p/login/test_fixture_token",
+  "https://billing.stripe.com/p/login?secret=test_fixture_token",
+  "https://billing.stripe.com/other?secret=test_fixture_token",
+  "https://billing.stripe.com/p/session/extra/path?secret=test_fixture_token",
+  "https://billing.stripe.com/p/session/?secret=test_fixture_token",
+  "https://billing.stripe.com/p/session?secret=",
+  "https://billing.stripe.com/p/session?secret=%20",
+  "https://billing.stripe.com/p/session?secret=test_fixture_token&secret=other",
+  "https://billing.stripe.com/p/session?secret=test_fixture_token&secret=",
+  "https://billing.stripe.com/p/session?secret=test%0Afixture",
+  "https://billing.stripe.com/p/session?secret=test%2Ffixture",
+  "https://billing.stripe.com/p/session?secret=test_fixture_token#private",
+  "https://billing.stripe.com/p/session#secret=test_fixture_token",
+  `${url}#private`,
   `${url}\njavascript:alert(1)`,
   ` ${url}`,
   null,
@@ -64,6 +93,22 @@ it("refuses non-test credentials before any fixture is created", async () => {
   await expect(checkStripeBillingLinks()).rejects.toThrow("require Stripe test mode");
   expect(stripe.customers.create).not.toHaveBeenCalled();
   expect(stripe.billingPortal.configurations.list).not.toHaveBeenCalled();
+});
+
+it.each([
+  "https://billing.stripe.com/p/session",
+  "https://billing.stripe.com/p/session/",
+  "https://billing.stripe.com/p/session?secret=",
+  "https://billing.stripe.com/p/session#secret=do-not-log",
+])("identifies incomplete connected test responses without exposing URL contents (%#)", async value => {
+  stripe.billingPortal.sessions.create.mockResolvedValue({ url: value });
+  const error = await checkStripeBillingLinks().then(() => { throw new Error("Expected failure"); }, error => error as Error);
+  expect(error.message).toContain("connected test-mode response is missing its session identifier");
+  expect(error.message).toContain("Production behavior has not been checked");
+  expect(error.message).not.toContain(value);
+  expect(error.message).not.toContain("do-not-log");
+  expect(error.message).not.toContain("private");
+  expect(stripe.customers.del).toHaveBeenCalledWith("cus_fixture");
 });
 
 it("cleans up the customer if session creation fails and redacts provider details", async () => {

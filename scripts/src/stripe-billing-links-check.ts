@@ -36,6 +36,18 @@ export async function checkStripeBillingLinks(): Promise<void> {
       return_url: "https://example.invalid/membership",
     });
     stage = "validating Stripe's portal URL against the membership destination rules; Stripe's URL format may have changed";
+    // Classify only this known failure without printing bearer URLs, session IDs,
+    // or provider errors. Do not infer anything about live-mode responses.
+    try {
+      const url = new URL(session.url);
+      if (url.protocol === "https:" && url.hostname === "billing.stripe.com"
+        && /^\/p\/session\/?$/.test(url.pathname)
+        && !url.searchParams.getAll("secret").some(secret => secret.trim())) {
+        stage = "validating Stripe's portal URL: the connected test-mode response is missing its session identifier; Stripe's URL format may have changed. Production behavior has not been checked";
+      }
+    } catch {
+      // The destination validator remains authoritative for malformed values.
+    }
     stripeBillingPortalUrl(session.url);
   } catch {
     // SDK errors can include request details. Do not leak a session URL in output.
