@@ -30,7 +30,7 @@
 - [Paid founding recovery](paid-founding-recovery.md) — honor verified paid checkouts even when newer reservations have filled the founding limit.
 - [Stripe test catalog cleanup](stripe-test-catalog-cleanup.md) — user-created recurring prices prevent product deletion; archive both after disposable subscription checks.
 - [Audit live refresh checks](audit-live-refresh-checks.md) — use a browser reconnect to force real query refetch while an accessible modal hides the underlying page.
-- [Audit save and autosave](audit-save-autosave.md) — after server confirmation, stop form draft writes until navigation completes; clearing storage alone can be undone by a late effect.
+- [Audit save, discard, and autosave](audit-save-autosave.md) — late form effects can undo storage clearing; block stale writes without blocking fresh edits after discard.
 - [pnpm audit workspace rewrites](pnpm-audit-workspace-rewrites.md) — audit --fix can rewrite workspace configuration and remove its comments; review shared overrides before installing.
 - [Enrollment index repair safety](enrollment-index-repair-safety.md) — fail closed on incompatible same-name indexes instead of dropping an unknown legacy object automatically.
 - [Audit browser fixture seeding](audit-browser-fixture-seeding.md) — seed saved drafts away from the mounted form; its delayed initial empty-state effect can erase fixtures.

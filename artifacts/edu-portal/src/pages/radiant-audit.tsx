@@ -72,6 +72,8 @@ export default function RadiantAuditPage() {
   const draftBaseline = useRef<{ owner: string; completedAt: string } | null>(null);
   const draftHadAnswers = useRef(false);
   const saveConfirmed = useRef(false);
+  const discardInFlight = useRef(false);
+  const discardedFormRevision = useRef(0);
   const retryReadVersion = useRef(0);
   const retrySaving = useRef(false);
   const save = useSaveRadiantAudit();
@@ -99,6 +101,8 @@ export default function RadiantAuditPage() {
     draftVersion.current = null;
     draftHadAnswers.current = false;
     saveConfirmed.current = false;
+    discardInFlight.current = false;
+    discardedFormRevision.current = 0;
     const local = readAuditDraft(accountId);
     void getRadiantAuditDraft({ responseType: "json" }).then(async remote => {
       let localAnswer = local;
@@ -249,7 +253,7 @@ export default function RadiantAuditPage() {
           "x-audit-draft-revision": draftVersion.current?.owner === owner ? draftVersion.current.revision : "none",
         } });
         if (draftVersion.current?.owner === owner) draftVersion.current.revision = saved.updatedAt;
-        markAuditDraftOnline(owner, answers);
+        if (!discardInFlight.current) markAuditDraftOnline(owner, answers);
       }).catch((failure: unknown) => {
         if (!handleDraftConflict(owner, failure) && owner === activeAccount.current) {
           setDraftWarning("Your online draft couldn't be saved. Your answers are still in this browser.");
@@ -284,7 +288,8 @@ export default function RadiantAuditPage() {
   const persistDraft = useCallback((answers: RadiantAuditSubmission) => {
     // The form can still emit a change while the confirmed save navigates away.
     // Never recreate the completed answers as a new unfinished draft.
-    if (!accountId || saveConfirmed.current) return;
+    if (!accountId || saveConfirmed.current || discardInFlight.current ||
+        draftRevision < discardedFormRevision.current) return;
     latestAnswers.current = answers;
     if (skipRestoredChange.current) {
       skipRestoredChange.current = false;
@@ -309,7 +314,7 @@ export default function RadiantAuditPage() {
       else if (draftHadAnswers.current) queueClearDraft(accountId);
     }
     draftHadAnswers.current = hasAnswers;
-  }, [accountId, email, queueDraft, queueClearDraft]);
+  }, [accountId, email, queueDraft, queueClearDraft, draftRevision]);
 
   async function keepThisDraft() {
     if (!accountId || !latestAnswers.current || !draftConflict || conflictResolving.current) return;
@@ -358,7 +363,8 @@ export default function RadiantAuditPage() {
   }
 
   async function discardDraft() {
-    if (draftConflict) return;
+    if (draftConflict || discardInFlight.current) return;
+    discardInFlight.current = true;
     draftBlocked.current = true;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     try {
@@ -372,10 +378,14 @@ export default function RadiantAuditPage() {
       clearAuditDraft(accountId);
       clearPendingAudit();
       attempt.current = null;
+      latestAnswers.current = null;
       draftHadAnswers.current = false;
       setDraftWarning(null);
       setError(null);
       setLoadedDraft({ accountId: accountId!, answers: null });
+      // Invalidate callbacks from the old form before React commits its reset.
+      // The newly mounted form can persist genuinely new edits normally.
+      discardedFormRevision.current = draftRevision + 1;
       setDraftRevision(revision => revision + 1);
       conflictPending.current = false;
       draftBlocked.current = false;
@@ -386,6 +396,8 @@ export default function RadiantAuditPage() {
         draftBlocked.current = false;
         setDraftWarning("Your draft couldn't be removed everywhere. Please try again.");
       }
+    } finally {
+      discardInFlight.current = false;
     }
   }
 

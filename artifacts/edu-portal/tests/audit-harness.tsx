@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router, Route, Switch } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -19,6 +20,30 @@ const navigation = { pending: null as string | null, release: () => {
   if (navigation.pending) navigate(navigation.pending);
 } };
 (window as unknown as { __auditNavigation: typeof navigation }).__auditNavigation = navigation;
+// Observe every browser draft write, including writes that a later reset/reload
+// could hide. This stays in the isolated harness, not the production page.
+const draftStorage = { writes: [] as string[], onClear: null as (() => void) | null };
+(window as unknown as { __auditDraftStorage: typeof draftStorage }).__auditDraftStorage = draftStorage;
+if (params.has("observeDraftWrites")) {
+  const setItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key, value) {
+    if (this === window.localStorage && key === "tebm:radiant-audit:signed-in-draft") {
+      draftStorage.writes.push(value);
+    }
+    return setItem.call(this, key, value);
+  };
+  const removeItem = Storage.prototype.removeItem;
+  Storage.prototype.removeItem = function (key) {
+    removeItem.call(this, key);
+    if (this === window.localStorage && key === "tebm:radiant-audit:signed-in-draft" && draftStorage.onClear) {
+      // Run a real form input/change effect after storage clearing but before
+      // the page schedules its keyed reset. Consume this one-shot seam first.
+      const onClear = draftStorage.onClear;
+      draftStorage.onClear = null;
+      flushSync(onClear);
+    }
+  };
+}
 const transitionHook: typeof hook = () => {
   const [path, setPath] = hook();
   return [path, (next, options) => {

@@ -1440,6 +1440,165 @@ test("a form change after confirmed save cannot recreate local or online unfinis
   expect(onlineDraft).toBeNull();
 });
 
+test("late form changes during explicit discard cannot restore old answers, but fresh edits survive", async ({ page }) => {
+  const discarded = fixture("discard-transition");
+  const fresh = fixture("fresh-after-discard");
+  const current: Audit = {
+    ...fixture("completed-before-discard"), routineScore: 1, valuesScore: 2,
+    completedAt: "2026-09-01T12:00:00.000Z",
+  };
+  let online: (Answers & { updatedAt: string }) | { discardedAt: string } | null = null;
+  const draftWrites: Answers[] = [];
+  let deleteStarted = false;
+  let markerReadStarted = false;
+  let holdMarkerRead = false;
+  let releaseDelete!: () => void;
+  let releaseMarkerRead!: () => void;
+  const deleteGate = new Promise<void>(resolve => { releaseDelete = resolve; });
+  const markerGate = new Promise<void>(resolve => { releaseMarkerRead = resolve; });
+  // No Clerk, database, or real-member API access, including destination reads.
+  await page.route("**/api/**", route => {
+    const request = route.request();
+    expect(request.method()).toBe("GET");
+    expect(new URL(request.url()).pathname).toMatch(/^\/api\/users\/me\/radiant-audit(?:\/history)?$/);
+    return route.fulfill({ json: request.url().endsWith("/history") ? [] : current });
+  });
+  await page.route("**/api/users/me/radiant-audit/draft", async route => {
+    const request = route.request();
+    expect(request.headers().authorization).toBe("Bearer member-a");
+    if (request.method() === "GET") {
+      if (holdMarkerRead) {
+        markerReadStarted = true;
+        await markerGate;
+        holdMarkerRead = false;
+      }
+      return route.fulfill({ json: online });
+    }
+    if (request.method() === "DELETE") {
+      deleteStarted = true;
+      await deleteGate;
+      online = { discardedAt: new Date().toISOString() };
+      holdMarkerRead = true;
+      return route.fulfill({ status: 204 });
+    }
+    expect(request.method()).toBe("PUT");
+    const revision = online
+      ? ("discardedAt" in online ? online.discardedAt : online.updatedAt) : "none";
+    expect(request.headers()["x-audit-draft-revision"]).toBe(revision);
+    expect(request.headers()["x-audit-draft-baseline"]).toBe(current.completedAt);
+    const input = request.postDataJSON() as Answers;
+    draftWrites.push(input);
+    online = { ...input, updatedAt: new Date().toISOString() };
+    return route.fulfill({ json: online });
+  });
+  const storageWrites = () => page.evaluate(() =>
+    (window as unknown as { __auditDraftStorage: { writes: string[] } }).__auditDraftStorage.writes);
+  try {
+    await signInAs(page, "member-a");
+    await page.goto("/tests/audit-harness.html?observeDraftWrites=1");
+    await page.getByLabel("Skincare consistency").check();
+    await page.getByLabel("Quality over price").check();
+    await page.getByLabel("Professional results").check();
+    await page.locator("#beauty-trend").fill(discarded.beautyTrend);
+    await page.locator("#mastery-goal").fill(discarded.masteryGoal);
+    await page.locator("#research-time").fill(discarded.researchTime);
+    await expect.poll(() => online && "masteryGoal" in online ? online.masteryGoal : null).toBe(discarded.masteryGoal);
+    await expect.poll(() => storageWrites()).not.toEqual([]);
+    const localBefore = await page.evaluate(key => localStorage.getItem(key), signedInDraftKey);
+    expect(localBefore).toContain(discarded.masteryGoal);
+    const localWriteCount = (await storageWrites()).length;
+    const onlineWriteCount = draftWrites.length;
+    await page.clock.install();
+    await page.getByRole("button", { name: "Discard draft", exact: true }).click();
+    await expect.poll(() => deleteStarted).toBe(true);
+    // Edit the real still-mounted form while DELETE is held.
+    await page.locator("#mastery-goal").fill(`${discarded.masteryGoal} late during deletion`);
+    await expect(page.locator("#mastery-goal")).toHaveValue(`${discarded.masteryGoal} late during deletion`);
+    await page.clock.runFor(1_000);
+    expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBe(localBefore);
+    expect((await storageWrites()).length).toBe(localWriteCount);
+    expect(draftWrites).toHaveLength(onlineWriteCount);
+
+    releaseDelete();
+    await expect.poll(() => markerReadStarted).toBe(true);
+    // Deletion is confirmed, but the revision read and form reset are still pending.
+    await page.locator("#beauty-trend").fill(`${discarded.beautyTrend} late before reset`);
+    await page.getByLabel("Skincare consistency").uncheck();
+    await page.clock.runFor(1_000);
+    expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBe(localBefore);
+    expect((await storageWrites()).length).toBe(localWriteCount);
+    expect(draftWrites).toHaveLength(onlineWriteCount);
+    expect(online).toHaveProperty("discardedAt");
+
+    await page.evaluate(() => {
+      const observed = window as unknown as {
+        __auditDraftStorage: { onClear: (() => void) | null };
+        __auditResetChange: string | null;
+      };
+      observed.__auditResetChange = null;
+      observed.__auditDraftStorage.onClear = () => {
+        const input = document.querySelector<HTMLTextAreaElement>("#research-time")!;
+        // Use the native input setter so React sees the changed value and runs
+        // the real form's onChange and draft effect, not a persistence mock.
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!
+          .call(input, "discarded late reset answer");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        observed.__auditResetChange = input.value;
+      };
+    });
+    releaseMarkerRead();
+    await expect(page.locator("#mastery-goal")).toHaveValue("");
+    expect(await page.evaluate(() =>
+      (window as unknown as { __auditResetChange: string | null }).__auditResetChange,
+    )).toBe("discarded late reset answer");
+    await expect(page.locator("#beauty-trend")).toHaveValue("");
+    await expect(page.locator("#research-time")).toHaveValue("");
+    await expect(page.getByLabel("Skincare consistency")).not.toBeChecked();
+    await expect(page.getByLabel("Quality over price")).not.toBeChecked();
+    await expect(page.getByLabel("Professional results")).not.toBeChecked();
+    await page.clock.runFor(1_000);
+    expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
+    expect((await storageWrites()).length).toBe(localWriteCount);
+    expect(draftWrites).toHaveLength(onlineWriteCount);
+    expect(online).toHaveProperty("discardedAt");
+
+    // On this same mounted page, the guard must end with discard rather than
+    // disabling persistence until a reload. Observe all reset-to-fresh writes.
+    await page.evaluate(() => {
+      (window as unknown as { __auditDraftStorage: { writes: string[] } }).__auditDraftStorage.writes = [];
+    });
+    await page.getByLabel("Skincare consistency").check();
+    await page.getByLabel("Quality over price").check();
+    await page.getByLabel("Professional results").check();
+    await page.locator("#beauty-trend").fill(fresh.beautyTrend);
+    await page.locator("#mastery-goal").fill(fresh.masteryGoal);
+    await page.locator("#research-time").fill(fresh.researchTime);
+    await page.clock.runFor(1_000);
+    await expect.poll(() => online && "masteryGoal" in online ? online.masteryGoal : null).toBe(fresh.masteryGoal);
+    expect(draftWrites.slice(onlineWriteCount)).toEqual([fresh]);
+    const localFresh = await page.evaluate(key => localStorage.getItem(key), signedInDraftKey);
+    expect(JSON.parse(localFresh!).answers).toMatchObject(fresh);
+    expect(localFresh).not.toContain(discarded.beautyTrend);
+    expect(localFresh).not.toContain(current.masteryGoal);
+    expect(localFresh).not.toContain("discarded late reset answer");
+    for (const raw of await storageWrites()) {
+      expect(raw).not.toContain(discarded.beautyTrend);
+      expect(raw).not.toContain(current.masteryGoal);
+      expect(raw).not.toContain("discarded late reset answer");
+    }
+    await page.reload();
+    await expect(page.locator("#mastery-goal")).toHaveValue(fresh.masteryGoal);
+    await expect(page.locator("#beauty-trend")).toHaveValue(fresh.beautyTrend);
+    await expect(page.locator("#research-time")).toHaveValue(fresh.researchTime);
+    await expect(page.getByLabel("Skincare consistency")).toBeChecked();
+    await expect(page.getByLabel("Quality over price")).toBeChecked();
+    await expect(page.getByLabel("Professional results")).toBeChecked();
+  } finally {
+    releaseDelete();
+    releaseMarkerRead();
+  }
+});
+
 test("a signed-in draft never appears for another account and can be discarded", async ({ page }) => {
   await signInAs(page, "member-a");
   await page.getByLabel("Skincare consistency").check();

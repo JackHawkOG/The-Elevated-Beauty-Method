@@ -14,3 +14,9 @@ Transition regressions should hold routing after save confirmation and edit the 
 **Why:** A blank form after navigation does not prove no late write occurred; restoration cleanup can mask it. A controlled navigation hold makes the narrow save-to-unmount interval deterministic without adding production test hooks.
 
 **How to apply:** Keep the hold in the isolated browser harness, run beyond the autosave debounce, and verify both local storage and online draft writes. Temporarily removing the confirmed-save guard should make this check fail.
+
+Explicit discard needs a temporary browser-persistence guard as well as online-write blocking, ending when the replacement form is ready for fresh edits.
+
+**Why:** The old form remains editable while deletion and its revision read are pending. Blocking only online autosaves still allows discarded answers to return to browser storage. A permanent stop would instead lose genuinely new drafts.
+
+**How to apply:** Check late changes during deletion, revision reading, and the storage-clear-to-form-reset interval. Observe individual storage writes so a later reset cannot hide a brief resurrection; verify fresh edits on the same page before reloading.
