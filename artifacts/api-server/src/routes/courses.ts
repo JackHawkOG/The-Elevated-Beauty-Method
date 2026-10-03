@@ -327,6 +327,9 @@ router.patch("/lessons/:lessonId", requireAuth, requireContentEditor, async (req
     res.status(403).json({ error: "Approved standalone copy is managed through editorial review" }); return;
   }
   const updated = await db.transaction(async tx => {
+    // The UPDATE locks the lesson before clearing enrollments, matching the
+    // progress route's lesson -> enrollment order. Its publication share lock
+    // either makes this edit wait or makes a waiting completion see the draft.
     const [draft] = await tx.update(lessonsTable).set({ ...parsed.data, publishedAt: null })
       .where(eq(lessonsTable.id, id)).returning();
     if (!draft) return undefined;

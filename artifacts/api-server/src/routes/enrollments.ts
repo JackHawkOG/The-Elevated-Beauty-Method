@@ -155,25 +155,30 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
 
   const { lessonId } = bodyParsed.data;
 
-  const [[lesson], [course], [member]] = await Promise.all([
-    db.select().from(lessonsTable).where(and(eq(lessonsTable.id, lessonId), eq(lessonsTable.courseId, courseId))).limit(1),
-    db.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1),
-    db.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1),
-  ]);
-  if (!lesson?.publishedAt) { res.status(400).json({ error: "Lesson does not belong to this course" }); return; }
-  if (!course?.publishedAt || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
-    res.status(403).json({ error: "Membership required" }); return;
-  }
-  if (isApprovedStandaloneCourse(course)) {
-    const courseLessons = await db.select().from(lessonsTable)
-      .where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
-      .orderBy(lessonsTable.sortOrder);
-    if (publishedLessonsForCourse(course, courseLessons)[0]?.id !== lessonId) {
-      res.status(404).json({ error: "Lesson not published" }); return;
-    }
-  }
-
   const result = await db.transaction(async (tx) => {
+    // Both progress and editorial edits lock the lesson BEFORE enrollments.
+    // A share lock lets members complete concurrently, but holds publication
+    // stable until the resume write commits. After waiting for an edit, this
+    // query reads the committed draft rather than trusting an earlier check.
+    const [lesson] = await tx.select().from(lessonsTable)
+      .where(and(eq(lessonsTable.id, lessonId), eq(lessonsTable.courseId, courseId)))
+      .for("share").limit(1);
+    if (!lesson?.publishedAt) return { status: 400, error: "Lesson does not belong to this course" };
+    const [[course], [member]] = await Promise.all([
+      tx.select().from(coursesTable).where(eq(coursesTable.id, courseId)).limit(1),
+      tx.select().from(usersTable).where(eq(usersTable.clerkId, userId)).limit(1),
+    ]);
+    if (!course?.publishedAt || !member || !canAccessTier(member.membershipTier, course.accessTier)) {
+      return { status: 403, error: "Membership required" };
+    }
+    if (isApprovedStandaloneCourse(course)) {
+      const courseLessons = await tx.select().from(lessonsTable)
+        .where(and(eq(lessonsTable.courseId, courseId), isNotNull(lessonsTable.publishedAt)))
+        .orderBy(lessonsTable.sortOrder, lessonsTable.id);
+      if (publishedLessonsForCourse(course, courseLessons)[0]?.id !== lessonId) {
+        return { status: 404, error: "Lesson not published" };
+      }
+    }
     // Lock this member's enrollment before reading or updating its progress.
     // Concurrent completions and retries then serialize on the same row.
     const [enrollment] = await tx.select().from(enrollmentsTable)
@@ -213,13 +218,14 @@ router.patch("/enrollments/:courseId/progress", requireAuth, async (req, res): P
       .set({ lastLessonId: lessonId, completedLessons: completedCount })
       .where(eq(enrollmentsTable.id, enrollment.id))
       .returning();
-    return { updated, totalLessons };
+    return { updated, totalLessons, courseTitle: course.title };
   });
   if (!result) { res.status(404).json({ error: "Not enrolled" }); return; }
+  if (result.status !== undefined) { res.status(result.status).json({ error: result.error }); return; }
 
   res.json(UpdateProgressResponse.parse({
     ...result.updated,
-    courseTitle: course?.title ?? "",
+    courseTitle: result.courseTitle,
     totalLessons: result.totalLessons,
     enrolledAt: result.updated.enrolledAt?.toISOString(),
   }));

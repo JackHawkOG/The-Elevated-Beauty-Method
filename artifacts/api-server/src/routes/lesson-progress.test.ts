@@ -943,6 +943,125 @@ test.each(["success", "cleanup failure", "failure after cleanup"] as const)(
   },
 );
 
+test.each(["edit", "completion"] as const)(
+  "%s commits first: a concurrent lesson edit cannot leave a draft resume pointer",
+  async firstWriter => {
+    let fixtureCourseId: number | undefined;
+    let transactionSpy: ReturnType<typeof vi.spyOn> | undefined;
+    let releaseFirst!: () => void;
+    const gate = new Promise<void>(resolve => { releaseFirst = resolve; });
+    let firstReady!: () => void;
+    const ready = new Promise<void>(resolve => { firstReady = resolve; });
+    let secondStarted!: (pid: number) => void;
+    const secondPid = new Promise<number>(resolve => { secondStarted = resolve; });
+    let firstPid: number;
+    const pending: Array<Promise<Awaited<ReturnType<typeof request>>>> = [];
+    try {
+      const [course] = await db.insert(coursesTable).values({
+        title: `Concurrent draft edit ${firstWriter} ${run}`, description: "Isolated concurrency fixture", categoryId,
+        instructorName: "Test", accessTier: "Elevated", publishedAt: new Date(),
+      }).returning();
+      fixtureCourseId = course.id;
+      const [target, sibling] = await db.insert(lessonsTable).values([
+        { courseId: course.id, title: "Target", sortOrder: 1, publishedAt: new Date() },
+        { courseId: course.id, title: "Sibling", sortOrder: 2, publishedAt: new Date() },
+      ]).returning();
+      await db.insert(enrollmentsTable).values([
+        { userId: elevatedId, courseId: course.id, lastLessonId: target.id, completedLessons: 1 },
+        { userId: freeId, courseId: course.id, lastLessonId: target.id, completedLessons: 1 },
+        { userId: concurrentId, courseId: course.id, lastLessonId: sibling.id, completedLessons: 1 },
+      ]);
+      await db.insert(lessonCompletionsTable).values([
+        { userId: elevatedId, lessonId: sibling.id },
+        { userId: freeId, lessonId: target.id },
+        { userId: concurrentId, lessonId: sibling.id },
+      ]);
+      const readCompletions = () => db.select().from(lessonCompletionsTable)
+        .where(inArray(lessonCompletionsTable.lessonId, [target.id, sibling.id]))
+        .orderBy(lessonCompletionsTable.userId, lessonCompletionsTable.lessonId);
+      const beforeCompletions = await readCompletions();
+      const beforeEnrollments = await db.select().from(enrollmentsTable)
+        .where(eq(enrollmentsTable.courseId, course.id)).orderBy(enrollmentsTable.id);
+
+      const transaction = db.transaction.bind(db);
+      let calls = 0;
+      transactionSpy = vi.spyOn(db, "transaction").mockImplementation((callback, config) =>
+        transaction(async tx => {
+          const first = calls++ === 0;
+          await tx.execute(sql`SET LOCAL lock_timeout = '8s'`);
+          const pidResult = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+          const pid = Number(pidResult.rows[0].pid);
+          if (first) firstPid = pid;
+          else secondStarted(pid);
+          const result = await callback(tx);
+          if (first) {
+            firstReady();
+            // Pause after the real writes, before commit: the second request
+            // can see the old published version but must wait on its row lock.
+            await gate;
+          }
+          return result;
+        }, config),
+      );
+      const edit = () => request("test-editor", `/lessons/${target.id}`, "PATCH", {
+        title: target.title, content: "Edited draft", sortOrder: target.sortOrder,
+        durationMinutes: target.durationMinutes,
+      });
+      const complete = () => request(elevatedId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: target.id });
+      pending.push(firstWriter === "edit" ? edit() : complete());
+      await Promise.race([ready, pending[0].then(result => {
+        throw new Error(`First request finished before the commit gate: ${JSON.stringify(result)}`);
+      })]);
+      pending.push(firstWriter === "edit" ? complete() : edit());
+      const waitingPid = await Promise.race([secondPid, pending[1].then(result => {
+        throw new Error(`Second request finished before its transaction: ${JSON.stringify(result)}`);
+      })]);
+      // Observe actual PostgreSQL blocking, not a sleep or assumed request order.
+      await vi.waitFor(async () => {
+        const blocked = await db.execute(sql`SELECT ${firstPid!}::int = ANY(pg_blocking_pids(${waitingPid}::int)) AS waiting`);
+        expect(blocked.rows[0].waiting).toBe(true);
+      }, { timeout: 5000, interval: 20 });
+      releaseFirst();
+      const results = await Promise.all(pending);
+      const edited = results[firstWriter === "edit" ? 0 : 1];
+      const completed = results[firstWriter === "completion" ? 0 : 1];
+      expect(edited.status).toBe(200);
+      expect(completed.status).toBe(firstWriter === "edit" ? 400 : 200);
+      expect((await db.select().from(lessonsTable).where(eq(lessonsTable.id, target.id)))[0])
+        .toMatchObject({ content: "Edited draft", publishedAt: null });
+      expect(await db.select().from(enrollmentsTable)
+        .where(eq(enrollmentsTable.courseId, course.id)).orderBy(enrollmentsTable.id))
+        .toEqual(beforeEnrollments.map(row => row.lastLessonId === target.id
+          ? { ...row, lastLessonId: null, completedLessons: row.userId === elevatedId && firstWriter === "completion" ? 2 : row.completedLessons }
+          : row));
+      const afterCompletions = await readCompletions();
+      expect(afterCompletions.filter(row => !(row.userId === elevatedId && row.lessonId === target.id)))
+        .toEqual(beforeCompletions);
+      expect(afterCompletions.filter(row => row.userId === elevatedId && row.lessonId === target.id))
+        .toHaveLength(firstWriter === "completion" ? 1 : 0);
+      const visible = await request(elevatedId, "/enrollments");
+      expect((visible.data as Array<{ courseId: number }>).find(row => row.courseId === course.id))
+        .toMatchObject({
+          lastLessonId: null, completedLessonIds: [sibling.id], totalLessons: 1,
+          completedLessons: firstWriter === "completion" ? 2 : 1,
+        });
+    } finally {
+      releaseFirst();
+      await Promise.allSettled(pending);
+      transactionSpy?.mockRestore();
+      if (fixtureCourseId !== undefined) {
+        const lessons = await db.select({ id: lessonsTable.id }).from(lessonsTable)
+          .where(eq(lessonsTable.courseId, fixtureCourseId));
+        if (lessons.length) await db.delete(lessonCompletionsTable)
+          .where(inArray(lessonCompletionsTable.lessonId, lessons.map(row => row.id)));
+        await db.delete(enrollmentsTable).where(eq(enrollmentsTable.courseId, fixtureCourseId));
+        await db.delete(lessonsTable).where(eq(lessonsTable.courseId, fixtureCourseId));
+        await db.delete(coursesTable).where(eq(coursesTable.id, fixtureCourseId));
+      }
+    }
+  }, 20000,
+);
+
 test("Elevated progress survives fresh requests and revisit; repeats and out-of-order completions do not inflate it", async () => {
   const enrolled = await request(elevatedId, "/enrollments", "POST", { courseId });
   expect(enrolled.status).toBe(201);

@@ -53,3 +53,4 @@
 - [PDF subset fonts](pdf-subset-fonts.md) — extracted PDF fonts may lack glyphs for revised copy; verify both text extraction and rendering.
 - [Profile cleanup concurrency](profile-cleanup-races.md) — ownership alone is insufficient; protect exact snapshots, the external deletion gap, and safety-check failure compensation.
 - [Shared membership decision snapshots](membership-decision-snapshots.md) — checkout locks alone cannot serialize access decisions across subscriptions; waiting needs a fresh SQL snapshot.
+- [Transaction test gates](transaction-test-gates.md) — race transaction signals against early responses so rejected requests cannot strand gates and fixtures.
