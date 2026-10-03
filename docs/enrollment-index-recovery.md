@@ -36,6 +36,28 @@ Keep the search path limited to that one schema; do not add a public fallback.
 If the expected tables or index are missing, or the index belongs to another
 table, stop and have the database owner resolve the discrepancy.
 
+For an operator-approved batch, save the commands above and the approved
+rename, migration and verification commands below in a reviewed `.psql` file.
+Run it from the repository root using your normal secure connection method:
+
+```sh
+psql -X -f reviewed-recovery.psql
+```
+
+`-X` ignores local psql startup files. `-f` makes this a noninteractive batch:
+with `\set ON_ERROR_STOP on` at its start, a SQL or include error stops further
+commands and returns a nonzero exit status (SQL errors return 3). In an
+interactive session, the setting returns control to the prompt; it does not
+prevent an operator from typing another command. Keep service offline on errors.
+
+Never put an unconditional resume command after this batch, use `;` to chain
+one, or suppress its failure with `|| true`. Any separately approved scripted
+resume action must be conditional on the batch's successful exit (for example,
+`psql -X -f reviewed-recovery.psql && ./approved-resume`), **and** must enforce
+the survivor, progress and dependency comparisons in step 4. The resume action
+is not part of the SQL recovery itself. Do not omit verification from the batch
+or treat a successful rename or merge alone as permission to resume.
+
 ## 2. Inspect ownership, dependencies and duplicate identities
 
 The inspection script prints the index definition and status, owning
@@ -129,7 +151,17 @@ backup/restore plan with writers still stopped.
 the real migration and startup repair in randomly named private legacy schemas
 with no public search-path fallback. It covers standalone and constraint-owned
 indexes, dependent foreign keys, refused unsafe retries, merge rollback and
-the duplicate-insert gate. Run in the development workspace:
+the duplicate-insert gate.
+
+It also executes the SQL command blocks from this document with the actual
+`psql -X -f -` client. Disposable schemas cover stopped rename/merge failures,
+rollback, retry without a second rename, absent tables/schemas with no public
+fallback, and a verification failure after the merge commits. A harmless
+temporary-file resume marker can run only after a successful batch, never an
+actual API restart. These tests require `psql` on `PATH`; missing tooling fails
+the checks rather than silently skipping them.
+
+Run in the development workspace:
 
 ```sh
 pnpm exec vitest run artifacts/api-server/src/routes/enrollment-index-recovery.test.ts --maxWorkers=1

@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, expect, test } from "vitest";
 import { pool, type PoolClient } from "@workspace/db";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -16,7 +20,8 @@ const migration = () => readFile(
 
 afterAll(async () => { await pool.end(); });
 
-async function withLegacySchema(callback: (client: PoolClient) => Promise<void>) {
+async function withLegacySchema(callback: (client: PoolClient, name: string) => Promise<void>) {
+  requireDevelopmentDatabase();
   const client = await pool.connect();
   const name = `enrollment_recovery_${randomUUID().replaceAll("-", "")}`;
   let created = false;
@@ -41,7 +46,7 @@ async function withLegacySchema(callback: (client: PoolClient) => Promise<void>)
       VALUES (1, 'member', 7, 1, NULL, '2022-01-01'),
              (2, 'member', 7, 4, 31, '2023-01-01');
     `);
-    await callback(client);
+    await callback(client, name);
   } finally {
     await client.query("ROLLBACK");
     await client.query("RESET search_path");
@@ -148,6 +153,180 @@ test.each([
     expect(await constraints()).toEqual(originalConstraints);
   });
 });
+
+// Read the runbook, rather than maintaining a second copy of its psql commands.
+// The shell's only "resume" action writes a disposable marker, never starts an API.
+async function runPsqlRecovery(name: string, retry = false) {
+  requireDevelopmentDatabase();
+  const root = fileURLToPath(new URL("../../../../", import.meta.url));
+  const runbook = await readFile(join(root, "docs/enrollment-index-recovery.md"), "utf8");
+  const blocks = [...runbook.matchAll(/```sql\n([\s\S]*?)```/g)].map(match => match[1]);
+  expect(blocks).toHaveLength(3);
+  const input = blocks.map((block, i) =>
+    i === 1 && retry ? "" :
+    `${block.replace("\\set enrollment_schema public", `\\set enrollment_schema ${name}`)
+      .replace('SET search_path TO :"enrollment_schema";', 'SET search_path TO :"enrollment_schema";\nSHOW search_path;')}
+\\echo RECOVERY_STEP_${i}_FINISHED
+`,
+  ).join("\n") + "\n\\echo RECOVERY_VERIFICATION_FINISHED\n";
+  const directory = await mkdtemp(join(tmpdir(), "enrollment-psql-"));
+  const marker = join(directory, "resumed");
+  try {
+    const env: NodeJS.ProcessEnv = { ...process.env, PGOPTIONS: "", PGCONNECT_TIMEOUT: "5" };
+    // libpq treats even an empty PGSERVICEFILE as a file to open.
+    delete env.PGSERVICE;
+    delete env.PGSERVICEFILE;
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn("bash", [
+        "-c", 'psql -X -f - && printf "resumed" > "$1"', "recovery-test", marker,
+      ], {
+        cwd: root,
+        // Use the PG* target already checked against the development URL.
+        // Never pass credentials on the command line or print this environment.
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+      child.stdout.on("data", chunk => { stdout += chunk; });
+      child.stderr.on("data", chunk => { stderr += chunk; });
+      child.on("error", error => { clearTimeout(timeout); reject(error); });
+      child.on("close", code => { clearTimeout(timeout); resolve({ code, stdout, stderr }); });
+      child.stdin.on("error", error => {
+        // psql may close its input immediately on a command failure.
+        if ((error as NodeJS.ErrnoException).code !== "EPIPE") reject(error);
+      });
+      child.stdin.end(input);
+    });
+    const resumed = await access(marker).then(() => true, () => false);
+    return { ...result, resumed };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+const privateIndexes = async (client: PoolClient) => (await client.query(`
+  SELECT indexname, indexdef FROM pg_indexes
+  WHERE schemaname = current_schema() ORDER BY indexname
+`)).rows;
+
+test("psql ON_ERROR_STOP stops after a refused rename, without merging or resuming", async () => {
+  await withLegacySchema(async (client, name) => {
+    await client.query(`
+      CREATE INDEX enrollments_user_id_course_id_unique ON enrollments (course_id);
+      CREATE INDEX enrollments_user_id_course_id_legacy ON enrollments (user_id);
+    `);
+    const before = { rows: await rows(client), indexes: await privateIndexes(client) };
+    const result = await runPsqlRecovery(name);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toContain("Legacy destination name is occupied");
+    expect(result.stdout).toContain("RECOVERY_STEP_0_FINISHED");
+    expect(result.stdout).not.toContain("RECOVERY_STEP_1_FINISHED");
+    expect(result.stdout).not.toContain("RECOVERY_VERIFICATION_FINISHED");
+    expect(result.resumed).toBe(false);
+    expect({ rows: await rows(client), indexes: await privateIndexes(client) }).toEqual(before);
+  });
+});
+
+test("psql stops after a failed merge, rolls back progress, and retries without renaming again", async () => {
+  await withLegacySchema(async (client, name) => {
+    await client.query(`
+      ALTER TABLE enrollments ADD CONSTRAINT enrollments_user_id_course_id_unique
+        UNIQUE (user_id, course_id, id);
+      CREATE TABLE enrollment_references (
+        user_id text, course_id integer, enrollment_id integer,
+        FOREIGN KEY (user_id, course_id, enrollment_id)
+          REFERENCES enrollments (user_id, course_id, id)
+      );
+      INSERT INTO enrollment_references VALUES ('member', 7, 2);
+    `);
+    const before = await rows(client);
+    const result = await runPsqlRecovery(name);
+    expect(result.code).toBe(3);
+    expect(result.stderr).toContain("violates foreign key constraint");
+    expect(result.stdout).toContain("RECOVERY_STEP_1_FINISHED");
+    expect(result.stdout).not.toContain("RECOVERY_VERIFICATION_FINISHED");
+    expect(result.stderr).not.toContain("Duplicate enrollments remain");
+    expect(result.resumed).toBe(false);
+    expect(await rows(client)).toEqual(before);
+    expect((await client.query("SELECT * FROM enrollment_references")).rows)
+      .toEqual([{ user_id: "member", course_id: 7, enrollment_id: 2 }]);
+    expect((await privateIndexes(client)).map(row => row.indexname))
+      .toEqual(["enrollments_pkey", "enrollments_user_id_course_id_legacy", "lessons_pkey"]);
+    // Separately approved reassignment, only in this disposable fixture.
+    await client.query("UPDATE enrollment_references SET enrollment_id = 1");
+    const retried = await runPsqlRecovery(name, true);
+    expect(retried.code).toBe(0);
+    expect(retried.stdout).not.toContain("RECOVERY_STEP_1_FINISHED");
+    expect(retried.stderr).toContain("Enrollment recovery verified:");
+    expect(retried.resumed).toBe(true);
+    expect(await rows(client)).toEqual([{
+      id: 1, completed_lessons: 4, last_lesson_id: 31, enrolled_at: "2022-01-01",
+    }]);
+  });
+});
+
+test.each(["missing table", "missing schema"] as const)(
+  "psql keeps the selected schema without public fallback when there is a %s", async (missing) => {
+    await withLegacySchema(async (client, name) => {
+      const before = await rows(client);
+      // The inspection's first read fails before any destructive script runs.
+      if (missing === "missing table") {
+        await client.query("ALTER TABLE enrollments RENAME TO private_enrollments");
+      }
+      const selected = missing === "missing schema" ? `${name}_absent` : name;
+      const result = await runPsqlRecovery(selected);
+      expect(result.code).toBe(3);
+      expect(result.stderr).toContain('relation "enrollments" does not exist');
+      expect(result.stdout).toMatch(new RegExp(`search_path\\s+-+\\s+${selected}\\s`));
+      expect(result.stdout).not.toContain("RECOVERY_STEP_0_FINISHED");
+      expect(result.resumed).toBe(false);
+      if (missing === "missing table") {
+        await client.query("ALTER TABLE private_enrollments RENAME TO enrollments");
+      }
+      expect(await rows(client)).toEqual(before);
+    });
+  },
+);
+
+test.each([false, true])(
+  "psql permits scripted resume only after verification succeeds (probe blocked: %s)", async (blocked) => {
+    await withLegacySchema(async (client, name) => {
+      await client.query("CREATE INDEX enrollments_user_id_course_id_unique ON enrollments (course_id)");
+      if (blocked) {
+        await client.query(`
+          CREATE FUNCTION reject_probe() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            UPDATE enrollments SET completed_lessons = 99 WHERE id = 1;
+            RAISE unique_violation USING CONSTRAINT = 'unrelated_legacy_constraint';
+          END $$;
+          CREATE TRIGGER reject_probe BEFORE INSERT ON enrollments
+            FOR EACH ROW EXECUTE FUNCTION reject_probe();
+        `);
+      }
+      const sequenceBefore = (await client.query("SELECT last_value, is_called FROM enrollments_id_seq")).rows;
+      const result = await runPsqlRecovery(name);
+      expect(result.stdout).toMatch(new RegExp(`search_path\\s+-+\\s+${name}\\s`));
+      expect(result.stdout).toContain(name);
+      expect(result.stdout).toContain("RECOVERY_STEP_1_FINISHED");
+      expect(result.code).toBe(blocked ? 3 : 0);
+      expect(result.resumed).toBe(!blocked);
+      if (blocked) {
+        expect(result.stderr).toContain("Duplicate probe rejected by unexpected constraint: unrelated_legacy_constraint");
+        expect(result.stdout).not.toContain("RECOVERY_VERIFICATION_FINISHED");
+      } else {
+        expect(result.stderr).toContain("Enrollment recovery verified: no duplicates; duplicate probe rejected by the expected index");
+        expect(result.stdout).toContain("RECOVERY_VERIFICATION_FINISHED");
+      }
+      // Merge committed, but verification's probe and trigger writes never persist.
+      expect(await rows(client)).toEqual([{
+        id: 1, completed_lessons: 4, last_lesson_id: 31, enrolled_at: "2022-01-01",
+      }]);
+      expect((await client.query("SELECT last_value, is_called FROM enrollments_id_seq")).rows).toEqual(sequenceBefore);
+    });
+  },
+);
 
 test("unsafe rename targets and occupied legacy names leave all rows and indexes intact", async () => {
   requireDevelopmentDatabase();
