@@ -6,6 +6,7 @@ const repair = vi.hoisted(() => vi.fn<() => Promise<void>>());
 const backfill = vi.hoisted(() => vi.fn<(needsPublicationBackfill: boolean) => Promise<void>>());
 const stripeStages = vi.hoisted(() => ({
   migrations: vi.fn<(...args: unknown[]) => Promise<void>>(),
+  connection: vi.fn<() => Promise<void>>(),
   webhook: vi.fn<(...args: unknown[]) => Promise<void>>(),
   synchronization: vi.fn<(...args: unknown[]) => Promise<void>>(),
 }));
@@ -44,14 +45,18 @@ vi.mock("../lib/ensure-publication-schema", () => ({ ensurePublicationSchema: vi
 vi.mock("../lib/seed-member-journey", () => ({ ensureMemberJourneyContent: backfill }));
 vi.mock("../lib/reconcile-announcement-activity", () => ({ reconcileAnnouncementActivity: vi.fn() }));
 vi.mock("../lib/membership-reconciliation", () => ({ startMembershipReconciliation: vi.fn() }));
+vi.mock("../lib/membership-review-email", () => ({ startMembershipReviewEmails: vi.fn() }));
 vi.mock("../lib/membership-checkout-expirations", () => ({ startCheckoutExpirationRecovery: vi.fn() }));
 vi.mock("../lib/membership-orphan-recovery", () => ({ startMembershipOrphanRecovery: vi.fn() }));
 vi.mock("../lib/membership-paid-recovery", () => ({ startUntrackedPaidCheckoutRecovery: vi.fn() }));
 vi.mock("../lib/stripeClient", () => ({
-  getStripeSync: vi.fn(async () => ({
-    findOrCreateManagedWebhook: stripeStages.webhook,
-    syncBackfill: stripeStages.synchronization,
-  })),
+  getStripeSync: async () => {
+    await stripeStages.connection();
+    return {
+      findOrCreateManagedWebhook: stripeStages.webhook,
+      syncBackfill: stripeStages.synchronization,
+    };
+  },
 }));
 vi.mock("stripe-replit-sync", () => ({ runMigrations: stripeStages.migrations }));
 vi.mock("../lib/logger", () => ({ logger: { info: vi.fn(), error: vi.fn() } }));
@@ -89,7 +94,7 @@ test("failed enrollment repair keeps enrollment requests offline; removing fault
     }));
     const failedStartup = import("../index");
     // While repair is pending, the endpoint must not be bound.
-    await vi.waitFor(() => expect(repair).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(repair).toHaveBeenCalledTimes(1), { timeout: 10000 });
     expect(failedListen).not.toHaveBeenCalled();
     await expect(fetch(`http://127.0.0.1:${port}/api/enrollments`, {
       method: "POST",
@@ -127,7 +132,7 @@ test("failed enrollment repair keeps enrollment requests offline; removing fault
   }
 }, 30000);
 
-test.each(["migrations", "webhook", "synchronization"] as const)(
+test.each(["migrations", "connection", "webhook", "synchronization"] as const)(
   "Stripe %s blocks enrollment while pending and after failure; a clean retry starts normally",
   async (stage) => {
     const oldPort = process.env.PORT;
@@ -202,6 +207,13 @@ test.each(["migrations", "webhook", "synchronization"] as const)(
         );
       }
       expect(stripeStages.migrations).toHaveBeenLastCalledWith({ databaseUrl: "postgres://unused.invalid/test" });
+      expect(stripeStages.connection).toHaveBeenLastCalledWith();
+      const completedStages = Object.values(stripeStages);
+      for (let index = 1; index < completedStages.length; index++) {
+        expect(completedStages[index - 1].mock.invocationCallOrder.at(-1)).toBeLessThan(
+          completedStages[index].mock.invocationCallOrder.at(-1)!,
+        );
+      }
       expect(stripeStages.webhook).toHaveBeenLastCalledWith("https://example.invalid/api/stripe/webhook");
       expect(stripeStages.synchronization).toHaveBeenLastCalledWith({ object: "all" });
       const response = await fetch(`http://127.0.0.1:${port}/api/enrollments`, {
@@ -211,26 +223,39 @@ test.each(["migrations", "webhook", "synchronization"] as const)(
         signal: AbortSignal.timeout(1000),
       });
       expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: expect.any(String) });
     } finally {
       // Also release a pending stage or an early-bound server if an ordering regression fails the test.
-      rejectStage?.(new Error("Startup test cleanup"));
-      await failedStartup?.catch(() => {});
-      for (const spy of listenSpies) {
-        for (const result of spy.mock.results) {
-          const listeningServer = result.value as Server | undefined;
-          if (listeningServer?.listening) await new Promise<void>((resolve, reject) => {
-            listeningServer.close((error) => error ? reject(error) : resolve());
-          });
+      try {
+        rejectStage?.(new Error("Startup test cleanup"));
+        await failedStartup?.catch(() => {});
+        const servers: Server[] = [];
+        for (const spy of listenSpies) {
+          for (const result of spy.mock.results) {
+            if (result.type === "return") servers.push(result.value as Server);
+          }
         }
-        spy.mockRestore();
+        const closed = await Promise.allSettled(servers.map(async listeningServer => {
+          if (!listeningServer.listening) return;
+          listeningServer.closeAllConnections();
+          await new Promise<void>((resolve, reject) => {
+            listeningServer.close(error => error ? reject(error) : resolve());
+          });
+        }));
+        const failures = closed.filter(result => result.status === "rejected");
+        if (failures.length) {
+          throw new AggregateError(failures.map(result => result.reason), "Startup listener cleanup failed");
+        }
+      } finally {
+        for (const spy of listenSpies) spy.mockRestore();
+        for (const mock of Object.values(stripeStages)) mock.mockReset();
+        if (oldPort === undefined) delete process.env.PORT;
+        else process.env.PORT = oldPort;
+        if (oldDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = oldDatabaseUrl;
+        if (oldDomains === undefined) delete process.env.REPLIT_DOMAINS;
+        else process.env.REPLIT_DOMAINS = oldDomains;
       }
-      for (const mock of Object.values(stripeStages)) mock.mockReset();
-      if (oldPort === undefined) delete process.env.PORT;
-      else process.env.PORT = oldPort;
-      if (oldDatabaseUrl === undefined) delete process.env.DATABASE_URL;
-      else process.env.DATABASE_URL = oldDatabaseUrl;
-      if (oldDomains === undefined) delete process.env.REPLIT_DOMAINS;
-      else process.env.REPLIT_DOMAINS = oldDomains;
     }
   },
   30000,
