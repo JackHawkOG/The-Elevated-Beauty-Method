@@ -324,7 +324,7 @@ test("recovery does not expire a checkout that completed while cleanup was unava
   sessions.delete(id);
 });
 
-test("paid reconciliation restores a checkout once after its paid-but-open cleanup retry was cleared", async () => {
+test("paid reconciliation retries a Stripe outage and restores a checkout once after its paid-but-open cleanup retry was cleared", async () => {
   clock(opens);
   const buyer = await addUser(218);
   expect((await request("/membership/checkout", "POST", buyer, { kind: "standard" })).status).toBe(200);
@@ -333,6 +333,16 @@ test("paid reconciliation restores a checkout once after its paid-but-open clean
   await pool.query("DELETE FROM membership_checkouts WHERE stripe_session_id = $1", [id]);
   session.payment_status = "paid";
   session.subscription = `sub_${randomUUID()}`;
+  const ownership = {
+    id, metadata: { ...session.metadata }, customer: session.customer,
+    client_reference_id: session.client_reference_id, subscription: session.subscription,
+    mode: session.mode, priceId: session.priceId,
+  };
+  const membershipTier = async () => (await pool.query(
+    "SELECT membership_tier FROM users WHERE clerk_id = $1", [buyer],
+  )).rows;
+  const tierBefore = await membershipTier();
+  const originalRetrieve = retrieveSession.getMockImplementation()!;
   try {
     await pool.query("INSERT INTO membership_checkout_expirations (stripe_session_id) VALUES ($1)", [id]);
     expect(await row(buyer)).toBeUndefined();
@@ -350,7 +360,33 @@ test("paid reconciliation restores a checkout once after its paid-but-open clean
     await reconcileUntrackedPaidSessions(buyer);
     expect(await row(buyer)).toBeUndefined();
     session.status = "complete";
+
+    const retrievesBefore = retrieveSession.mock.calls.filter(([sessionId]) => sessionId === id).length;
+    const lookupError = new Error("Paid checkout Stripe lookup temporarily unavailable");
+    let failLookup = true;
+    retrieveSession.mockImplementation(async (sessionId: string) => {
+      if (sessionId === id && failLookup) {
+        failLookup = false;
+        throw lookupError;
+      }
+      return originalRetrieve(sessionId);
+    });
+    await expect(reconcileUntrackedPaidSessions(buyer)).rejects.toBe(lookupError);
+    expect(retrieveSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(retrievesBefore + 1);
+    expect((await pool.query(
+      "SELECT 1 FROM membership_checkouts WHERE clerk_id = $1", [buyer],
+    )).rows).toHaveLength(0);
+    expect(await membershipTier()).toEqual(tierBefore);
+    expect((await pool.query(
+      "SELECT 1 FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id],
+    )).rows).toHaveLength(0);
+    expect(session).toMatchObject({ ...ownership, status: "complete", payment_status: "paid" });
+    expect(customers.get(session.customer!)?.metadata.clerkId).toBe(buyer);
+    expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirationsBefore);
+    expect(createSession.mock.calls.length).toBe(createdBefore);
+
     await reconcileUntrackedPaidSessions(buyer);
+    expect(retrieveSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(retrievesBefore + 2);
     expect(await row(buyer)).toMatchObject({
       status: "confirmed", stripe_session_id: id, membership_tier: "Elevated",
     });
@@ -369,7 +405,9 @@ test("paid reconciliation restores a checkout once after its paid-but-open clean
     )).rows).toHaveLength(0);
     expect(expireSession.mock.calls.filter(([sessionId]) => sessionId === id)).toHaveLength(expirationsBefore);
     expect(createSession.mock.calls.length).toBe(createdBefore);
+    expect(session).toMatchObject({ ...ownership, status: "complete", payment_status: "paid" });
   } finally {
+    retrieveSession.mockImplementation(originalRetrieve);
     await pool.query("DELETE FROM membership_checkout_expirations WHERE stripe_session_id = $1", [id]);
     sessions.delete(id);
     vi.restoreAllMocks();
