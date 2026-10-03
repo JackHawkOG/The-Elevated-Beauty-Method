@@ -65,17 +65,45 @@ const rows = async (client: PoolClient) => (await client.query(`
   FROM enrollments ORDER BY id
 `)).rows;
 
+const additionalLegacyRules = ["partial", "expression", "deferrable"] as const;
+type AdditionalLegacyRule = typeof additionalLegacyRules[number];
+
+async function installAdditionalLegacyRule(client: PoolClient, rule: AdditionalLegacyRule) {
+  if (rule === "partial") {
+    await client.query(`
+      CREATE UNIQUE INDEX enrollments_user_id_course_id_unique
+        ON enrollments (user_id, course_id) WHERE completed_lessons >= 10
+    `);
+  } else if (rule === "expression") {
+    await client.query(`
+      CREATE UNIQUE INDEX enrollments_user_id_course_id_unique
+        ON enrollments (lower(user_id), (course_id + id))
+    `);
+  } else {
+    // A committed DEFERRABLE constraint cannot contain duplicate pairs.
+    await client.query(`
+      DELETE FROM enrollments WHERE id = 2;
+      ALTER TABLE enrollments ADD CONSTRAINT enrollments_user_id_course_id_unique
+        UNIQUE (user_id, course_id) DEFERRABLE INITIALLY IMMEDIATE
+    `);
+  }
+}
+
 test.each([
   ["migration", "standalone"],
   ["startup repair", "standalone"],
   ["migration", "constraint-owned"],
   ["startup repair", "constraint-owned"],
+  ...additionalLegacyRules.flatMap(rule => [
+    ["migration", rule] as const,
+    ["startup repair", rule] as const,
+  ]),
 ] as const)("operator recovery via %s preserves a %s index and dependencies", async (kind, ownership) => {
   requireDevelopmentDatabase();
   await withLegacySchema(async (client) => {
     if (ownership === "standalone") {
       await client.query("CREATE INDEX enrollments_user_id_course_id_unique ON enrollments (user_id, course_id)");
-    } else {
+    } else if (ownership === "constraint-owned") {
       await client.query(`
         ALTER TABLE enrollments ADD CONSTRAINT enrollments_user_id_course_id_unique
           UNIQUE (user_id, course_id, id);
@@ -86,6 +114,8 @@ test.each([
         );
         INSERT INTO enrollment_references VALUES ('member', 7, 1);
       `);
+    } else {
+      await installAdditionalLegacyRule(client, ownership);
     }
     const legacyOid = (await client.query(
       "SELECT 'enrollments_user_id_course_id_unique'::regclass::oid AS oid",
@@ -98,13 +128,45 @@ test.each([
       ORDER BY classid, objid, objsubid, refclassid, refobjid, refobjsubid, deptype
     `, [legacyOid])).rows;
     const constraints = async () => (await client.query(`
-      SELECT oid, contype, conrelid, confrelid, conindid, pg_get_constraintdef(oid) AS definition
+      SELECT oid, contype, conrelid, confrelid, conindid, condeferrable, condeferred,
+        pg_get_constraintdef(oid) AS definition
       FROM pg_constraint WHERE conrelid = 'enrollments'::regclass OR conindid = $1
       ORDER BY oid
     `, [legacyOid])).rows;
     const originalRows = await rows(client);
     const originalDependencies = await dependencies();
     const originalConstraints = await constraints();
+    const legacyProperties = async () => (await client.query(`
+      SELECT indisunique, indisvalid, indisready, indimmediate, indnkeyatts,
+        indkey::text, pg_get_expr(indpred, indrelid) AS predicate,
+        pg_get_expr(indexprs, indrelid) AS expressions
+      FROM pg_index WHERE indexrelid = $1
+    `, [legacyOid])).rows;
+    const originalProperties = await legacyProperties();
+    expect(originalDependencies.length).toBeGreaterThan(0);
+    if (ownership === "partial") {
+      expect(originalProperties[0]).toMatchObject({
+        indisunique: true, indimmediate: true, predicate: expect.stringContaining("completed_lessons"),
+        expressions: null,
+      });
+    } else if (ownership === "expression") {
+      expect(originalProperties[0]).toMatchObject({
+        indisunique: true, indimmediate: true, predicate: null,
+        expressions: expect.stringContaining("lower(user_id)"),
+      });
+    } else if (ownership === "deferrable") {
+      expect(originalProperties[0]).toMatchObject({ indisunique: true, indimmediate: false });
+      expect(originalConstraints).toContainEqual(expect.objectContaining({
+        conindid: legacyOid, condeferrable: true, condeferred: false,
+      }));
+      // Prove the fixture really defers pair uniqueness before recovery.
+      await client.query("BEGIN; SET CONSTRAINTS enrollments_user_id_course_id_unique DEFERRED");
+      await client.query("INSERT INTO enrollments (id, user_id, course_id) VALUES (3, 'member', 7)");
+      expect(await rows(client)).toHaveLength(2);
+      await expect(client.query("SET CONSTRAINTS enrollments_user_id_course_id_unique IMMEDIATE"))
+        .rejects.toMatchObject({ code: "23505", constraint: "enrollments_user_id_course_id_unique" });
+      await client.query("ROLLBACK");
+    }
     // Execute the documented read-only inspection, including both dependency directions.
     const inspected = await client.query(await operation("inspect-enrollment-index"));
     expect(inspected).toHaveLength(6);
@@ -112,6 +174,9 @@ test.each([
       ? { code: "P0001" } : { cause: { code: "P0001" } });
     await client.query("ROLLBACK");
     expect(await rows(client)).toEqual(originalRows);
+    expect(await legacyProperties()).toEqual(originalProperties);
+    expect(await dependencies()).toEqual(originalDependencies);
+    expect(await constraints()).toEqual(originalConstraints);
 
     await client.query(await operation("rename-incompatible-enrollment-index"));
     expect((await client.query(
@@ -119,18 +184,31 @@ test.each([
     )).rows[0].oid).toBe(legacyOid);
     expect(await dependencies()).toEqual(originalDependencies);
     expect(await constraints()).toEqual(originalConstraints);
-    if (ownership === "constraint-owned") {
+    expect(await legacyProperties()).toEqual(originalProperties);
+    if (ownership === "constraint-owned" || ownership === "deferrable") {
       expect((await client.query(
         "SELECT conname FROM pg_constraint WHERE conrelid = 'enrollments'::regclass AND conindid = $1",
         [legacyOid],
       )).rows).toEqual([{ conname: "enrollments_user_id_course_id_legacy" }]);
     }
     await repair(client, kind);
-    expect(await rows(client)).toEqual([{
+    expect(await rows(client)).toEqual(ownership === "deferrable" ? originalRows : [{
       id: 1, completed_lessons: 4, last_lesson_id: 31, enrolled_at: "2022-01-01",
     }]);
     expect(await dependencies()).toEqual(originalDependencies);
     expect(await constraints()).toEqual(originalConstraints);
+    expect(await legacyProperties()).toEqual(originalProperties);
+    expect((await client.query(`
+      SELECT indexrelid::oid AS oid, indisunique, indisvalid, indisready,
+        indimmediate, indnkeyatts, indpred, indexprs
+      FROM pg_index WHERE indexrelid = 'enrollments_user_id_course_id_unique'::regclass
+    `)).rows[0]).toEqual({
+      oid: expect.any(Number), indisunique: true, indisvalid: true, indisready: true,
+      indimmediate: true, indnkeyatts: 2, indpred: null, indexprs: null,
+    });
+    expect((await client.query(
+      "SELECT 'enrollments_user_id_course_id_unique'::regclass::oid AS oid",
+    )).rows[0].oid).not.toBe(legacyOid);
     if (ownership === "constraint-owned") {
       expect((await client.query("SELECT * FROM enrollment_references")).rows)
         .toEqual([{ user_id: "member", course_id: 7, enrollment_id: 1 }]);
@@ -145,6 +223,13 @@ test.each([
     await expect(client.query(`
       INSERT INTO enrollments (id, user_id, course_id) VALUES (3, 'member', 7)
     `)).rejects.toMatchObject({ code: "23505", constraint: "enrollments_user_id_course_id_unique" });
+    if (ownership === "deferrable") {
+      await client.query("BEGIN; SET CONSTRAINTS enrollments_user_id_course_id_legacy DEFERRED");
+      await expect(client.query("INSERT INTO enrollments (id, user_id, course_id) VALUES (3, 'member', 7)"))
+        .rejects.toMatchObject({ code: "23505", constraint: "enrollments_user_id_course_id_unique" });
+      await client.query("ROLLBACK");
+      expect(await rows(client)).toEqual(recoveredRows);
+    }
     await repair(client, kind);
     expect(await rows(client)).toEqual(recoveredRows);
     await expect(client.query(await operation("rename-incompatible-enrollment-index")))
@@ -153,6 +238,58 @@ test.each([
     expect(await constraints()).toEqual(originalConstraints);
   });
 });
+
+test.each(additionalLegacyRules)(
+  "verification refuses a same-name %s rule without immediate pair uniqueness", async (rule) => {
+    await withLegacySchema(async (client) => {
+      await installAdditionalLegacyRule(client, rule);
+      await client.query("DELETE FROM enrollments WHERE id = 2");
+      const before = { rows: await rows(client), indexes: await privateIndexes(client) };
+      const sequenceBefore = (await client.query("SELECT last_value, is_called FROM enrollments_id_seq")).rows;
+      await expect(client.query(await operation("verify-enrollment-index-recovery")))
+        .rejects.toMatchObject({ message: expect.stringContaining("uniqueness is not installed") });
+      await client.query("ROLLBACK");
+      expect({ rows: await rows(client), indexes: await privateIndexes(client) }).toEqual(before);
+      expect((await client.query("SELECT last_value, is_called FROM enrollments_id_seq")).rows)
+        .toEqual(sequenceBefore);
+    });
+  },
+);
+
+test.each(["migration", "startup repair"] as const)(
+  "verification via %s refuses rejection by a preserved legacy expression index", async (kind) => {
+    await withLegacySchema(async (client) => {
+      await installAdditionalLegacyRule(client, "expression");
+      await client.query(await operation("rename-incompatible-enrollment-index"));
+      await repair(client, kind);
+      const before = await rows(client);
+      const sequenceBefore = (await client.query("SELECT last_value, is_called FROM enrollments_id_seq")).rows;
+      // A real legacy-index violation, not a synthetic exception: change the
+      // probe's pair so it passes the new index but conflicts on course_id + id.
+      await client.query(`
+        CREATE FUNCTION redirect_probe() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          UPDATE enrollments SET completed_lessons = 99 WHERE id = 1;
+          NEW.course_id := NEW.course_id - NEW.id + 1;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER redirect_probe BEFORE INSERT ON enrollments
+          FOR EACH ROW EXECUTE FUNCTION redirect_probe();
+      `);
+      await expect(client.query(await operation("verify-enrollment-index-recovery")))
+        .rejects.toMatchObject({
+          message: expect.stringContaining("unexpected constraint: enrollments_user_id_course_id_legacy"),
+        });
+      await client.query("ROLLBACK");
+      expect(await rows(client)).toEqual(before);
+      expect((await client.query("SELECT last_value, is_called FROM enrollments_id_seq")).rows)
+        .toEqual(sequenceBefore);
+      await client.query("DROP TRIGGER redirect_probe ON enrollments");
+      await client.query(await operation("verify-enrollment-index-recovery"));
+      expect(await rows(client)).toEqual(before);
+    });
+  },
+);
 
 // Read the runbook, rather than maintaining a second copy of its psql commands.
 // The shell's only "resume" action writes a disposable marker, never starts an API.
