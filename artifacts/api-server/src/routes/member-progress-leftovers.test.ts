@@ -304,7 +304,7 @@ test("database cleanup rolls back every selected feed row if one changes after s
   }
 });
 
-test.each(["changed", "unchanged"] as const)(
+test.each(["changed-email", "changed-name", "unchanged"] as const)(
   "database member cleanup preserves a %s selection before identity deletion",
   async state => {
     requireDevelopmentDatabase();
@@ -321,6 +321,7 @@ test.each(["changed", "unchanged"] as const)(
     const deletedIdentities: string[] = [];
     const output: string[] = [];
     const changedEmail = `changed-${fixtureRun}@example.com`;
+    const changedName = `Renamed member ${fixtureRun}`;
     try {
       for (const identity of identities) {
         const [row] = await db.insert(usersTable).values({
@@ -339,24 +340,29 @@ test.each(["changed", "unchanged"] as const)(
         async id => { deletedIdentities.push(id); },
         message => output.push(message),
         async () => {
-          if (state === "changed") {
+          if (state !== "unchanged") {
             // Change the second selected member so an earlier successful delete
             // must roll back, without ever reaching the identity provider.
-            await db.update(usersTable).set({ email: changedEmail })
+            await db.update(usersTable).set(state === "changed-email"
+              ? { email: changedEmail } : { displayName: changedName })
               .where(eq(usersTable.clerkId, identities[1].id));
           }
         },
       );
-      if (state === "changed") {
+      if (state !== "unchanged") {
         await expect(cleanup).rejects.toThrow(/Member changed during cleanup; refusing partial deletion/);
         expect(deletedIdentities).toEqual([]);
         expect(output).toEqual([]);
         const remaining = await db.select({
-          clerkId: usersTable.clerkId, email: usersTable.email,
+          clerkId: usersTable.clerkId, email: usersTable.email, displayName: usersTable.displayName,
         }).from(usersTable).where(inArray(usersTable.clerkId, memberIds)).orderBy(usersTable.id);
         expect(remaining).toEqual([
-          { clerkId: identities[0].id, email: identities[0].email },
-          { clerkId: identities[1].id, email: changedEmail },
+          { clerkId: identities[0].id, email: identities[0].email, displayName: identities[0].name },
+          {
+            clerkId: identities[1].id,
+            email: state === "changed-email" ? changedEmail : identities[1].email,
+            displayName: state === "changed-name" ? changedName : identities[1].name,
+          },
         ]);
         expect(await db.select({ id: activityTable.id }).from(activityTable)
           .where(inArray(activityTable.id, activityIds))).toEqual([{ id: activity.id }]);
