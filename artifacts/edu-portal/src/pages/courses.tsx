@@ -29,7 +29,7 @@ export default function CoursesPage() {
     { query: { queryKey: getListCoursesQueryKey(courseParams) } }
   );
 
-  const enrollMutation = useCourseEnrollment((data) => {
+  const enrollMutation = useCourseEnrollment("list", (data) => {
     toast({ title: "Enrolled successfully", description: `You are now enrolled in ${data.courseTitle}.` });
     setLocation(`/courses/${data.courseId}`);
   });

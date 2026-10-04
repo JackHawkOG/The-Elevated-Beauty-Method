@@ -21,6 +21,17 @@ export function trackEvent(name: string, data?: AnalyticsData): void {
   }
 }
 
+export type CourseEnrollmentSource = "list" | "detail";
+export type CourseEnrollmentOutcome = "confirmed" | "recovered_confirmed" | "rejected" | "unconfirmed_lookup";
+
+export function trackCourseEnrollmentOutcome(
+  outcome: CourseEnrollmentOutcome,
+  source: CourseEnrollmentSource,
+): void {
+  // Fixed dimensions only: never forward course/member IDs, replies, or errors.
+  trackEvent("course_enrollment_outcome", { outcome, source });
+}
+
 export function trackRadiantAuditSaved(completionKind: "first_time" | "retake"): void {
   trackEvent("radiant_audit_saved", { completion_kind: completionKind });
 }

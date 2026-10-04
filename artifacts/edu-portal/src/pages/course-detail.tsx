@@ -28,7 +28,7 @@ export default function CourseDetailPage() {
   const completedIds = new Set(enrollment?.completedLessonIds ?? []);
   const nextLesson = course?.lessons?.find(lesson => !completedIds.has(lesson.id)) ?? course?.lessons?.[0];
 
-  const enrollMutation = useCourseEnrollment(() => {
+  const enrollMutation = useCourseEnrollment("detail", () => {
     toast({ title: "Enrolled successfully", description: "You can now access all lessons." });
   });
 

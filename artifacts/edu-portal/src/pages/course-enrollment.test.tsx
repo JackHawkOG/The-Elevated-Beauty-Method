@@ -34,6 +34,7 @@ const enrollment: Enrollment = {
   totalLessons: 1, enrolledAt: "2026-10-02T00:00:00Z",
 };
 afterEach(() => {
+  delete window.umami;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -47,8 +48,15 @@ async function settle(until: () => boolean) {
 
 for (const page of ["list", "detail"] as const) {
   for (const failure of ["success", "network", "server", "timeout", "invalid reply", "missing", "lookup unavailable", "access", "validation"] as const) {
-    test(`${page}: ${failure} enrollment reply has accurate status`, async () => {
+    test.each(["available", "absent", "throws", "rejects"] as const)(
+      `${page}: ${failure} enrollment reply has accurate status with %s analytics`, async (analytics) => {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      const track = vi.fn(() => {
+        if (analytics === "throws") throw new Error("Tracker blocked");
+        if (analytics === "rejects") return Promise.reject(new Error("Tracker unavailable"));
+        return undefined;
+      });
+      if (analytics !== "absent") window.umami = { track };
       let persisted: Enrollment[] = [];
       let posts = 0;
       let recoveryReads = 0;
@@ -94,6 +102,7 @@ for (const page of ["list", "detail"] as const) {
         ));
         await settle(() => Array.from(container.querySelectorAll("button")).some(button =>
           button.textContent?.includes(page === "list" ? "Access" : "Enroll Now")));
+        expect(track).not.toHaveBeenCalled();
         const button = Array.from(container.querySelectorAll("button")).find(button =>
           button.textContent?.includes(page === "list" ? "Access" : "Enroll Now"))!;
         await act(async () => button.click());
@@ -101,6 +110,7 @@ for (const page of ["list", "detail"] as const) {
         if (!definitive && failure !== "success") {
           await settle(() => !!finishLookup);
           expect(toast).not.toHaveBeenCalled();
+          expect(track).not.toHaveBeenCalled();
           await settle(() => button.disabled);
           expect(posts).toBe(1);
           await act(async () => finishLookup!());
@@ -124,6 +134,16 @@ for (const page of ["list", "detail"] as const) {
           if (definitive) expect(recoveryReads).toBe(0);
           if (page === "list") expect(location.history?.at(-1)).toBe("/courses");
         }
+        // Exactly one outcome per attempt, and no identity, course payload,
+        // or raw error can escape via the tracker.
+        expect(track.mock.calls).toEqual(analytics === "absent" ? [] : [
+          ["course_enrollment_outcome", {
+            source: page,
+            outcome: failure === "success" ? "confirmed"
+              : failure === "lookup unavailable" ? "unconfirmed_lookup"
+              : definitive || failure === "missing" ? "rejected" : "recovered_confirmed",
+          }],
+        ]);
       } finally {
         await act(async () => mountedRoot.unmount());
         client.clear();

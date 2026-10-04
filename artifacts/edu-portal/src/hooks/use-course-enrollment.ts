@@ -7,6 +7,7 @@ import {
   getGetCourseQueryKey,
   type Enrollment,
 } from "@workspace/api-client-react";
+import { trackCourseEnrollmentOutcome, type CourseEnrollmentSource } from "@/lib/analytics";
 
 class EnrollmentUnconfirmedError extends Error {
   constructor() {
@@ -33,29 +34,41 @@ export function enrollmentErrorNotice(error: unknown) {
   };
 }
 
-export function useCourseEnrollment(onEnrolled: (enrollment: Enrollment) => void) {
+export function useCourseEnrollment(source: CourseEnrollmentSource, onEnrolled: (enrollment: Enrollment) => void) {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
     mutationFn: async ({ data }: { data: { courseId: number } }) => {
       try {
-        return await enrollInCourse(data);
+        const enrollment = await enrollInCourse(data);
+        // The API returns only after persisting (or reusing) the enrollment.
+        trackCourseEnrollmentOutcome("confirmed", source);
+        return enrollment;
       } catch (error) {
         const status = errorStatus(error);
         // Access/validation rejections are definitive; a timeout or server error
         // may occur after the enrollment committed.
-        if (status && status >= 400 && status < 500 && status !== 408) throw error;
+        if (status && status >= 400 && status < 500 && status !== 408) {
+          trackCourseEnrollmentOutcome("rejected", source);
+          throw error;
+        }
         let persisted: Enrollment[];
         try {
           // Bypass cached data and in-flight pre-enrollment queries.
           persisted = await listEnrollments();
         } catch {
+          trackCourseEnrollmentOutcome("unconfirmed_lookup", source);
           throw new EnrollmentUnconfirmedError();
         }
         await queryClient.cancelQueries({ queryKey: getListEnrollmentsQueryKey() });
         queryClient.setQueryData(getListEnrollmentsQueryKey(), persisted);
         const enrollment = persisted.find(item => item.courseId === data.courseId);
-        if (enrollment) return enrollment;
+        if (enrollment) {
+          trackCourseEnrollmentOutcome("recovered_confirmed", source);
+          return enrollment;
+        }
+        // A successful fresh lookup established that enrollment was not saved.
+        trackCourseEnrollmentOutcome("rejected", source);
         throw new Error("Your enrollment wasn't found. Please try again.");
       }
     },
