@@ -54,3 +54,4 @@
 - [Profile cleanup concurrency](profile-cleanup-races.md) — ownership alone is insufficient; protect exact snapshots, the external deletion gap, and safety-check failure compensation.
 - [Shared membership decision snapshots](membership-decision-snapshots.md) — checkout locks alone cannot serialize access decisions across subscriptions; waiting needs a fresh SQL snapshot.
 - [Transaction test gates](transaction-test-gates.md) — race transaction signals against early responses so rejected requests cannot strand gates and fixtures.
+- [Guide delivery test isolation](guide-delivery-test-isolation.md) — scoped request fixtures alone do not isolate the store's global expired-counter cleanup.

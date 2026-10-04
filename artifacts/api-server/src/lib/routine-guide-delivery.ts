@@ -69,14 +69,18 @@ export function getRoutineGuideDeliveryAction(
   return "retry";
 }
 
-export const routineGuideClaimStore: GuideClaimStore = {
+// Database injection lets integration checks use the real locking/query path
+// without exposing existing delivery records or global rate-limit cleanup.
+export const createRoutineGuideClaimStore = (
+  database: Omit<typeof db, "$client"> = db,
+): GuideClaimStore => ({
   async reserve({ requestId, email, ip, now = new Date() }): Promise<Reservation> {
     const emailHash = sha256(email);
     const ipHash = sha256(ip);
     const windowStartedAt = new Date(Math.floor(now.getTime() / RATE_WINDOW_MS) * RATE_WINDOW_MS);
     const deliveryKey = { guideVersion: ROUTINE_GUIDE_VERSION, emailHash };
 
-    return db.transaction(async (tx): Promise<Reservation> => {
+    return database.transaction(async (tx): Promise<Reservation> => {
       const lockKeys = [
         lockKey(`request:${requestId}`),
         lockKey(`email:${emailHash}`),
@@ -179,7 +183,7 @@ export const routineGuideClaimStore: GuideClaimStore = {
   },
 
   async markAccepted(email, providerIdempotencyKey, now = new Date()): Promise<void> {
-    const [updated] = await db.update(routineGuideDeliveriesTable)
+    const [updated] = await database.update(routineGuideDeliveriesTable)
       .set({ state: "sent", acceptedAt: now, leaseUntil: null, updatedAt: now })
       .where(and(
         eq(routineGuideDeliveriesTable.emailHash, sha256(email)),
@@ -190,7 +194,7 @@ export const routineGuideClaimStore: GuideClaimStore = {
   },
 
   async markRejected(email, providerIdempotencyKey, now = new Date()): Promise<void> {
-    const [updated] = await db.update(routineGuideDeliveriesTable)
+    const [updated] = await database.update(routineGuideDeliveriesTable)
       .set({ state: "failed", leaseUntil: null, updatedAt: now })
       .where(and(
         eq(routineGuideDeliveriesTable.emailHash, sha256(email)),
@@ -201,7 +205,7 @@ export const routineGuideClaimStore: GuideClaimStore = {
   },
 
   async markUncertain(email, providerIdempotencyKey, now = new Date()): Promise<void> {
-    const [updated] = await db.update(routineGuideDeliveriesTable)
+    const [updated] = await database.update(routineGuideDeliveriesTable)
       .set({
         state: "uncertain",
         leaseUntil: new Date(now.getTime() + ACTIVE_CLAIM_LEASE_MS),
@@ -214,4 +218,6 @@ export const routineGuideClaimStore: GuideClaimStore = {
       .returning({ emailHash: routineGuideDeliveriesTable.emailHash });
     if (!updated) throw new Error("Routine guide uncertainty state was not recorded");
   },
-};
+});
+
+export const routineGuideClaimStore = createRoutineGuideClaimStore();
