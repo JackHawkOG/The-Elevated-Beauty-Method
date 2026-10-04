@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import express from "express";
 import type { Server } from "node:http";
-import { GetPendingMembershipInvoiceHistoryResponse } from "@workspace/api-zod";
+import { GetMembershipInvoiceHistoryNoticeResponse, GetPendingMembershipInvoiceHistoryResponse } from "@workspace/api-zod";
 
 const state = vi.hoisted(() => ({
   getUser: vi.fn(),
@@ -111,4 +111,49 @@ test("database outages return an error, not an empty or stale queue", async () =
   expect(response.status).toBe(503);
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   expect(await response.json()).toEqual({ error: "Pending invoice history is unavailable. Try again later." });
+});
+
+function noticeRequest(role?: string) {
+  return fetch(url.replace("pending-invoice-history", "invoice-history-notice"), {
+    headers: role ? { "x-test-user": role } : {},
+  });
+}
+test.each([undefined, "member", "editor", "unknown"])("notice denies %s without querying recovery state", async role => {
+  expect((await noticeRequest(role)).status).toBe(role ? 403 : 401);
+  expect(state.query).not.toHaveBeenCalled();
+});
+test.each(["owner", "admin"])("%s receives only the current aggregate recovery notice", async role => {
+  state.query.mockResolvedValue({ rows: [{ overdue_count: 2, ...row() }] });
+  const response = await noticeRequest(role);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  expect(GetMembershipInvoiceHistoryNoticeResponse.parse(await response.json())).toEqual({
+    overdueCount: 2, failedAttemptThreshold: 8,
+  });
+  const [sql, params] = state.query.mock.calls[0];
+  expect(sql).toContain("count(*)::integer");
+  expect(sql).toContain("status = 'forfeited' AND kind = 'founding' AND invoice_history_pending");
+  expect(sql).toContain("invoice_history_retry_count >= $1");
+  expect(params).toEqual([8]);
+  expect(sql).not.toMatch(/UPDATE|INSERT|DELETE|LIMIT/);
+});
+test("recovered history clears the notice without retaining a cached count", async () => {
+  state.query.mockResolvedValueOnce({ rows: [{ overdue_count: 1 }] });
+  expect(await (await noticeRequest("owner")).json()).toEqual({ overdueCount: 1, failedAttemptThreshold: 8 });
+  state.query.mockResolvedValueOnce({ rows: [{ overdue_count: 0 }] });
+  expect(await (await noticeRequest("owner")).json()).toEqual({ overdueCount: 0, failedAttemptThreshold: 8 });
+});
+test("notice fails closed when role verification is unavailable", async () => {
+  state.getUser.mockRejectedValue(new Error("Clerk unavailable"));
+  expect((await noticeRequest("owner")).status).toBe(503);
+  expect(state.query).not.toHaveBeenCalled();
+});
+test("database outage never reports recovery or retains an old notice count", async () => {
+  state.query.mockResolvedValueOnce({ rows: [{ overdue_count: 1 }] });
+  expect((await noticeRequest("owner")).status).toBe(200);
+  state.query.mockRejectedValue(new Error("DB unavailable"));
+  const response = await noticeRequest("owner");
+  expect(response.status).toBe(503);
+  expect(response.headers.get("cache-control")).toBe("private, no-store");
+  expect(await response.json()).toEqual({ error: "Invoice history recovery notices could not be checked. Try again later." });
 });

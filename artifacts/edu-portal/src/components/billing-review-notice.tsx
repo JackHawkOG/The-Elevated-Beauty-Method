@@ -1,8 +1,13 @@
 import { useUser } from "@clerk/react";
 import { Link } from "wouter";
 import { getGetMembershipReviewNotificationsQueryKey, useGetMembershipReviewNotifications } from "@workspace/api-client-react";
+import { InvoiceHistoryNotice } from "./invoice-history-notice";
 
 export function BillingReviewNotice() {
+  return <><ReviewNotice /><InvoiceHistoryNotice /></>;
+}
+
+function ReviewNotice() {
   const { user } = useUser();
   const canReview = ["owner", "admin"].includes(String(user?.publicMetadata.role));
   const notifications = useGetMembershipReviewNotifications({

@@ -320,6 +320,13 @@ export interface MembershipCheckoutCleanupAlerts {
   sessions: MembershipCheckoutCleanupAlert[];
 }
 
+export interface MembershipInvoiceHistoryNotice {
+  /** @minimum 0 */
+  overdueCount: number;
+  /** @minimum 1 */
+  failedAttemptThreshold: number;
+}
+
 export interface PendingMembershipInvoiceHistoryRecord {
   checkoutId: number;
   memberId: string;

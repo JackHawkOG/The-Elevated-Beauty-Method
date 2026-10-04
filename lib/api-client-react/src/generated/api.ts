@@ -66,6 +66,7 @@ import type {
   MembershipCheckoutInput,
   MembershipConversionInput,
   MembershipConversionReceipt,
+  MembershipInvoiceHistoryNotice,
   MembershipOffer,
   MembershipReconciliationAlerts,
   MembershipRedirect,
@@ -1502,6 +1503,83 @@ export function useGetMembershipReconciliationAlerts<TData = Awaited<ReturnType<
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMembershipReconciliationAlertsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetMembershipInvoiceHistoryNoticeUrl = () => {
+
+
+
+
+  return `/api/membership/invoice-history-notice`
+}
+
+/**
+ * @summary Private operational notice for prolonged ended-membership history recovery (owner/admin only)
+ */
+export const getMembershipInvoiceHistoryNotice = async ( options?: Parameters<typeof customFetch>[1]): Promise<MembershipInvoiceHistoryNotice> => {
+
+  return customFetch<MembershipInvoiceHistoryNotice>(getGetMembershipInvoiceHistoryNoticeUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMembershipInvoiceHistoryNoticeQueryKey = () => {
+    return [
+    `/api/membership/invoice-history-notice`
+    ] as const;
+    }
+
+
+export const getGetMembershipInvoiceHistoryNoticeQueryOptions = <TData = Awaited<ReturnType<typeof getMembershipInvoiceHistoryNotice>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipInvoiceHistoryNotice>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMembershipInvoiceHistoryNoticeQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMembershipInvoiceHistoryNotice>>> = ({ signal }) => getMembershipInvoiceHistoryNotice({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMembershipInvoiceHistoryNotice>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMembershipInvoiceHistoryNoticeQueryResult = NonNullable<Awaited<ReturnType<typeof getMembershipInvoiceHistoryNotice>>>
+export type GetMembershipInvoiceHistoryNoticeQueryError = ErrorType<void>
+
+
+/**
+ * @summary Private operational notice for prolonged ended-membership history recovery (owner/admin only)
+ */
+
+export function useGetMembershipInvoiceHistoryNotice<TData = Awaited<ReturnType<typeof getMembershipInvoiceHistoryNotice>>, TError = ErrorType<void>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMembershipInvoiceHistoryNotice>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMembershipInvoiceHistoryNoticeQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

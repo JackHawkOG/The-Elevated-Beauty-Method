@@ -1,5 +1,24 @@
 import { pool } from "@workspace/db";
 
+// Includes the initial failure. With exponential retries this is about 32 hours.
+export const INVOICE_HISTORY_FAILED_ATTEMPT_THRESHOLD = 8;
+
+export async function membershipInvoiceHistoryNotice() {
+  // Derive from committed recovery state rather than a separate notification
+  // ledger: successful recovery clears the notice atomically. Never substitute
+  // a cached count (or zero) when the database cannot be read.
+  const result = await pool.query<{ overdue_count: number }>(
+    `SELECT count(*)::integer AS overdue_count FROM membership_checkouts
+     WHERE status = 'forfeited' AND kind = 'founding' AND invoice_history_pending
+       AND invoice_history_retry_count >= $1`,
+    [INVOICE_HISTORY_FAILED_ATTEMPT_THRESHOLD],
+  );
+  return {
+    overdueCount: result.rows[0].overdue_count,
+    failedAttemptThreshold: INVOICE_HISTORY_FAILED_ATTEMPT_THRESHOLD,
+  };
+}
+
 // Read persisted recovery state only: viewing this queue must never retry Stripe
 // requests, alter forfeiture, or grant access.
 export async function pendingMembershipInvoiceHistory(after = 0) {

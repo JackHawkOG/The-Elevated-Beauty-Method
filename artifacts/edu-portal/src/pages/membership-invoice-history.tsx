@@ -42,6 +42,7 @@ function History({ userId }: { userId: string }) {
       <p className="text-muted-foreground">Read-only staff view of forfeited founding memberships still awaiting invoice history. Access remains ended for these members. Missing history is not proof of payment failure.</p>
       <section aria-label="How to read this list" className="rounded-2xl border border-border bg-card p-6 text-sm space-y-2">
         <p><strong>Retry attempts</strong> counts failed invoice-history attempts, including the initial attempt.</p>
+        <p>A private staff notice appears after eight failed attempts (roughly 32 hours on the current retry schedule) and clears after successful history recovery. If notices cannot be checked, recovery is not confirmed.</p>
         <p><strong>Next retry</strong> is when the record becomes eligible. The automatic sweep runs roughly every 15 minutes, so the actual retry may be later. No date means no retry time is recorded, not that the record is resolved.</p>
         <p><strong>Subscription</strong> shown as unavailable means no subscription identifier is available.</p>
       </section>

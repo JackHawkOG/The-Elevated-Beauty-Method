@@ -13,6 +13,8 @@ vi.mock("@clerk/react", () => ({
   useUser: () => ({ user: state.userId ? { id: state.userId, publicMetadata: { role: state.role } } : null }),
 }));
 vi.mock("@workspace/api-client-react", () => ({
+  getGetMembershipInvoiceHistoryNoticeQueryKey: () => ["/membership/invoice-history-notice"],
+  useGetMembershipInvoiceHistoryNotice: () => ({ data: { overdueCount: 0, failedAttemptThreshold: 8 }, isError: false }),
   getGetMembershipReviewNotificationsQueryKey: () => ["/membership/review-notifications"],
   useGetMembershipReviewNotifications: (options: unknown) => {
     state.query(options);

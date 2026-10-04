@@ -414,6 +414,24 @@ paths:
           description: Sign-in required
         "403":
           description: Owner or admin access required
+  /membership/invoice-history-notice:
+    get:
+      operationId: getMembershipInvoiceHistoryNotice
+      tags: [membership]
+      summary: Private operational notice for prolonged ended-membership history recovery (owner/admin only)
+      responses:
+        "200":
+          description: Current aggregate only; no member or billing identifiers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MembershipInvoiceHistoryNotice"
+        "401":
+          description: Authentication required
+        "403":
+          description: Staff access required
+        "503":
+          description: Staff access or current notice could not be checked; not evidence of recovery
   /membership/pending-invoice-history:
     get:
       operationId: getPendingMembershipInvoiceHistory
@@ -1653,6 +1671,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MembershipCheckoutCleanupAlert"
+    MembershipInvoiceHistoryNotice:
+      type: object
+      required: [overdueCount, failedAttemptThreshold]
+      properties:
+        overdueCount: { type: integer, minimum: 0 }
+        failedAttemptThreshold: { type: integer, minimum: 1 }
     PendingMembershipInvoiceHistoryRecord:
       type: object
       required: [checkoutId, memberId, subscriptionId, retryAttempts, nextRetryAt]

@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { pool } from "@workspace/db";
 import { requireDevelopmentDatabase } from "../routes/test-development-database";
-import { pendingMembershipInvoiceHistory } from "./membership-invoice-history";
+import { membershipInvoiceHistoryNotice, pendingMembershipInvoiceHistory } from "./membership-invoice-history";
 
 test("pending queue filters real SQL to ended founding records and leaves recovery state unchanged", async () => {
   requireDevelopmentDatabase();
@@ -34,6 +34,44 @@ test("pending queue filters real SQL to ended founding records and leaves recove
     expect((await client.query("SELECT * FROM membership_checkouts ORDER BY id")).rows).toEqual(before);
     await client.query("UPDATE membership_checkouts SET invoice_history_pending = false WHERE id = 1");
     expect((await pendingMembershipInvoiceHistory()).memberships.map(row => row.checkoutId)).toEqual([6]);
+  } finally {
+    querySpy?.mockRestore();
+    await client.query("ROLLBACK");
+    client.release();
+  }
+});
+
+test("notice threshold excludes unrelated records and clears only with committed history recovery", async () => {
+  requireDevelopmentDatabase();
+  const client = await pool.connect();
+  let querySpy: ReturnType<typeof vi.spyOn> | undefined;
+  try {
+    await client.query("BEGIN");
+    await client.query(`CREATE TEMP TABLE membership_checkouts (
+      id integer, kind text, status text, invoice_history_pending boolean,
+      invoice_history_retry_count integer, invoice_history_retry_at timestamptz
+    ) ON COMMIT DROP`);
+    await client.query(`INSERT INTO membership_checkouts VALUES
+      (1, 'founding', 'forfeited', true, 7, now()),
+      (2, 'founding', 'forfeited', true, 8, now() + interval '1 day'),
+      (3, 'founding', 'forfeited', true, 9, NULL),
+      (4, 'founding', 'forfeited', false, 100, NULL),
+      (5, 'founding', 'confirmed', true, 100, NULL),
+      (6, 'standard', 'forfeited', true, 100, NULL),
+      (7, 'founding', 'pending', true, 100, NULL)`);
+    const before = (await client.query("SELECT * FROM membership_checkouts ORDER BY id")).rows;
+    querySpy = vi.spyOn(pool, "query").mockImplementation(((sql: string, params?: unknown[]) => client.query(sql, params)) as typeof pool.query);
+    expect(await membershipInvoiceHistoryNotice()).toEqual({ overdueCount: 2, failedAttemptThreshold: 8 });
+    expect((await client.query("SELECT * FROM membership_checkouts ORDER BY id")).rows).toEqual(before);
+    await client.query("SAVEPOINT recovery");
+    await client.query("UPDATE membership_checkouts SET invoice_history_pending = false, invoice_history_retry_count = 0 WHERE id IN (2, 3)");
+    expect((await membershipInvoiceHistoryNotice()).overdueCount).toBe(0);
+    await client.query("ROLLBACK TO SAVEPOINT recovery");
+    expect((await membershipInvoiceHistoryNotice()).overdueCount).toBe(2);
+    await client.query("UPDATE membership_checkouts SET invoice_history_pending = false, invoice_history_retry_count = 0 WHERE id IN (2, 3)");
+    expect((await membershipInvoiceHistoryNotice()).overdueCount).toBe(0);
+    expect((await client.query("SELECT status FROM membership_checkouts WHERE id IN (2, 3)")).rows)
+      .toEqual([{ status: "forfeited" }, { status: "forfeited" }]);
   } finally {
     querySpy?.mockRestore();
     await client.query("ROLLBACK");

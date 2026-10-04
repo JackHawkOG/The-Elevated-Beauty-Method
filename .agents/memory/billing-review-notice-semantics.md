@@ -32,3 +32,9 @@ Keep invoice-history recovery for ended founding memberships separate from billi
 **Why:** An ended subscription can already have lost access while its payment-failure reason remains uncertain because invoice history is unavailable. The user explicitly requested a separate staff view without exposing private billing information to members or restoring access.
 
 **How to apply:** Treat pending history as an unresolved explanation, not a new payment failure or an active entitlement. Keep recovery attempts and retry schedules private to authorized billing staff.
+
+Derive invoice-history notices from committed pending recovery state, without a separate alert ledger. A failed notice read must replace stale counts with an explicit unavailable status, never an all-clear.
+
+**Why:** History recovery already commits its pending flag and retry count together. A separate ledger introduces another clearing step that can drift, and an unavailable database cannot prove whether recovery occurred.
+
+**How to apply:** Keep the notice read-only and generic, scope it to the current authorized staff identity, and refetch while staff pages remain open. Do not reuse the independent sweep-health warning as evidence of individual history recovery.

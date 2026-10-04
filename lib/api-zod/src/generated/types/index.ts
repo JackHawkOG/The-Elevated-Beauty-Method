@@ -63,6 +63,7 @@ export * from './membershipCheckoutInputKind';
 export * from './membershipConversionInput';
 export * from './membershipConversionReceipt';
 export * from './membershipConversionReceiptKind';
+export * from './membershipInvoiceHistoryNotice';
 export * from './membershipOffer';
 export * from './membershipOfferPhase';
 export * from './membershipReconciliationAlert';

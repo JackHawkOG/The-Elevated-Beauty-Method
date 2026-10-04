@@ -468,6 +468,20 @@ export const GetMembershipReconciliationAlertsResponse = zod.object({
 
 
 /**
+ * @summary Private operational notice for prolonged ended-membership history recovery (owner/admin only)
+ */
+export const getMembershipInvoiceHistoryNoticeResponseOverdueCountMin = 0;
+
+
+
+
+export const GetMembershipInvoiceHistoryNoticeResponse = zod.object({
+  "overdueCount": zod.number().int().min(getMembershipInvoiceHistoryNoticeResponseOverdueCountMin),
+  "failedAttemptThreshold": zod.number().int().min(1)
+})
+
+
+/**
  * @summary List ended founding memberships awaiting invoice history (owner/admin only)
  */
 export const getPendingMembershipInvoiceHistoryQueryAfterMin = 0;
