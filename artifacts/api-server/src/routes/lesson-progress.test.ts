@@ -723,7 +723,7 @@ test("a draft exact duplicate before the published approved lesson cannot block 
   }
 });
 
-test("two published approved copies select the lowest ID and switch without inherited progress when it is unpublished", async () => {
+test("two published approved copies select the lowest ID and keep their own progress through unpublication and republication", async () => {
   const userId = `test-approved-published-tie-${run}`;
   const actorName = "Approved Published Tie Test";
   const approved = approvedTopicLessons[0];
@@ -831,6 +831,55 @@ test("two published approved copies select the lowest ID and switch without inhe
     expect((await db.select().from(lessonCompletionsTable)
       .where(eq(lessonCompletionsTable.userId, userId))).map(row => row.lessonId).sort((a, b) => a - b))
       .toEqual([selected.id, duplicate.id]);
+
+    const historicalCompletions = await db.select().from(lessonCompletionsTable)
+      .where(eq(lessonCompletionsTable.userId, userId)).orderBy(lessonCompletionsTable.lessonId);
+    // Republishing the earlier exact copy selects it again. Its own completion
+    // becomes visible, but the resume pointer still belongs to the now-hidden copy.
+    await db.update(lessonsTable).set({ publishedAt: new Date() }).where(eq(lessonsTable.id, selected.id));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const courseDetail = await request(userId, `/courses/${course.id}`);
+      expect(courseDetail.status).toBe(200);
+      expect(courseDetail.data).toMatchObject({ lessonCount: 1 });
+      expect((courseDetail.data as { lessons: Array<{ id: number }> }).lessons.map(lesson => lesson.id))
+        .toEqual([selected.id]);
+      const listing = await request(userId, `/courses/${course.id}/lessons`);
+      expect(listing.status).toBe(200);
+      expect((listing.data as Array<{ id: number }>).map(lesson => lesson.id)).toEqual([selected.id]);
+      const direct = await request(userId, `/lessons/${selected.id}`);
+      expect(direct.status).toBe(200);
+      expect(direct.data).toMatchObject({ id: selected.id, content: approved.content });
+      expect((await request(userId, `/lessons/${duplicate.id}`)).status).toBe(404);
+
+      const resumed = await request(userId, "/enrollments");
+      expect(resumed.status).toBe(200);
+      expect((resumed.data as Array<{ courseId: number }>).find(row => row.courseId === course.id))
+        .toMatchObject({ lastLessonId: null, totalLessons: 1, completedLessons: 1, completedLessonIds: [selected.id] });
+      const reenrolled = await request(userId, "/enrollments", "POST", { courseId: course.id });
+      expect(reenrolled.status).toBe(201);
+      expect(reenrolled.data).toMatchObject({ lastLessonId: null, totalLessons: 1, completedLessons: 1 });
+    }
+    expect((await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: duplicate.id })).status)
+      .toBe(404);
+    expect(await db.select().from(lessonCompletionsTable)
+      .where(eq(lessonCompletionsTable.userId, userId)).orderBy(lessonCompletionsTable.lessonId))
+      .toEqual(historicalCompletions);
+
+    // Revisiting the selected copy restores only its own resume pointer and
+    // retries its existing completion without rewriting either historical row.
+    const republishedCompletion = await request(userId, `/enrollments/${course.id}/progress`, "PATCH", { lessonId: selected.id });
+    expect(republishedCompletion.status).toBe(200);
+    expect(republishedCompletion.data).toMatchObject({ lastLessonId: selected.id, totalLessons: 1, completedLessons: 1 });
+    const republishedResume = await request(userId, "/enrollments");
+    expect(republishedResume.status).toBe(200);
+    expect((republishedResume.data as Array<{ courseId: number }>).find(row => row.courseId === course.id))
+      .toMatchObject({ lastLessonId: selected.id, totalLessons: 1, completedLessons: 1, completedLessonIds: [selected.id] });
+    const republishedReenrollment = await request(userId, "/enrollments", "POST", { courseId: course.id });
+    expect(republishedReenrollment.status).toBe(201);
+    expect(republishedReenrollment.data).toMatchObject({ lastLessonId: selected.id, totalLessons: 1, completedLessons: 1 });
+    expect(await db.select().from(lessonCompletionsTable)
+      .where(eq(lessonCompletionsTable.userId, userId)).orderBy(lessonCompletionsTable.lessonId))
+      .toEqual(historicalCompletions);
   } finally {
     if (reviewedCourseId) {
       await db.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, userId));
