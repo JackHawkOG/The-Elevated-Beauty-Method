@@ -29,7 +29,7 @@ export async function syncStripeStartupBackfill(
       // failures fatal. Bound retries even if the cache contains many stale IDs.
       if (!id || repaired.has(id) || repaired.size >= 10) throw error;
       const customer = await retrieveCustomer(id);
-      if (customer.id !== id || !customer.deleted || customer.object !== "customer") throw error;
+      if (customer.id !== id || customer.deleted !== true || customer.object !== "customer") throw error;
       const accountId = await sync.getAccountId();
       await sync.upsertCustomers([customer], accountId);
       repaired.add(id);
