@@ -9,11 +9,11 @@ For account-switch race checks, use a response captured from the signed-in brows
 
 **How to apply:** Guard tests to development keys and database, capture the first account's response in its browser session, then release the held route after the second identity becomes active. A canceled former request is also safe; verify no first-account answers appear after switching identities.
 
-For lost-response POST checks, an intercepted form request can be mirrored from the signed-in page using its captured payload, authorization header, and idempotency key. Let that browser-originated request commit, then abort the intercepted form request so the UI sees a network failure.
+For lost-response POST checks, prefer wrapping the signed-in page's existing fetch: await the original successful response, consume a clone, then reject only that matching response. This tests a single real committed write without replaying it. An intercepted form request can also be mirrored from the signed-in page using its captured payload, authorization header, and idempotency key. Let that browser-originated request commit, then abort the intercepted form request so the UI sees a network failure.
 
 **Why:** Playwright's `route.fetch()` replay of a Clerk-authenticated form request returned 401, while a signed-in browser fetch with the captured request data reached the real server.
 
-**How to apply:** Mark the browser-originated commit request so the route handler lets it pass; intercept only the intended first attempt, not the subsequent form retry. Assert the server committed before aborting, then check that the retry reused the key.
+**How to apply:** Match the exact method, path, and fixture payload; discard only the first successful response. Keep recovery reads untouched, verify committed rows, and count outgoing mutations. If using a mirrored request, mark it so the route handler lets it pass; intercept only the intended first attempt, not the subsequent form retry. Assert the server committed before aborting, then check that the retry reused the key.
 
 For a late profile mutation, hold the return of the page's own `fetch` after the original response resolves. This allows the server to commit while the UI still awaits the response, without replaying a Clerk-authenticated request through Playwright's route fetch.
 
