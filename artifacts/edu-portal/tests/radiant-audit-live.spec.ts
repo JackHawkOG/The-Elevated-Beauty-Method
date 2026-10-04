@@ -1073,8 +1073,10 @@ test("a first-time real member reviews an expired pending Audit before explicitl
     const payload = JSON.parse(writes[0].body);
     expect(payload).toMatchObject({
       routineChecks: ["skincare-consistency"], valuesChecks: ["quality-over-price"],
-      email: memberEmail, ...pendingAnswers,
+      ...pendingAnswers,
     });
+    // Ownership comes from the verified Clerk session, not a client email.
+    expect(payload).not.toHaveProperty("email");
     expect(payload.submissionId).toEqual(expect.any(String));
     expect(payload.submissionId).not.toBe(oldId);
     const saved = await db.select().from(radiantAuditsTable).where(eq(radiantAuditsTable.clerkId, created[0]));
