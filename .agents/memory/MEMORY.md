@@ -56,3 +56,4 @@
 - [Transaction test gates](transaction-test-gates.md) — race transaction signals against early responses so rejected requests cannot strand gates and fixtures.
 - [Guide delivery test isolation](guide-delivery-test-isolation.md) — scoped request fixtures alone do not isolate the store's global expired-counter cleanup.
 - [Guide measurement approval](guide-measurement-approval.md) — anonymous request measurement was approved with disclosure, not identity tracking or marketing consent.
+- [Paused browser query notifications](paused-browser-query-notifications.md) — real HTTP completion and timer-batched React Query rendering need separate settling in clock tests.
