@@ -77,7 +77,8 @@ export const ClaimRoutineGuideBody = zod.object({
 
 export const ClaimRoutineGuideResponse = zod.object({
   "status": zod.enum(['sent', 'processing']),
-  "message": zod.string()
+  "message": zod.string(),
+  "outcome": zod.enum(['accepted', 'deduplicated', 'processing']).optional().describe('Provider acceptance from this attempt, an already accepted request reused without sending, or a request still processing. None confirms mailbox delivery.')
 })
 
 

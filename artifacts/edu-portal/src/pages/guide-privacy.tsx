@@ -3,6 +3,7 @@ import { useGetRoutineGuide, getGetRoutineGuideQueryKey } from "@workspace/api-c
 import { Button } from "@/components/ui/button";
 import { guideTheme } from "@/lib/guide-theme";
 import { useGuidePageMeta } from "@/lib/guide-page-meta";
+import { GUIDE_ANALYTICS_DISCLOSURE } from "@/lib/guide-analytics";
 
 export default function GuidePrivacyPage() {
   useGuidePageMeta("The Elevated Routine privacy | The Elevated Beauty Method ™", "How The Elevated Beauty Method ™ handles your email when you request The Elevated Routine guide: what we keep, who processes it, and how to ask for removal.");
@@ -31,6 +32,10 @@ export default function GuidePrivacyPage() {
             <li><span className="text-foreground">Separate provider records.</span> Resend may retain email and delivery records under its own retention policies. Removing our records does not erase Resend’s records or recall an email already sent or being processed. Contact us about provider-held records; we do not promise they have been deleted when local removal is complete.</li>
             <li><span className="text-foreground">No automatic resend.</span> Removal does not send another email. A later new guide request with explicit consent may create new records.</li>
           </ul>
+        </section>
+        <section className="mt-10 space-y-4" data-testid="text-guide-analytics-disclosure">
+          <h2 className="font-serif text-2xl">Anonymous request measurement</h2>
+          <p className="text-sm text-muted-foreground">{GUIDE_ANALYTICS_DISCLOSURE}</p>
         </section>
       </main>
     </div>

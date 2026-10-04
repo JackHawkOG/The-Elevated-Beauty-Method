@@ -4,6 +4,7 @@ import { useGetRoutineGuide, getGetRoutineGuideQueryKey, useClaimRoutineGuide } 
 import { Button } from "@/components/ui/button";
 import { guideTheme } from "@/lib/guide-theme";
 import { useGuidePageMeta } from "@/lib/guide-page-meta";
+import { GUIDE_ANALYTICS_DISCLOSURE, trackGuideFormViewed, trackGuideSubmitted, trackGuideResult, trackGuideFailure } from "@/lib/guide-analytics";
 
 const masterLogo = `${import.meta.env.BASE_URL}brand/tebm-master-logo-1920x1080.png`;
 const CONSENT_FALLBACK = "Email me The Elevated Routine from The Elevated Beauty Method ™.";
@@ -21,7 +22,7 @@ function errorMessage(err: unknown): string {
 export default function ElevatedRoutinePage() {
   useGuidePageMeta("The Elevated Routine | Free guide by Dominique | The Elevated Beauty Method ™", "Request The Elevated Routine, a nine-page guide by Dominique, by email. We use your address only to send this PDF. No marketing subscription, no account needed.");
   const guide = useGetRoutineGuide({ query: { queryKey: getGetRoutineGuideQueryKey(), retry: false } });
-  const claim = useClaimRoutineGuide();
+  const claim = useClaimRoutineGuide({ mutation: { onSuccess: trackGuideResult, onError: trackGuideFailure } });
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
   const [website, setWebsite] = useState("");
@@ -29,6 +30,7 @@ export default function ElevatedRoutinePage() {
   const idRef = useRef<{ key: string; id: string } | null>(null);
   const inFlight = useRef(false);
   const statusRef = useRef<HTMLDivElement>(null);
+  const formViewed = useRef(false);
 
   const info = guide.data;
   const consentText = info?.consentText ?? CONSENT_FALLBACK;
@@ -39,14 +41,22 @@ export default function ElevatedRoutinePage() {
   const failed = claim.isError;
 
   useEffect(() => { if (result || failed) statusRef.current?.focus(); }, [result, failed]);
+  useEffect(() => {
+    if (!guide.isPending && !guide.isError && info?.available && !result && !formViewed.current) {
+      formViewed.current = true;
+      trackGuideFormViewed();
+    }
+  }, [guide.isPending, guide.isError, info?.available, result]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setTouched(true);
     if (!info?.available || emailError || consentError || inFlight.current || claim.isPending) return;
     const key = trimmed.toLowerCase() + "|" + website;
+    const retry = idRef.current?.key === key;
     if (!idRef.current || idRef.current.key !== key) idRef.current = { key, id: crypto.randomUUID() };
     inFlight.current = true;
+    trackGuideSubmitted(retry ? "retry" : "initial");
     claim.mutate({ data: { email: trimmed, consent: true, requestId: idRef.current.id, website } }, { onSettled: () => { inFlight.current = false; } });
   }
 
@@ -100,6 +110,7 @@ export default function ElevatedRoutinePage() {
                   <Button className="mt-5 rounded-full" variant="outline" onClick={() => {
                     if (!idRef.current || inFlight.current || claim.isPending) return;
                     inFlight.current = true;
+                    trackGuideSubmitted("check");
                     claim.mutate({ data: { email: trimmed, consent: true, requestId: idRef.current.id, website } },
                       { onSettled: () => { inFlight.current = false; } });
                   }} disabled={claim.isPending} data-testid="button-retry-processing">{claim.isPending ? "Checking…" : "Check again"}</Button>
@@ -111,6 +122,7 @@ export default function ElevatedRoutinePage() {
                 <div id="guide-privacy-summary" className="mt-4 rounded-2xl border border-border bg-background/60 p-4 text-sm" data-testid="text-privacy-notice">
                   <p className="text-xs uppercase tracking-[0.2em] text-primary/80">Before you submit</p>
                   <p className="mt-2 whitespace-pre-line text-muted-foreground">{info?.privacyNotice}</p>
+                  <p className="mt-3 text-muted-foreground" data-testid="text-guide-analytics-disclosure">{GUIDE_ANALYTICS_DISCLOSURE}</p>
                   <Link href="/guide-privacy" className="mt-2 inline-block underline underline-offset-4 hover:text-primary">Read the full guide privacy page</Link>
                 </div>
                 <label htmlFor="guide-email" className="mt-6 block text-sm text-muted-foreground">Email address</label>

@@ -110,6 +110,7 @@ export * from './radiantAuditSaveResultCompletionKind';
 export * from './radiantAuditStoredDraft';
 export * from './routineGuideClaimInput';
 export * from './routineGuideClaimResult';
+export * from './routineGuideClaimResultOutcome';
 export * from './routineGuideClaimResultStatus';
 export * from './routineGuideInfo';
 export * from './userProfile';

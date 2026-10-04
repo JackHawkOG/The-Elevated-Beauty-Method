@@ -55,3 +55,4 @@
 - [Shared membership decision snapshots](membership-decision-snapshots.md) — checkout locks alone cannot serialize access decisions across subscriptions; waiting needs a fresh SQL snapshot.
 - [Transaction test gates](transaction-test-gates.md) — race transaction signals against early responses so rejected requests cannot strand gates and fixtures.
 - [Guide delivery test isolation](guide-delivery-test-isolation.md) — scoped request fixtures alone do not isolate the store's global expired-counter cleanup.
+- [Guide measurement approval](guide-measurement-approval.md) — anonymous request measurement was approved with disclosure, not identity tracking or marketing consent.

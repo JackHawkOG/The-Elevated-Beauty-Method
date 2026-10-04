@@ -168,12 +168,13 @@ test("explicit consent sends once, normalizes email, and makes request ID reuse 
   const first = await post(base, validInput("  Guide.User@Example.com ", requestId));
   expect(first.status).toBe(200);
   expect(first.data.status).toBe("sent");
+  expect(first.data.outcome).toBe("accepted");
   expect(first.data.message).toContain("accepted");
   expect(send).toHaveBeenCalledTimes(1);
   expect(send.mock.calls[0]?.[0]).toBe("guide.user@example.com");
-  expect((await post(base, validInput("guide.user@example.com", requestId))).status).toBe(200);
+  expect(await post(base, validInput("guide.user@example.com", requestId))).toMatchObject({ status: 200, data: { outcome: "deduplicated" } });
   expect((await post(base, validInput("another@example.com", requestId))).status).toBe(409);
-  expect((await post(base, validInput("guide.user@example.com", "22e1b724-85b7-4b69-b4c4-6efec88778f6"))).status).toBe(200);
+  expect(await post(base, validInput("guide.user@example.com", "22e1b724-85b7-4b69-b4c4-6efec88778f6"))).toMatchObject({ status: 200, data: { outcome: "deduplicated" } });
   expect(send).toHaveBeenCalledTimes(1);
 });
 
@@ -205,7 +206,7 @@ test("uncertain sends retry only with the same idempotency key and stop after Re
   const { base } = await startApp(store, send);
   const input = validInput("uncertain@example.com", "c1ad1a5e-15a2-44a4-9c11-45e451daf67a");
   expect((await post(base, input)).status).toBe(503);
-  expect((await post(base, input)).status).toBe(202);
+  expect(await post(base, input)).toMatchObject({ status: 202, data: { status: "processing", outcome: "processing" } });
   store.now += 91_000;
   sendResult = "accepted";
   expect((await post(base, input)).status).toBe(200);

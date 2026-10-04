@@ -37,6 +37,7 @@ vi.mock("@/components/layout", () => ({
 import ElevatedRoutinePage from "./elevated-routine";
 import GuidePrivacyPage from "./guide-privacy";
 import GuidesPage from "./guides";
+import { GUIDE_ANALYTICS_DISCLOSURE } from "@/lib/guide-analytics";
 
 function render(node: ReactNode) {
   return renderToStaticMarkup(<Router hook={() => ["/the-elevated-routine", () => {}]}>{node}</Router>);
@@ -53,6 +54,7 @@ test("public form requires separate unchecked guide-only consent and never sends
   const html = render(<ElevatedRoutinePage />);
   expect(html).toContain(state.info.consentText);
   expect(html).toContain(state.info.privacyNotice);
+  expect(html).toContain(GUIDE_ANALYTICS_DISCLOSURE);
   expect(html).toContain('href="/guide-privacy"');
   expect(html).toContain('type="email"');
   expect(html).toContain('type="checkbox"');
@@ -104,6 +106,7 @@ test("processing offers only an explicit retry, not a sent confirmation", () => 
 test("privacy scope is guide-only and gives the approved removal contact", () => {
   const html = render(<GuidePrivacyPage />);
   expect(html).toContain(state.info.privacyNotice);
+  expect(html).toContain(GUIDE_ANALYTICS_DISCLOSURE);
   expect(html).toContain("does not subscribe you to marketing");
   expect(html).toContain("mailto:hello@elevatedbeautymethod.com");
 });

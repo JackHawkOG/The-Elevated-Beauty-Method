@@ -5,9 +5,12 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+import type { RoutineGuideClaimResultOutcome } from './routineGuideClaimResultOutcome';
 import type { RoutineGuideClaimResultStatus } from './routineGuideClaimResultStatus';
 
 export interface RoutineGuideClaimResult {
   status: RoutineGuideClaimResultStatus;
   message: string;
+  /** Provider acceptance from this attempt, an already accepted request reused without sending, or a request still processing. None confirms mailbox delivery. */
+  outcome?: RoutineGuideClaimResultOutcome;
 }

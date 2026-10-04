@@ -1533,6 +1533,10 @@ components:
           enum: [sent, processing]
         message:
           type: string
+        outcome:
+          type: string
+          enum: [accepted, deduplicated, processing]
+          description: Provider acceptance from this attempt, an already accepted request reused without sending, or a request still processing. None confirms mailbox delivery.
     PublicMemberStory:
       type: object
       required: [id, quote, attribution]

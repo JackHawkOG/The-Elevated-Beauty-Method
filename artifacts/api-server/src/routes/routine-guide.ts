@@ -243,6 +243,7 @@ export function createRoutineGuideRouter(dependencies: RoutineGuideDependencies 
     if (reservation.kind === "processing") {
       res.status(202).json(ClaimRoutineGuideResponse.parse({
         status: "processing",
+        outcome: "processing",
         message: ROUTINE_GUIDE_PROCESSING_MESSAGE,
       }));
       return;
@@ -250,6 +251,7 @@ export function createRoutineGuideRouter(dependencies: RoutineGuideDependencies 
     if (reservation.kind === "sent") {
       res.status(200).json(ClaimRoutineGuideResponse.parse({
         status: "sent",
+        outcome: "deduplicated",
         message: ROUTINE_GUIDE_RESPONSE_MESSAGE,
       }));
       return;
@@ -266,6 +268,7 @@ export function createRoutineGuideRouter(dependencies: RoutineGuideDependencies 
         await store.markAccepted(normalizedEmail as string, reservation.providerIdempotencyKey);
         res.status(200).json(ClaimRoutineGuideResponse.parse({
           status: "sent",
+          outcome: "accepted",
           message: ROUTINE_GUIDE_RESPONSE_MESSAGE,
         }));
         return;

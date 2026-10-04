@@ -89,9 +89,23 @@ export const RoutineGuideClaimResultStatus = {
   processing: 'processing',
 } as const;
 
+/**
+ * Provider acceptance from this attempt, an already accepted request reused without sending, or a request still processing. None confirms mailbox delivery.
+ */
+export type RoutineGuideClaimResultOutcome = typeof RoutineGuideClaimResultOutcome[keyof typeof RoutineGuideClaimResultOutcome];
+
+
+export const RoutineGuideClaimResultOutcome = {
+  accepted: 'accepted',
+  deduplicated: 'deduplicated',
+  processing: 'processing',
+} as const;
+
 export interface RoutineGuideClaimResult {
   status: RoutineGuideClaimResultStatus;
   message: string;
+  /** Provider acceptance from this attempt, an already accepted request reused without sending, or a request still processing. None confirms mailbox delivery. */
+  outcome?: RoutineGuideClaimResultOutcome;
 }
 
 export interface PublicMemberStory {
