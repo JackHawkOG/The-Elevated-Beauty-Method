@@ -114,7 +114,8 @@ it("keeps unrelated community rows and refuses malformed rows during database cl
   }
 }, 30_000);
 
-it("resumes after Clerk deletion fails without touching unmarked, young, or unrelated rows", async () => {
+it.each(["unchanged", "marker removed", "email changed"] as const)(
+  "revalidates a failed Clerk cleanup retry when ownership is %s without touching unrelated rows", async (ownership) => {
   requireCommunityDevelopment();
   const { db, pool } = await import("../../../lib/db/src/index");
   const oldTag = newCommunityFixtureTag();
@@ -134,9 +135,11 @@ it("resumes after Clerk deletion fails without touching unmarked, young, or unre
     createdAt: Date.now() - ageHours * 60 * 60 * 1000,
   }));
   const clerkUsers = new Map(identities.map(({ tag: _tag, ...identity }) => [identity.id, identity]));
+  // Discovery can be stale: only getUser returns current ownership evidence.
+  const listedUsers = [...clerkUsers.values()];
   let failDeletion = true;
   const client = {
-    getUserList: vi.fn(async () => ({ data: [...clerkUsers.values()], totalCount: clerkUsers.size })),
+    getUserList: vi.fn(async () => ({ data: listedUsers, totalCount: listedUsers.length })),
     getUser: vi.fn(async (id: string) => {
       const user = clerkUsers.get(id);
       if (!user) throw new Error(`Unexpected Clerk lookup: ${id}`);
@@ -229,7 +232,33 @@ it("resumes after Clerk deletion fails without touching unmarked, young, or unre
     expect(await unrelatedRows()).toEqual(unrelatedBefore);
     expect([...clerkUsers.keys()].sort()).toEqual([oldId, unmarkedId, youngId].sort());
     expect(clerkUsers.get(oldId)).toMatchObject({ privateMetadata: communityFixturePrivateMetadata });
+    expect(client.getUser).toHaveBeenCalledExactlyOnceWith(oldId);
     expect(client.deleteUser).toHaveBeenCalledExactlyOnceWith(oldId);
+
+    if (ownership !== "unchanged") {
+      const original = clerkUsers.get(oldId)!;
+      const changed = ownership === "marker removed"
+        ? { ...original, privateMetadata: {} }
+        // Still a valid fixture email: the exact match with discovery must fail,
+        // not just the fixture-email format check.
+        : { ...original, emailAddresses: [{ emailAddress: communityFixtureEmail(unmarkedTag) }] };
+      clerkUsers.set(oldId, changed);
+      expect(listedUsers[0]).toEqual(original);
+      expect(changed).not.toEqual(original);
+
+      await expect(cleanupCommunityFixtures({ client, db, deleteRows: true }))
+        .rejects.toThrow(`Community fixture identity changed; refusing deletion for ${oldId}`);
+      expect(await rows()).toEqual(survivors);
+      expect(await unrelatedRows()).toEqual(unrelatedBefore);
+      expect([...clerkUsers.keys()].sort()).toEqual([oldId, unmarkedId, youngId].sort());
+      expect(clerkUsers.get(oldId)).toEqual(changed);
+      expect(client.getUserList).toHaveBeenCalledTimes(2);
+      expect(client.getUserList).toHaveBeenNthCalledWith(2, { limit: 100, offset: 0 });
+      expect(client.getUser).toHaveBeenCalledTimes(2);
+      expect(client.getUser).toHaveBeenNthCalledWith(2, oldId);
+      expect(client.deleteUser).toHaveBeenCalledExactlyOnceWith(oldId);
+      return;
+    }
 
     await cleanupCommunityFixtures({ client, db, deleteRows: true });
     expect(await rows()).toEqual(survivors);
