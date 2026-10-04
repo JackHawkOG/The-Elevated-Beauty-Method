@@ -138,6 +138,44 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
     expect(protectedRecords(mock)).toEqual(protectedBefore);
   });
 
+  it.each([
+    "missing-product-marker", "altered-product-marker",
+    "missing-price-marker", "altered-price-marker",
+    "changed-product-name", "mismatched-product-reference",
+  ] as const)(
+    "rejects shared catalog with %s before any database or remote deletion", async kind => {
+      const mock = membershipCleanupMocks();
+      useSharedCatalog(mock);
+      const product = mock.state.products[0];
+      const price = mock.state.prices[0];
+      const subscriptionPrice = mock.state.subscriptions[0].items.data[0].price;
+      if (kind === "missing-product-marker") product.metadata = {};
+      if (kind === "altered-product-marker") product.metadata = { fixture_owner: "another-owner" };
+      if (kind === "missing-price-marker" || kind === "altered-price-marker") {
+        const metadata = kind === "missing-price-marker" ? {} : { fixture_owner: "another-owner" };
+        price.metadata = { ...metadata };
+        subscriptionPrice.metadata = { ...metadata };
+      }
+      if (kind === "changed-product-name") product.name = "Real membership";
+      if (kind === "mismatched-product-reference") {
+        product.id = "prod_mismatched";
+        // Keep all ownership markers valid, but return a different product ID
+        // for the subscription's reference to exercise the reference guard.
+        mock.stripe.products.retrieve.mockResolvedValue(structuredClone(product));
+      }
+
+      await refusesWithoutChanges(mock, /Unowned Stripe subscription/);
+      expect(mock.stripe.products.retrieve).toHaveBeenCalledExactlyOnceWith("prod_fixture");
+      expect(mock.pool.connect).not.toHaveBeenCalled();
+      expect(mock.connection.query).not.toHaveBeenCalled();
+      expect(mock.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+      expect(mock.stripe.customers.del).not.toHaveBeenCalled();
+      expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+      expect(mock.stripe.prices.update).not.toHaveBeenCalled();
+      expect(mock.stripe.products.update).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["cancel:sub_fixture", "customer-delete:cus_fixture", "clerk-delete:user_fixture"])(
     "resumes shared-catalog cleanup after a failed %s without archiving reusable billing", async failure => {
       const mock = membershipCleanupMocks();
