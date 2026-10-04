@@ -151,70 +151,100 @@ export async function cleanupMembershipStatusFixtures(
   validateArgs(args);
   requireDevelopment();
   try {
-    const candidates: Array<{ id: string; email: string }> = [];
+    const candidates: Array<{ id: string; email: string; tag: string }> = [];
     const blockedTags = new Set<string>();
+    const failures: Error[] = [];
+    const catalogs = new Map<string, { product: Stripe.Product; price?: Stripe.Price }>();
     for (let offset = 0; ; offset += 100) {
       const page = await clerk.users.getUserList({ limit: 100, offset });
       for (const user of page.data) {
         const fixture = staleMembershipStatusFixture(user);
-        if (fixture) candidates.push({ id: user.id, email: fixture.email });
+        if (fixture) candidates.push({ id: user.id, email: fixture.email, tag: fixture.tag });
         else {
           // A second identity from the same run may still be in use. In that
           // case even the old account's shared catalog must not be archived.
-          const possible = user.emailAddresses.length === 1 &&
-            /^membership-status-[ab]-([0-9a-f]{12})\+clerk_test@example\.com$/.exec(user.emailAddresses[0].emailAddress);
-          if (possible) blockedTags.add(possible[1]);
+          // Extra addresses make an identity ineligible too. Matching an address
+          // here only protects a catalog; it never authorizes deletion.
+          for (const address of user.emailAddresses) {
+            const possible = /^membership-status-[ab]-([0-9a-f]{12})\+clerk_test@example\.com$/.exec(address.emailAddress);
+            if (possible) blockedTags.add(possible[1]);
+          }
         }
       }
       if (!page.data.length || offset + page.data.length >= page.totalCount) break;
     }
     for (const candidate of candidates) {
-      requireDevelopment();
-      const identity = await clerk.users.getUser(candidate.id);
-      const fixture = staleMembershipStatusFixture(identity);
-      if (!fixture || fixture.email !== candidate.email) {
-        throw new Error(`Fixture identity changed; refusing deletion for ${candidate.id}`);
-      }
-      if (blockedTags.has(fixture.tag)) {
-        throw new Error(`Another identity in this run is not eligible; refusing ${fixture.tag}`);
-      }
-      const { customer, subscription, product, price } = await billingFor(stripe, fixture, identity.createdAt);
-      const connection = await pool.connect();
-      let counts: { members: number; checkouts: number };
       try {
-        await connection.query("BEGIN");
-        // Lock the member, and reject all unexpected links before modifying anything.
-        await connection.query("SELECT id FROM users WHERE clerk_id = $1 FOR UPDATE", [candidate.id]);
-        counts = await inspectRows(connection, candidate.id, fixture, subscription?.id, customer?.id);
-        if (args.length) {
-          // Recheck Clerk immediately before deletion. If later remote cleanup fails,
-          // the marked identity remains available for a safe retry.
-          const latest = await clerk.users.getUser(candidate.id);
-          if (!staleMembershipStatusFixture(latest) || latest.emailAddresses[0].emailAddress !== fixture.email) {
-            throw new Error(`Fixture identity changed; refusing deletion for ${candidate.id}`);
-          }
-          await connection.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [candidate.id]);
-          await connection.query("DELETE FROM users WHERE clerk_id = $1 AND email = $2", [candidate.id, fixture.email]);
+        requireDevelopment();
+        if (blockedTags.has(candidate.tag)) {
+          throw new Error(`Another identity in this run is not eligible or failed; refusing ${candidate.tag}`);
         }
-        await connection.query("COMMIT");
+        const identity = await clerk.users.getUser(candidate.id);
+        const fixture = staleMembershipStatusFixture(identity);
+        if (!fixture || fixture.email !== candidate.email) {
+          throw new Error(`Fixture identity changed; refusing deletion for ${candidate.id}`);
+        }
+        const { customer, subscription, product, price } = await billingFor(stripe, fixture, identity.createdAt);
+        const connection = await pool.connect();
+        let counts: { members: number; checkouts: number };
+        try {
+          await connection.query("BEGIN");
+          // Lock the member, and reject all unexpected links before modifying anything.
+          await connection.query("SELECT id FROM users WHERE clerk_id = $1 FOR UPDATE", [candidate.id]);
+          counts = await inspectRows(connection, candidate.id, fixture, subscription?.id, customer?.id);
+          if (args.length) {
+            // Recheck Clerk immediately before deletion. If account cleanup fails,
+            // the marked identity remains available for a safe retry.
+            const latest = await clerk.users.getUser(candidate.id);
+            if (!staleMembershipStatusFixture(latest) || latest.emailAddresses[0].emailAddress !== fixture.email) {
+              throw new Error(`Fixture identity changed; refusing deletion for ${candidate.id}`);
+            }
+            await connection.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [candidate.id]);
+            await connection.query("DELETE FROM users WHERE clerk_id = $1 AND email = $2", [candidate.id, fixture.email]);
+          }
+          await connection.query("COMMIT");
+        } catch (error) {
+          await connection.query("ROLLBACK");
+          throw error;
+        } finally {
+          connection.release();
+        }
+        log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${fixture.email}): ${counts.members} member, ${counts.checkouts} checkout, ${subscription ? 1 : 0} subscription, ${customer ? 1 : 0} customer`);
+        if (args.length) {
+          if (subscription && subscription.status !== "canceled") await stripe.subscriptions.cancel(subscription.id);
+          if (customer) await stripe.customers.del(customer.id);
+          await clerk.users.deleteUser(candidate.id);
+          // Do not archive a per-run catalog until every sibling has succeeded.
+          // Reusable catalogs are never returned by billingFor as an owned product.
+          if (product) catalogs.set(fixture.tag, { product, price });
+        }
       } catch (error) {
-        await connection.query("ROLLBACK");
-        throw error;
-      } finally {
-        connection.release();
+        blockedTags.add(candidate.tag);
+        failures.push(new Error(
+          `${candidate.id} (${candidate.email}, run ${candidate.tag}): ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        ));
       }
-      log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${fixture.email}): ${counts.members} member, ${counts.checkouts} checkout, ${subscription ? 1 : 0} subscription, ${customer ? 1 : 0} customer`);
-      if (args.length) {
-        if (subscription && subscription.status !== "canceled") await stripe.subscriptions.cancel(subscription.id);
-        if (customer) await stripe.customers.del(customer.id);
-        // Legacy per-run catalog can be archived; the owned free catalog is
-        // intentionally shared with subsequent privacy checks.
+    }
+    for (const [tag, { product, price }] of catalogs) {
+      if (blockedTags.has(tag)) continue;
+      try {
+        requireDevelopment();
         if (price?.active) await stripe.prices.update(price.id, { active: false });
-        if (product?.active) await stripe.products.update(product.id, { active: false });
-        await clerk.users.deleteUser(candidate.id);
+        if (product.active) await stripe.products.update(product.id, { active: false });
+      } catch (error) {
+        failures.push(new Error(
+          `Catalog for run ${tag}: ${error instanceof Error ? error.message : String(error)}. ` +
+          `Accounts were removed; review remaining catalog ${product.id}${price ? ` / ${price.id}` : ""} before retrying archival.`,
+          { cause: error },
+        ));
       }
     }
     if (!args.length) log("Dry run; nothing deleted. Pass --delete to remove eligible marked fixtures.");
+    if (failures.length) {
+      throw new AggregateError(failures,
+        `Membership fixture cleanup failed:\n${failures.map(error => error.message).join("\n")}`);
+    }
   } finally {
     await pool.end();
   }

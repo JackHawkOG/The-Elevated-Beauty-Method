@@ -63,7 +63,7 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
       "DELETE FROM membership_checkouts WHERE clerk_id = $1",
       "DELETE FROM users WHERE clerk_id = $1 AND email = $2",
       "cancel:sub_fixture", "customer-delete:cus_fixture",
-      "price-archive:price_fixture", "product-archive:prod_fixture", "clerk-delete:user_fixture",
+       "clerk-delete:user_fixture", "price-archive:price_fixture", "product-archive:prod_fixture",
     ]);
     expect(mock.events.indexOf("COMMIT")).toBeLessThan(mock.events.indexOf("cancel:sub_fixture"));
     expect(mock.events.indexOf("release")).toBeLessThan(mock.events.indexOf("cancel:sub_fixture"));
@@ -263,8 +263,7 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
     expect(mock.state.identities.map(row => row.id)).toEqual(["user_member"]);
   });
 
-  it.each(["cancel:sub_fixture", "customer-delete:cus_fixture", "price-archive:price_fixture",
-    "product-archive:prod_fixture", "clerk-delete:user_fixture"])(
+   it.each(["cancel:sub_fixture", "customer-delete:cus_fixture", "clerk-delete:user_fixture"])(
     "safely resumes after database commit and a failed %s", async failure => {
       const mock = membershipCleanupMocks();
       const before = protectedRecords(mock);
@@ -304,6 +303,155 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
     expect(mock.snapshot()).toEqual(before);
     expect(mock.mutations()).toEqual([]);
   });
+
+  it.each(["young", "unmarked", "changed", "extra-email"] as const)(
+    "protects a run with a %s sibling while deleting an independent run", async kind => {
+      const mock = membershipCleanupMocks();
+      const sibling = mock.addFixture("abcdef123456", "b");
+      const safe = mock.addFixture("123456abcdef");
+      if (kind === "young") sibling.createdAt = Date.now();
+      if (kind === "unmarked") sibling.privateMetadata = {};
+      if (kind === "changed") sibling.firstName = "In use";
+      if (kind === "extra-email") sibling.emailAddresses.push({ emailAddress: "another@example.com" });
+      const before = mock.snapshot();
+      const unrelated = protectedRecords(mock);
+      await expect(mock.run()).rejects.toThrow(/Another identity in this run is not eligible/);
+      expect(mock.state.identities).toEqual(before.identities.filter(row => row.id !== safe.id));
+      expect(mock.state.members).toEqual(before.members.filter(row => row.clerk_id !== safe.id));
+      expect(mock.state.checkouts).toEqual(before.checkouts.filter(row => row.clerk_id !== safe.id));
+      expect(mock.state.customers).toEqual(before.customers.filter(row => row.email !== safe.emailAddresses[0].emailAddress));
+      expect(mock.state.products[0]).toEqual(before.products[0]);
+      expect(mock.state.prices[0]).toEqual(before.prices[0]);
+      expect(mock.state.subscriptions.slice(0, 3)).toEqual(before.subscriptions.slice(0, 3));
+      expect(mock.state.products.find(row => row.id === "prod_123456abcdef")?.active).toBe(false);
+      expect(protectedRecords(mock)).toEqual(unrelated);
+      expect(mock.pool.end).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["identity", "billing", "database", "cancel", "customer", "clerk"] as const)(
+    "continues independent cleanup after a sibling %s failure and preserves the shared catalog", async kind => {
+      const mock = membershipCleanupMocks();
+      const sibling = mock.addFixture("abcdef123456", "b");
+      const safe = mock.addFixture("123456abcdef");
+      const before = mock.snapshot();
+      const unrelated = protectedRecords(mock);
+      const failures = {
+        identity: `clerk-get:${sibling.id}`,
+        billing: `customer-list:${sibling.emailAddresses[0].emailAddress}`,
+        cancel: "cancel:sub_abcdef123456_b",
+        customer: "customer-delete:cus_abcdef123456_b",
+        clerk: `clerk-delete:${sibling.id}`,
+      };
+      if (kind === "database") mock.state.members.find(row => row.clerk_id === sibling.id)!.bio = "Protected";
+      else mock.failOnce(failures[kind]);
+      await expect(mock.run()).rejects.toThrow(kind === "database" ? /Non-fixture/ : /Injected/);
+      expect(mock.state.identities.some(row => row.id === sibling.id)).toBe(true);
+      expect(mock.state.identities.some(row => row.id === safe.id)).toBe(false);
+      expect(mock.state.products[0]).toEqual(before.products[0]);
+      expect(mock.state.prices[0]).toEqual(before.prices[0]);
+      expect(mock.stripe.products.update).not.toHaveBeenCalledWith("prod_fixture", { active: false });
+      expect(mock.stripe.prices.update).not.toHaveBeenCalledWith("price_fixture", { active: false });
+      if (["identity", "billing", "database"].includes(kind)) {
+        expect(mock.state.customers.find(row => row.id === "cus_abcdef123456_b"))
+          .toEqual(before.customers.find(row => row.id === "cus_abcdef123456_b"));
+        expect(mock.state.subscriptions.find(row => row.id === "sub_abcdef123456_b"))
+          .toEqual(before.subscriptions.find(row => row.id === "sub_abcdef123456_b"));
+        expect(mock.state.checkouts.find(row => row.clerk_id === sibling.id))
+          .toEqual(before.checkouts.find(row => row.clerk_id === sibling.id));
+      }
+      expect(protectedRecords(mock)).toEqual(unrelated);
+      expect(mock.pool.end).toHaveBeenCalledOnce();
+      expect(mock.connection.release).toHaveBeenCalledTimes(mock.pool.connect.mock.calls.length);
+    },
+  );
+
+  it.each(["cancel:sub_fixture", "DELETE FROM users WHERE clerk_id = $1 AND email = $2"])(
+    "skips a failed run's later sibling after %s but still cleans another run", async failure => {
+    const mock = membershipCleanupMocks();
+    const sibling = mock.addFixture("abcdef123456", "b");
+    const safe = mock.addFixture("123456abcdef");
+    const before = mock.snapshot();
+    mock.failOnce(failure);
+    await expect(mock.run()).rejects.toThrow(/Injected[\s\S]*user_abcdef123456_b/);
+    expect(mock.clerk.users.getUser).not.toHaveBeenCalledWith(sibling.id);
+    expect(mock.state.members.find(row => row.clerk_id === sibling.id))
+      .toEqual(before.members.find(row => row.clerk_id === sibling.id));
+    expect(mock.state.customers.find(row => row.id === "cus_abcdef123456_b"))
+      .toEqual(before.customers.find(row => row.id === "cus_abcdef123456_b"));
+    expect(mock.state.subscriptions.find(row => row.id === "sub_abcdef123456_b"))
+      .toEqual(before.subscriptions.find(row => row.id === "sub_abcdef123456_b"));
+    expect(mock.state.products[0]).toEqual(before.products[0]);
+    expect(mock.state.prices[0]).toEqual(before.prices[0]);
+    expect(mock.state.identities.some(row => row.id === safe.id)).toBe(false);
+    expect(mock.connection.release).toHaveBeenCalledTimes(mock.pool.connect.mock.calls.length);
+    if (failure.startsWith("DELETE")) {
+      expect(mock.events).toContain("ROLLBACK");
+      expect(mock.state.members.find(row => row.clerk_id === "user_fixture")).toEqual(before.members[0]);
+      expect(mock.state.checkouts.find(row => row.clerk_id === "user_fixture")).toEqual(before.checkouts[0]);
+    }
+  });
+
+  it("does not process any run when discovery cannot establish the complete sibling list", async () => {
+    const mock = membershipCleanupMocks();
+    mock.addFixture("123456abcdef");
+    const before = mock.snapshot();
+    mock.clerk.users.getUserList.mockRejectedValue(new Error("Clerk listing unavailable"));
+    await expect(mock.run()).rejects.toThrow("Clerk listing unavailable");
+    expect(mock.snapshot()).toEqual(before);
+    expect(mock.mutations()).toEqual([]);
+    expect(mock.pool.connect).not.toHaveBeenCalled();
+    expect(mock.pool.end).toHaveBeenCalledOnce();
+  });
+
+  it("archives a successful sibling catalog only once, after both identities are deleted", async () => {
+    const mock = membershipCleanupMocks();
+    const sibling = mock.addFixture("abcdef123456", "b");
+    await mock.run();
+    expect(mock.events.indexOf(`clerk-delete:${sibling.id}`))
+      .toBeLessThan(mock.events.indexOf("price-archive:price_fixture"));
+    expect(mock.stripe.prices.update).toHaveBeenCalledExactlyOnceWith("price_fixture", { active: false });
+    expect(mock.stripe.products.update).toHaveBeenCalledExactlyOnceWith("prod_fixture", { active: false });
+    expect(mock.state.identities.map(row => row.id)).toEqual(["user_member"]);
+  });
+
+  it.each([{ args: [] }, { args: ["--delete"] }])("reports every blocked run in mode $args and still processes a safe run", async ({ args }) => {
+    const mock = membershipCleanupMocks();
+    const second = mock.addFixture("111111111111");
+    const safe = mock.addFixture("222222222222");
+    mock.state.members[0].bio = "Protected first";
+    mock.state.invoices.find(row => row.customer === "cus_111111111111_a")!.total = 3000;
+    const before = mock.snapshot();
+    let error: unknown;
+    try { await mock.run(args); } catch (caught) { error = caught; }
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toHaveLength(2);
+    expect((error as Error).message).toContain("user_fixture");
+    expect((error as Error).message).toContain(second.id);
+    expect((error as Error).message).toContain("Non-fixture");
+    expect((error as Error).message).toContain("Additional billing");
+    expect(mock.state.members[0]).toEqual(before.members[0]);
+    expect(mock.state.identities.some(row => row.id === second.id)).toBe(true);
+    if (args.length) expect(mock.state.identities.some(row => row.id === safe.id)).toBe(false);
+    else {
+      expect(mock.snapshot()).toEqual(before);
+      expect(mock.mutations()).toEqual([]);
+      expect(mock.log).toHaveBeenCalledWith(expect.stringContaining(safe.id));
+    }
+    expect(mock.pool.end).toHaveBeenCalledOnce();
+  });
+
+  it.each(["price-archive:price_fixture", "product-archive:prod_fixture"])(
+    "reports a catalog %s failure without blocking another run's catalog", async failure => {
+      const mock = membershipCleanupMocks();
+      mock.addFixture("123456abcdef");
+      mock.failOnce(failure);
+      await expect(mock.run()).rejects.toThrow(`Catalog for run abcdef123456: Injected ${failure} failure`);
+      expect(mock.state.products.find(row => row.id === "prod_123456abcdef")?.active).toBe(false);
+      expect(mock.state.prices.find(row => row.id === "price_123456abcdef")?.active).toBe(false);
+      expect(mock.pool.end).toHaveBeenCalledOnce();
+    },
+  );
 
   it("refuses invalid command arguments and a failed development guard before inspecting resources", async () => {
     const mock = membershipCleanupMocks();

@@ -90,6 +90,46 @@ export function membershipCleanupMocks() {
     created: customer.created, cancel_at: customer.created + 4 * 86400, metadata: {},
     items: { data: [{ quantity: 1, price: structuredClone(state.prices[index]) }] },
   }));
+  // Add independent runs or role-b siblings without ever using live providers.
+  function addFixture(tag: string, role: "a" | "b" = "a") {
+    const suffix = `${tag}_${role}`;
+    const fixtureEmail = `membership-status-${role}-${tag}+clerk_test@example.com`;
+    const added = {
+      ...structuredClone(identity), id: `user_${suffix}`,
+      emailAddresses: [{ emailAddress: fixtureEmail }],
+    };
+    state.identities.push(added);
+    state.members.push({
+      ...structuredClone(state.members[0]), id: added.id, clerk_id: added.id, email: fixtureEmail,
+    });
+    state.checkouts.push({
+      ...structuredClone(state.checkouts[0]), id: state.checkouts.length + 1,
+      clerk_id: added.id, kind: role === "a" ? "standard" : "founding",
+      stripe_subscription_id: `sub_${suffix}`,
+    });
+    let product = state.products.find(row => row.name === `Disposable membership privacy check ${tag}`);
+    if (!product) {
+      product = { ...structuredClone(state.products[0]), id: `prod_${tag}`,
+        name: `Disposable membership privacy check ${tag}` };
+      state.products.push(product);
+      state.prices.push({ ...structuredClone(state.prices[0]), id: `price_${tag}`, product: product.id });
+    }
+    const price = state.prices.find(row => row.product === product.id)!;
+    state.customers.push({
+      ...structuredClone(state.customers[0]), id: `cus_${suffix}`, email: fixtureEmail,
+    });
+    const subscription = {
+      ...structuredClone(state.subscriptions[0]), id: `sub_${suffix}`, customer: `cus_${suffix}`,
+      cancel_at: state.subscriptions[0].created + (role === "a" ? 4 : 5) * 86400,
+      items: { data: [{ quantity: 1, price: structuredClone(price) }] },
+    };
+    state.subscriptions.push(subscription);
+    state.invoices.push({
+      ...structuredClone(state.invoices[0]), id: `in_${suffix}`, customer: `cus_${suffix}`,
+      parent: { type: "subscription_details", subscription_details: { subscription: subscription.id } },
+    });
+    return added;
+  }
   const events: string[] = [];
   let failure: string | undefined;
   function operation(name: string) {
@@ -140,6 +180,7 @@ export function membershipCleanupMocks() {
       data: structuredClone(state.identities.slice(offset, offset + limit)), totalCount: state.identities.length,
     })),
     getUser: vi.fn(async (id: string) => {
+      operation(`clerk-get:${id}`);
       const user = state.identities.find(user => user.id === id);
       if (!user) throw new Error(`Missing mock Clerk user ${id}`);
       return structuredClone(user);
@@ -165,9 +206,10 @@ export function membershipCleanupMocks() {
       }),
     },
     customers: {
-      list: vi.fn(async ({ email }: { email: string }) => ({
-        data: structuredClone(state.customers.filter(row => row.email === email)), has_more: false,
-      })),
+      list: vi.fn(async ({ email }: { email: string }) => {
+        operation(`customer-list:${email}`);
+        return { data: structuredClone(state.customers.filter(row => row.email === email)), has_more: false };
+      }),
       del: vi.fn(async (id: string) => {
         operation(`customer-delete:${id}`); state.customers = state.customers.filter(row => row.id !== id);
       }),
@@ -201,7 +243,8 @@ export function membershipCleanupMocks() {
   const dependencies = { clerk, stripe, pool, requireDevelopment, log: vi.fn() } as unknown as
     Parameters<typeof cleanupMembershipStatusFixtures>[0];
   return {
-    state, identity, clerk, stripe, pool, connection, events, mutations, snapshot, requireDevelopment,
+    state, identity, clerk, stripe, pool, connection, events, mutations, snapshot, requireDevelopment, addFixture,
+    log: dependencies.log,
     failOnce: (name: string) => { failure = name; },
     run: (args: string[] = ["--delete"]) => cleanupMembershipStatusFixtures(dependencies, args),
   };

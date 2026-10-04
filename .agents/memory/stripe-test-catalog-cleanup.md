@@ -8,3 +8,17 @@ Stripe does not delete a product once it has a user-created recurring price, eve
 **Why:** A live membership privacy check passed but its cleanup failed when it attempted to delete the product after archiving the price.
 
 **How to apply:** Guard the Stripe client against live keys before any fixture lookup or mutation. Verify the ownership marker and zero-cost price before reuse; cancel per-run subscriptions and remove customers, but preserve shared catalog entries for later runs. Cleanup of interrupted older fixtures may still archive their separately owned catalog.
+
+Per-run catalogs must remain available until all sibling accounts have passed
+cleanup, including remote identity deletion. Independent run tags may continue
+after a refusal, but siblings are not independent catalog owners.
+
+**Why:** Archiving for the first successful account can disable the billing
+catalog of an unsafe or failed sibling. Stripe and identity deletion are not
+atomic; putting archival last favors protecting accounts over automatic recovery
+of unused catalogs.
+
+**How to apply:** Defer archival until all sibling cleanup succeeds. If archival
+then fails after the last identity was removed, explicitly report the remaining
+catalog for ownership review rather than assuming a name pattern alone permits
+deletion on a later invocation.
