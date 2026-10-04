@@ -96,6 +96,104 @@ test("history restore hides cached cancellation and access details when membersh
   }
 });
 
+test("history restore recovers current membership after a failed refresh without remounting or navigation", async () => {
+  const cached = {
+    membership: { kind: "founding", status: "confirmed", cancellationDate: "2030-06-15T12:00:00.000Z" },
+  };
+  const recovered = {
+    membership: { kind: "founding", status: "confirmed", cancellationDate: null },
+  };
+  let response: typeof cached | typeof recovered = cached;
+  let refreshFails = false;
+  const requests = vi.fn(async (input: RequestInfo | URL) => {
+    expect(String(input)).toBe("/api/membership/me");
+    return new Response(JSON.stringify(refreshFails ? { error: "Billing unavailable" } : response), {
+      status: refreshFails ? 503 : 200,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", requests);
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.history.replaceState(null, "", "/membership");
+  const navigate = vi.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const queryKey = [...getGetMyMembershipQueryKey(), undefined];
+  client.setQueryData(queryKey, cached);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <Router hook={() => ["/membership", navigate]}>
+            <MembershipPage />
+          </Router>
+        </QueryClientProvider>,
+      );
+    });
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+      expect(client.getQueryState(queryKey)?.fetchStatus).toBe("idle");
+      expect(requests).toHaveBeenCalledTimes(1);
+      expect(container.textContent).toContain("membership is active until your scheduled cancellation.");
+      expect(container.textContent).toContain("Your cancellation takes effect on");
+      expect(container.textContent).toContain("June 15");
+    });
+    const mountedPage = container.firstElementChild;
+    expect(mountedPage).not.toBeNull();
+
+    refreshFails = true;
+    await act(async () => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+      expect(client.getQueryState(queryKey)?.fetchStatus).toBe("idle");
+      expect(client.getQueryState(queryKey)?.status).toBe("error");
+      expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+        "Your membership status could not be checked. Please try again later.",
+      );
+    });
+    expect(requests).toHaveBeenCalledTimes(2);
+    expect(client.getQueryData(queryKey)).toEqual(cached);
+    expect(container.textContent).not.toContain("membership is active");
+    expect(container.textContent).not.toContain("June 15");
+    expect(container.firstElementChild).toBe(mountedPage);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/membership");
+
+    refreshFails = false;
+    response = recovered;
+    // Keep the same React root and page; recovery must come from the later refresh.
+    await act(async () => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+      expect(client.getQueryState(queryKey)?.fetchStatus).toBe("idle");
+      expect(client.getQueryState(queryKey)?.status).toBe("success");
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(container.textContent).toContain("membership is active.");
+      expect(container.textContent).toContain("Manage billing or cancel");
+    });
+    expect(requests).toHaveBeenCalledTimes(3);
+    expect(client.getQueryData(queryKey)).toEqual(recovered);
+    expect(container.textContent).not.toContain("scheduled cancellation");
+    expect(container.textContent).not.toContain("Your cancellation takes effect on");
+    expect(container.textContent).not.toContain("June 15");
+    expect(container.textContent).not.toContain("You keep access until then.");
+    expect(container.firstElementChild).toBe(mountedPage);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe("/membership");
+  } finally {
+    await act(async () => root.unmount());
+    client.clear();
+    container.remove();
+  }
+});
+
 test.each([
   { trigger: "window focus", event: "visibilitychange" },
   { trigger: "history restore", event: "pageshow" },
