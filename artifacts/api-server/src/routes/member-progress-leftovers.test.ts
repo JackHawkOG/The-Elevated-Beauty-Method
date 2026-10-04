@@ -385,6 +385,7 @@ test.each(["changed-email", "changed-name", "unchanged"] as const)(
 );
 
 test.each([
+  "category-name", "category-slug", "category-description", "category-icon", "category-created-at",
   "course-title", "course-description", "course-instructor", "course-tier",
   "course-created-at", "course-thumbnail", "lesson-title", "lesson-content",
   "lesson-order", "lesson-created-at", "lesson-video", "added-lesson", "unchanged",
@@ -406,9 +407,9 @@ test.each([
     const deletedIdentities: string[] = [];
     const output: string[] = [];
     try {
-      await db.insert(usersTable).values({
+      const [member] = await db.insert(usersTable).values({
         clerkId: identity.id, email: identity.email, displayName: identity.name, createdAt,
-      });
+      }).returning();
       const [category] = await db.insert(categoriesTable).values({
         slug: `browser-progress-${fixtureRun}`, name: `Browser progress ${fixtureRun}`, createdAt,
       }).returning();
@@ -429,12 +430,14 @@ test.each([
       const [enrollment] = await db.insert(enrollmentsTable).values({
         userId: identity.id, courseId,
       }).returning();
-      await db.insert(lessonCompletionsTable).values({ userId: identity.id, lessonId: lessonIds[0] });
+      const [completion] = await db.insert(lessonCompletionsTable)
+        .values({ userId: identity.id, lessonId: lessonIds[0] }).returning();
       const [activity] = await db.insert(activityTable).values({
         actorName: identity.name, entityTitle: course.title,
         type: "enrollment", description: "enrolled in a course", createdAt,
       }).returning();
       activityIds.push(activity.id);
+      let expectedCategory = category;
       let expectedCourse = course;
       let expectedLessons = await db.select().from(lessonsTable)
         .where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.id);
@@ -444,6 +447,13 @@ test.each([
         async () => {
           // Commit through a separate connection after the inspector's snapshot,
           // before its transaction. No real identity-provider users are created.
+          const categoryChanges = {
+            "category-name": { name: "Real category" },
+            "category-slug": { slug: `real-category-${fixtureRun}` },
+            "category-description": { description: "Real editorial content" },
+            "category-icon": { icon: "GraduationCap" },
+            "category-created-at": { createdAt: new Date() },
+          };
           const courseChanges = {
             "course-title": { title: "Edited course" },
             "course-description": { description: "Real course content" },
@@ -459,7 +469,10 @@ test.each([
             "lesson-created-at": { createdAt: new Date() },
             "lesson-video": { videoUrl: "https://example.com/edited.mp4" },
           };
-          if (change in courseChanges) {
+          if (change in categoryChanges) {
+            await db.update(categoriesTable).set(categoryChanges[change as keyof typeof categoryChanges])
+              .where(eq(categoriesTable.id, category.id));
+          } else if (change in courseChanges) {
             await db.update(coursesTable).set(courseChanges[change as keyof typeof courseChanges])
               .where(eq(coursesTable.id, course.id));
           } else if (change in lessonChanges) {
@@ -472,6 +485,8 @@ test.each([
             }).returning();
             lessonIds.push(added.id);
           }
+          [expectedCategory] = await db.select().from(categoriesTable)
+            .where(eq(categoriesTable.id, category.id));
           [expectedCourse] = await db.select().from(coursesTable).where(eq(coursesTable.id, course.id));
           expectedLessons = await db.select().from(lessonsTable)
             .where(eq(lessonsTable.courseId, course.id)).orderBy(lessonsTable.id);
@@ -479,7 +494,9 @@ test.each([
       );
       if (change !== "unchanged") {
         await expect(cleanup).rejects.toThrow(
-          change.startsWith("course-")
+          change.startsWith("category-")
+            ? /Category changed during cleanup; refusing partial deletion/
+            : change.startsWith("course-")
             ? /Course changed during cleanup; refusing partial deletion/
             : /Lessons changed during cleanup; refusing partial deletion/,
         );
@@ -490,13 +507,13 @@ test.each([
         expect(await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id))
           .orderBy(lessonsTable.id)).toEqual(expectedLessons);
         expect(await db.select().from(categoriesTable).where(eq(categoriesTable.id, category.id)))
-          .toEqual([category]);
-        expect(await db.select({ clerkId: usersTable.clerkId }).from(usersTable)
-          .where(eq(usersTable.clerkId, identity.id))).toEqual([{ clerkId: identity.id }]);
+          .toEqual([expectedCategory]);
+        expect(await db.select().from(usersTable)
+          .where(eq(usersTable.clerkId, identity.id))).toEqual([member]);
         expect(await db.select().from(enrollmentsTable).where(eq(enrollmentsTable.id, enrollment.id)))
           .toEqual([enrollment]);
         expect(await db.select().from(lessonCompletionsTable)
-          .where(eq(lessonCompletionsTable.userId, identity.id))).toHaveLength(1);
+          .where(eq(lessonCompletionsTable.userId, identity.id))).toEqual([completion]);
         expect(await db.select().from(activityTable).where(eq(activityTable.id, activity.id)))
           .toEqual([activity]);
       } else {

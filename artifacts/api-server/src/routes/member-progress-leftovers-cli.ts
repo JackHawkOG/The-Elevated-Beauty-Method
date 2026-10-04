@@ -128,6 +128,9 @@ export async function inspectProgressLeftovers(
       throw new Error("A Clerk identity has a non-fixture member record; refusing deletion");
     }
     const category = categoriesForRun[0];
+    const categorySnapshot = category
+      ? categories.find(row => row.id === Number(category.id))
+      : undefined;
     const courseRows = category
       ? await db.select().from(coursesTable).where(eq(coursesTable.categoryId, Number(category.id)))
       : [];
@@ -167,6 +170,15 @@ export async function inspectProgressLeftovers(
     // review additional records; never cascade through unrelated data.
     await beforeDelete?.();
     await db.transaction(async tx => {
+      if (category) {
+        // Lock the parent before deleting any children. Compare every selected
+        // field, not just fixture markers, so editorial reuse cannot be erased.
+        const [currentCategory] = await tx.select().from(categoriesTable)
+          .where(eq(categoriesTable.id, Number(category.id))).for("update");
+        if (!currentCategory || !isDeepStrictEqual(currentCategory, categorySnapshot)) {
+          throw new Error("Category changed during cleanup; refusing partial deletion");
+        }
+      }
       for (const id of ids) {
         await tx.delete(lessonCompletionsTable).where(eq(lessonCompletionsTable.userId, id));
         await tx.delete(enrollmentsTable).where(eq(enrollmentsTable.userId, id));
