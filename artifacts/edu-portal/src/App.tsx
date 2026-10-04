@@ -154,6 +154,7 @@ import { pruneInvalidAuditDraft } from '@/lib/radiant-audit-draft';
 import ElevatedRoutinePage from '@/pages/elevated-routine';
 import GuidePrivacyPage from '@/pages/guide-privacy';
 import GuidesPage from '@/pages/guides';
+import GuideRecordsPage from '@/pages/guide-records';
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
   return (
@@ -178,6 +179,14 @@ function MemberStoriesRoute() {
   const role = user?.publicMetadata.role;
   if (role !== "admin" && role !== "owner") return <NotFound />;
   return <MemberStoriesPage />;
+}
+
+function GuideRecordsRoute() {
+  const { user, isLoaded } = useUser();
+  if (!isLoaded) return null;
+  const role = user?.publicMetadata.role;
+  if (role !== "admin" && role !== "owner") return <NotFound />;
+  return <GuideRecordsPage />;
 }
 
 function AnnouncementActivityReviewRoute() {
@@ -212,6 +221,7 @@ function Router() {
       <Route path="/profile" component={() => <ProtectedRoute component={ProfilePage} />} />
       <Route path="/editorial" component={() => <ProtectedRoute component={EditorialRoute} />} />
       <Route path="/member-stories" component={() => <ProtectedRoute component={MemberStoriesRoute} />} />
+      <Route path="/guide-records" component={() => <ProtectedRoute component={GuideRecordsRoute} />} />
       <Route path="/announcement-activity-review" component={() => <ProtectedRoute component={AnnouncementActivityReviewRoute} />} />
       <Route path="/stories" component={() => <ProtectedRoute component={PublicStoriesPage} />} />
       <Route component={NotFound} />

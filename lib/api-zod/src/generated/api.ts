@@ -8,6 +8,43 @@
 import * as zod from 'zod';
 
 
+export const lookupRoutineGuideRecordsBodyEmailMax = 254;
+
+
+
+export const LookupRoutineGuideRecordsBody = zod.object({
+  "email": zod.string().email().max(lookupRoutineGuideRecordsBodyEmailMax)
+})
+
+export const LookupRoutineGuideRecordsResponse = zod.object({
+  "email": zod.string(),
+  "claims": zod.number().int(),
+  "deliveries": zod.number().int(),
+  "emailCounters": zod.number().int(),
+  "activeDelivery": zod.boolean(),
+  "revision": zod.string()
+})
+
+
+export const removeRoutineGuideRecordsBodyEmailMax = 254;
+
+export const removeRoutineGuideRecordsBodyConfirmationEmailMax = 254;
+
+export const removeRoutineGuideRecordsBodyRevisionRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const RemoveRoutineGuideRecordsBody = zod.object({
+  "email": zod.string().email().max(removeRoutineGuideRecordsBodyEmailMax),
+  "confirmationEmail": zod.string().email().max(removeRoutineGuideRecordsBodyConfirmationEmailMax),
+  "revision": zod.string().regex(removeRoutineGuideRecordsBodyRevisionRegExp)
+})
+
+export const RemoveRoutineGuideRecordsResponse = zod.object({
+  "email": zod.string(),
+  "erased": zod.boolean()
+})
+
+
 /**
  * @summary Guide-only request information
  */

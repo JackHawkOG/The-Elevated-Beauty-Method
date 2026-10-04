@@ -63,6 +63,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 </SidebarMenuButton>
               </SidebarMenuItem>}
               {canManageStories && <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={location === "/guide-records"}>
+                  <Link href="/guide-records"><BookOpen /> <span>Guide record removal</span></Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>}
+              {canManageStories && <SidebarMenuItem>
                 <SidebarMenuButton asChild isActive={location.startsWith("/member-stories")}>
                    <Link href="/member-stories"><Quote /> <span>Member stories</span>{removalCount > 0 && <span className="ml-auto rounded-full bg-destructive px-2 text-xs text-destructive-foreground" aria-label={`${removalCount} outstanding story removal requests`}>{removalCount}</span>}</Link>
                 </SidebarMenuButton>

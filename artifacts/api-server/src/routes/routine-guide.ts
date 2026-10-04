@@ -3,13 +3,20 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
+import { clerkClient } from "@clerk/express";
+import { requireAuth } from "../middlewares/requireAuth";
+import { createGuideRecordStore, GuideRecordConflict, type GuideRecordStore } from "../lib/routine-guide-records";
 import { ReplitConnectors } from "@replit/connectors-sdk";
 import {
   ClaimRoutineGuideBody,
   ClaimRoutineGuideResponse,
   GetRoutineGuideResponse,
   ListDigitalGuidesResponse,
+  LookupRoutineGuideRecordsBody,
+  LookupRoutineGuideRecordsResponse,
+  RemoveRoutineGuideRecordsBody,
+  RemoveRoutineGuideRecordsResponse,
 } from "@workspace/api-zod";
 import {
   ROUTINE_GUIDE_CONSENT,
@@ -34,9 +41,24 @@ type SenderOutcome = "accepted" | "rejected" | "uncertain" | "preflight_failure"
 
 export interface RoutineGuideDependencies {
   store?: GuideClaimStore;
+  records?: GuideRecordStore;
   attachmentPath?: string;
   publishedInLibrary?: boolean;
   send?: (email: string, idempotencyKey: string) => Promise<SenderOutcome>;
+}
+
+async function requireOwner(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const user = await clerkClient.users.getUser(req.userId!);
+    if (user.publicMetadata.role !== "owner" && user.publicMetadata.role !== "admin") {
+      res.status(403).json({ error: "Owner access required" });
+      return;
+    }
+    next();
+  } catch {
+    req.log.error("Could not verify guide-record owner access");
+    res.status(503).json({ error: "Unable to verify owner access" });
+  }
 }
 
 function runtimeAttachmentPath(): string {
@@ -119,10 +141,48 @@ export function createRoutineGuideSender(
 export function createRoutineGuideRouter(dependencies: RoutineGuideDependencies = {}): IRouter {
   const router = Router();
   const store = dependencies.store ?? routineGuideClaimStore;
+  const records = dependencies.records ?? createGuideRecordStore();
   const attachmentPath = dependencies.attachmentPath ?? runtimeAttachmentPath();
   const send = dependencies.send ?? createRoutineGuideSender(attachmentPath);
   const publishedInLibrary = dependencies.publishedInLibrary ??
     process.env.ROUTINE_GUIDE_LIBRARY_PUBLISHED === "true";
+
+  router.post("/routine-guide/records/lookup", requireAuth, requireOwner, async (req, res): Promise<void> => {
+    res.setHeader("Cache-Control", "no-store");
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : req.body?.email;
+    const parsed = LookupRoutineGuideRecordsBody.safeParse({ email });
+    if (!parsed.success) {
+      res.status(400).json({ error: "Provide a valid requested email address." });
+      return;
+    }
+    try {
+      res.json(LookupRoutineGuideRecordsResponse.parse(await records.lookup(parsed.data.email)));
+    } catch {
+      req.log.error("Guide-record lookup failed");
+      res.status(503).json({ error: "Could not look up guide records. No records were removed." });
+    }
+  });
+
+  router.post("/routine-guide/records/remove", requireAuth, requireOwner, async (req, res): Promise<void> => {
+    res.setHeader("Cache-Control", "no-store");
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : req.body?.email;
+    const parsed = RemoveRoutineGuideRecordsBody.safeParse({ ...req.body, email });
+    if (!parsed.success || parsed.data.confirmationEmail !== email) {
+      res.status(400).json({ error: "Type the exact reviewed email address to confirm guide-only removal." });
+      return;
+    }
+    try {
+      const result = await records.remove(parsed.data.email, parsed.data.revision);
+      res.json(RemoveRoutineGuideRecordsResponse.parse(result));
+    } catch (error) {
+      if (error instanceof GuideRecordConflict) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+      req.log.error("Guide-record erasure could not be confirmed");
+      res.status(503).json({ error: "Erasure could not be confirmed. Look up the address again before retrying; do not assume removal succeeded." });
+    }
+  });
 
   router.get("/routine-guide", (_req, res): void => {
     res.setHeader("Cache-Control", "no-store");

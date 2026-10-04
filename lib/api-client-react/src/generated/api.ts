@@ -45,6 +45,10 @@ import type {
   Enrollment,
   EnrollmentInput,
   GetPendingMembershipInvoiceHistoryParams,
+  GuideRecordLookupInput,
+  GuideRecordRemovalInput,
+  GuideRecordRemovalResult,
+  GuideRecordReview,
   HealthStatus,
   Lesson,
   LessonInput,
@@ -115,6 +119,136 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getLookupRoutineGuideRecordsUrl = () => {
+
+
+
+
+  return `/api/routine-guide/records/lookup`
+}
+
+export const lookupRoutineGuideRecords = async (guideRecordLookupInput: GuideRecordLookupInput, options?: Parameters<typeof customFetch>[1]): Promise<GuideRecordReview> => {
+
+  return customFetch<GuideRecordReview>(getLookupRoutineGuideRecordsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(guideRecordLookupInput)
+  }
+);}
+
+
+
+
+
+export const getLookupRoutineGuideRecordsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupRoutineGuideRecords>>, TError,{data: BodyType<GuideRecordLookupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof lookupRoutineGuideRecords>>, TError,{data: BodyType<GuideRecordLookupInput>}, TContext> => {
+
+const mutationKey = ['lookupRoutineGuideRecords'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof lookupRoutineGuideRecords>>, {data: BodyType<GuideRecordLookupInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  lookupRoutineGuideRecords(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type LookupRoutineGuideRecordsMutationResult = NonNullable<Awaited<ReturnType<typeof lookupRoutineGuideRecords>>>
+    export type LookupRoutineGuideRecordsMutationBody = BodyType<GuideRecordLookupInput>
+    export type LookupRoutineGuideRecordsMutationError = ErrorType<void>
+
+    export const useLookupRoutineGuideRecords = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof lookupRoutineGuideRecords>>, TError,{data: BodyType<GuideRecordLookupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof lookupRoutineGuideRecords>>,
+        TError,
+        {data: BodyType<GuideRecordLookupInput>},
+        TContext
+      > => {
+      return useMutation(getLookupRoutineGuideRecordsMutationOptions(options));
+    }
+
+export const getRemoveRoutineGuideRecordsUrl = () => {
+
+
+
+
+  return `/api/routine-guide/records/remove`
+}
+
+export const removeRoutineGuideRecords = async (guideRecordRemovalInput: GuideRecordRemovalInput, options?: Parameters<typeof customFetch>[1]): Promise<GuideRecordRemovalResult> => {
+
+  return customFetch<GuideRecordRemovalResult>(getRemoveRoutineGuideRecordsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(guideRecordRemovalInput)
+  }
+);}
+
+
+
+
+
+export const getRemoveRoutineGuideRecordsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRoutineGuideRecords>>, TError,{data: BodyType<GuideRecordRemovalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeRoutineGuideRecords>>, TError,{data: BodyType<GuideRecordRemovalInput>}, TContext> => {
+
+const mutationKey = ['removeRoutineGuideRecords'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeRoutineGuideRecords>>, {data: BodyType<GuideRecordRemovalInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  removeRoutineGuideRecords(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveRoutineGuideRecordsMutationResult = NonNullable<Awaited<ReturnType<typeof removeRoutineGuideRecords>>>
+    export type RemoveRoutineGuideRecordsMutationBody = BodyType<GuideRecordRemovalInput>
+    export type RemoveRoutineGuideRecordsMutationError = ErrorType<void>
+
+    export const useRemoveRoutineGuideRecords = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRoutineGuideRecords>>, TError,{data: BodyType<GuideRecordRemovalInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof removeRoutineGuideRecords>>,
+        TError,
+        {data: BodyType<GuideRecordRemovalInput>},
+        TContext
+      > => {
+      return useMutation(getRemoveRoutineGuideRecordsMutationOptions(options));
+    }
 
 export const getGetRoutineGuideUrl = () => {
 

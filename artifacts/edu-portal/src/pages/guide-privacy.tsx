@@ -27,6 +27,9 @@ export default function GuidePrivacyPage() {
             <li><span className="text-foreground">Processing.</span> Resend processes the email that carries the guide.</li>
             <li><span className="text-foreground">No marketing.</span> Requesting the guide does not subscribe you to marketing.</li>
             <li><span className="text-foreground">Removal.</span> To ask for removal, write to <a className="text-primary underline underline-offset-4" href="mailto:hello@elevatedbeautymethod.com">hello@elevatedbeautymethod.com</a>.</li>
+            <li><span className="text-foreground">Scope of removal.</span> We can remove this address’s guide-only consent, delivery/retry records, and hashed email request counters from this site. Shared hashed IP abuse-prevention counters expire separately. This does not delete your account, membership, billing records, Audit answers, or other site data.</li>
+            <li><span className="text-foreground">Separate provider records.</span> Resend may retain email and delivery records under its own retention policies. Removing our records does not erase Resend’s records or recall an email already sent or being processed. Contact us about provider-held records; we do not promise they have been deleted when local removal is complete.</li>
+            <li><span className="text-foreground">No automatic resend.</span> Removal does not send another email. A later new guide request with explicit consent may create new records.</li>
           </ul>
         </section>
       </main>

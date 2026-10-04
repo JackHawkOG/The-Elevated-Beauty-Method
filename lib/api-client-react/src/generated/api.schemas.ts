@@ -5,6 +5,34 @@
  * Educational Community Portal API
  * OpenAPI spec version: 0.1.0
  */
+export interface GuideRecordLookupInput {
+  /** @maxLength 254 */
+  email: string;
+}
+
+export interface GuideRecordRemovalInput {
+  /** @maxLength 254 */
+  email: string;
+  /** @maxLength 254 */
+  confirmationEmail: string;
+  /** @pattern ^[a-f0-9]{64}$ */
+  revision: string;
+}
+
+export interface GuideRecordReview {
+  email: string;
+  claims: number;
+  deliveries: number;
+  emailCounters: number;
+  activeDelivery: boolean;
+  revision: string;
+}
+
+export interface GuideRecordRemovalResult {
+  email: string;
+  erased: boolean;
+}
+
 export interface MembershipConversionInput {
   /**
      * Private checkout correlation. Never forward to analytics.

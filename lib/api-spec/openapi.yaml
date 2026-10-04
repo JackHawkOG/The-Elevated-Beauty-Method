@@ -27,6 +27,58 @@ tags:
   - name: method
     description: Personalized beauty method
 paths:
+  /routine-guide/records/lookup:
+    post:
+      operationId: lookupRoutineGuideRecords
+      tags: [Guides]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuideRecordLookupInput"
+      responses:
+        "200":
+          description: Owner-only exact-address guide record review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideRecordReview"
+        "400":
+          description: Invalid address
+        "401":
+          description: Sign-in required
+        "403":
+          description: Owner access required
+        "503":
+          description: Review unavailable
+  /routine-guide/records/remove:
+    post:
+      operationId: removeRoutineGuideRecords
+      tags: [Guides]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuideRecordRemovalInput"
+      responses:
+        "200":
+          description: Local guide records erased after transaction commit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuideRecordRemovalResult"
+        "400":
+          description: Explicit address confirmation required
+        "401":
+          description: Sign-in required
+        "403":
+          description: Owner access required
+        "409":
+          description: Records changed or delivery still active; review again
+        "503":
+          description: Erasure could not be confirmed
   /routine-guide:
     get:
       operationId: getRoutineGuide
@@ -1374,6 +1426,53 @@ paths:
 
 components:
   schemas:
+    GuideRecordLookupInput:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+    GuideRecordRemovalInput:
+      type: object
+      required: [email, confirmationEmail, revision]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        confirmationEmail:
+          type: string
+          format: email
+          maxLength: 254
+        revision:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+    GuideRecordReview:
+      type: object
+      required: [email, claims, deliveries, emailCounters, activeDelivery, revision]
+      properties:
+        email:
+          type: string
+        claims:
+          type: integer
+        deliveries:
+          type: integer
+        emailCounters:
+          type: integer
+        activeDelivery:
+          type: boolean
+        revision:
+          type: string
+    GuideRecordRemovalResult:
+      type: object
+      required: [email, erased]
+      properties:
+        email:
+          type: string
+        erased:
+          type: boolean
     MembershipConversionInput:
       type: object
       required: [checkoutSessionId]

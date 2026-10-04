@@ -9,6 +9,7 @@ import * as schema from "../../../../lib/db/src/schema";
 import { expect, test, vi } from "vitest";
 import { requireDevelopmentDatabase } from "./test-development-database";
 import { createRoutineGuideRouter, type RoutineGuideDependencies } from "./routine-guide";
+import { createGuideRecordStore, GuideRecordConflict } from "../lib/routine-guide-records";
 import {
   createRoutineGuideClaimStore,
   ROUTINE_GUIDE_CONSENT,
@@ -22,6 +23,61 @@ type Delivery = {
   attempt_count: number; first_attempt_at: Date; lease_until: Date | null; accepted_at: Date | null;
 };
 type Sender = NonNullable<RoutineGuideDependencies["send"]>;
+
+test("owner removal erases all guide versions and email counters, preserves other addresses and shared IP counters", async () => {
+  await withFixture(async f => {
+    const claims = f.store(f.first);
+    const reserved = await claims.reserve({ requestId: f.requestId, email: f.email, ip: f.ip });
+    if (reserved.kind !== "send") throw new Error("Expected send reservation");
+    await claims.markAccepted(f.email, reserved.providerIdempotencyKey);
+    await f.store(f.second).reserve({ requestId: f.otherRequestId, email: f.otherEmail, ip: f.ip });
+    await f.control.query("INSERT INTO routine_guide_claims (request_id, email_hash, consent, consent_text, guide_version) VALUES ($1,$2,true,$3,'older')", [randomUUID(), f.emailHash, ROUTINE_GUIDE_CONSENT]);
+    const records = createGuideRecordStore(drizzle(f.first, { schema }));
+    const review = await records.lookup(f.email);
+    expect(review).toMatchObject({ claims: 2, deliveries: 1, emailCounters: 1, activeDelivery: false });
+    expect(await records.remove(f.email, review.revision)).toEqual({ email: f.email, erased: true });
+    expect(await records.lookup(f.email)).toMatchObject({ claims: 0, deliveries: 0, emailCounters: 0 });
+    expect(await records.lookup(f.otherEmail)).toMatchObject({ claims: 1, deliveries: 1, emailCounters: 1 });
+    expect((await f.control.query("SELECT * FROM routine_guide_rate_limits WHERE key_hash LIKE 'ip:%'")).rows).toHaveLength(1);
+    // A delayed provider completion cannot recreate deleted records.
+    await expect(claims.markAccepted(f.email, reserved.providerIdempotencyKey)).rejects.toThrow();
+    expect(await records.lookup(f.email)).toMatchObject({ claims: 0, deliveries: 0 });
+  });
+});
+
+test("active delivery and stale reviews reject removal without deleting records", async () => {
+  await withFixture(async f => {
+    const claims = f.store(f.first);
+    const reserved = await claims.reserve({ requestId: f.requestId, email: f.email, ip: f.ip });
+    if (reserved.kind !== "send") throw new Error("Expected send reservation");
+    const records = createGuideRecordStore(drizzle(f.second, { schema }));
+    const active = await records.lookup(f.email);
+    expect(active.activeDelivery).toBe(true);
+    await expect(records.remove(f.email, active.revision)).rejects.toBeInstanceOf(GuideRecordConflict);
+    await claims.markAccepted(f.email, reserved.providerIdempotencyKey);
+    await expect(records.remove(f.email, active.revision)).rejects.toBeInstanceOf(GuideRecordConflict);
+    expect(await records.lookup(f.email)).toMatchObject({ claims: 1, deliveries: 1, emailCounters: 1 });
+  });
+});
+
+test("a failed deletion rolls back every guide record including earlier deletions", async () => {
+  await withFixture(async f => {
+    const claims = f.store(f.first);
+    const reserved = await claims.reserve({ requestId: f.requestId, email: f.email, ip: f.ip });
+    if (reserved.kind !== "send") throw new Error("Expected send reservation");
+    await claims.markAccepted(f.email, reserved.providerIdempotencyKey);
+    const records = createGuideRecordStore(drizzle(f.second, { schema }));
+    const before = await records.lookup(f.email);
+    await f.control.query(`
+      CREATE FUNCTION reject_guide_removal() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'fixture deletion failure'; END $$;
+      CREATE TRIGGER reject_guide_removal BEFORE DELETE ON routine_guide_rate_limits
+      FOR EACH ROW EXECUTE FUNCTION reject_guide_removal();
+    `);
+    await expect(records.remove(f.email, before.revision)).rejects.toMatchObject({ cause: { message: "fixture deletion failure" } });
+    expect(await records.lookup(f.email)).toEqual(before);
+  });
+});
 
 // Each fixture has its own migration-backed schema, three physical connections,
 // reserved-domain addresses, and explicitly owned request IDs/hashes. No query
