@@ -2,6 +2,7 @@
 // Dry run by default. Only marked identities older than 24 hours are eligible.
 import { createClerkClient } from "@clerk/backend";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import type Stripe from "stripe";
 import type { PoolClient } from "../../../lib/db/src/index";
 import { getTestStripeClient } from "../../../scripts/src/stripeClient";
@@ -12,6 +13,29 @@ import { isMembershipStatusTestCatalog } from "./membership-status-test-price";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 
 type Fixture = NonNullable<ReturnType<typeof staleMembershipStatusFixture>>;
+type Identity = Awaited<ReturnType<ReturnType<typeof createClerkClient>["users"]["getUser"]>>;
+
+async function verifyIdentity(
+  clerk: ReturnType<typeof createClerkClient>, identity: Identity, fixture: Fixture,
+) {
+  const latest = await clerk.users.getUser(identity.id);
+  if (latest.id !== identity.id || latest.createdAt !== identity.createdAt ||
+      staleMembershipStatusFixture(latest)?.email !== fixture.email) {
+    throw new Error(`Fixture identity changed; refusing deletion for ${identity.id}`);
+  }
+}
+
+// Only our successful cancellation may change these ownership fields. Stripe
+// also adds cancellation timestamps, so do not compare the entire subscription.
+function subscriptionOwnership(subscription: Stripe.Subscription | undefined, canceled = false) {
+  if (!subscription) return;
+  return {
+    id: subscription.id, customer: subscription.customer, created: subscription.created,
+    metadata: subscription.metadata, items: subscription.items.data,
+    status: canceled ? "canceled" : subscription.status,
+    cancel_at: canceled ? null : subscription.cancel_at,
+  };
+}
 
 async function billingFor(stripe: Stripe, fixture: Fixture, createdAt: number) {
   const products: Stripe.Product[] = [];
@@ -154,7 +178,9 @@ export async function cleanupMembershipStatusFixtures(
     const candidates: Array<{ id: string; email: string; tag: string }> = [];
     const blockedTags = new Set<string>();
     const failures: Error[] = [];
-    const catalogs = new Map<string, { product: Stripe.Product; price?: Stripe.Price }>();
+    const catalogs = new Map<string, {
+      product: Stripe.Product; price?: Stripe.Price; fixture: Fixture; createdAt: number;
+    }>();
     for (let offset = 0; ; offset += 100) {
       const page = await clerk.users.getUserList({ limit: 100, offset });
       for (const user of page.data) {
@@ -181,7 +207,7 @@ export async function cleanupMembershipStatusFixtures(
         }
         const identity = await clerk.users.getUser(candidate.id);
         const fixture = staleMembershipStatusFixture(identity);
-        if (!fixture || fixture.email !== candidate.email) {
+        if (!fixture || identity.id !== candidate.id || fixture.email !== candidate.email) {
           throw new Error(`Fixture identity changed; refusing deletion for ${candidate.id}`);
         }
         const { customer, subscription, product, price } = await billingFor(stripe, fixture, identity.createdAt);
@@ -195,10 +221,7 @@ export async function cleanupMembershipStatusFixtures(
           if (args.length) {
             // Recheck Clerk immediately before deletion. If account cleanup fails,
             // the marked identity remains available for a safe retry.
-            const latest = await clerk.users.getUser(candidate.id);
-            if (!staleMembershipStatusFixture(latest) || latest.emailAddresses[0].emailAddress !== fixture.email) {
-              throw new Error(`Fixture identity changed; refusing deletion for ${candidate.id}`);
-            }
+            await verifyIdentity(clerk, identity, fixture);
             await connection.query("DELETE FROM membership_checkouts WHERE clerk_id = $1", [candidate.id]);
             await connection.query("DELETE FROM users WHERE clerk_id = $1 AND email = $2", [candidate.id, fixture.email]);
           }
@@ -211,12 +234,36 @@ export async function cleanupMembershipStatusFixtures(
         }
         log(`${args.length ? "Removing" : "Would remove"} ${candidate.id} (${fixture.email}): ${counts.members} member, ${counts.checkouts} checkout, ${subscription ? 1 : 0} subscription, ${customer ? 1 : 0} customer`);
         if (args.length) {
-          if (subscription && subscription.status !== "canceled") await stripe.subscriptions.cancel(subscription.id);
-          if (customer) await stripe.customers.del(customer.id);
+          let canceled = false;
+          let customerDeleted = false;
+          const verifyRemoteBoundary = async () => {
+            requireDevelopment();
+            const latest = await billingFor(stripe, fixture, identity.createdAt);
+            if (!isDeepStrictEqual(latest.product, product) ||
+                !isDeepStrictEqual(latest.price, price) ||
+                !isDeepStrictEqual(latest.customer, customerDeleted ? undefined : customer) ||
+                !isDeepStrictEqual(subscriptionOwnership(latest.subscription),
+                  customerDeleted ? undefined : subscriptionOwnership(subscription, canceled))) {
+              throw new Error(`Fixture billing changed; refusing deletion for ${candidate.id}`);
+            }
+            // Check Clerk last, after Stripe's potentially paginated reads.
+            await verifyIdentity(clerk, identity, fixture);
+          };
+          if (subscription && subscription.status !== "canceled") {
+            await verifyRemoteBoundary();
+            await stripe.subscriptions.cancel(subscription.id);
+            canceled = true;
+          }
+          if (customer) {
+            await verifyRemoteBoundary();
+            await stripe.customers.del(customer.id);
+            customerDeleted = true;
+          }
+          await verifyRemoteBoundary();
           await clerk.users.deleteUser(candidate.id);
           // Do not archive a per-run catalog until every sibling has succeeded.
           // Reusable catalogs are never returned by billingFor as an owned product.
-          if (product) catalogs.set(fixture.tag, { product, price });
+          if (product) catalogs.set(fixture.tag, { product, price, fixture, createdAt: identity.createdAt });
         }
       } catch (error) {
         blockedTags.add(candidate.tag);
@@ -226,12 +273,46 @@ export async function cleanupMembershipStatusFixtures(
         ));
       }
     }
-    for (const [tag, { product, price }] of catalogs) {
+    for (const [tag, { product, price, fixture, createdAt }] of catalogs) {
       if (blockedTags.has(tag)) continue;
       try {
         requireDevelopment();
-        if (price?.active) await stripe.prices.update(price.id, { active: false });
-        if (product.active) await stripe.products.update(product.id, { active: false });
+        let priceArchived = false;
+        const verifyCatalogBoundary = async () => {
+          requireDevelopment();
+          const latest = await billingFor(stripe, fixture, createdAt);
+          if (latest.customer || !isDeepStrictEqual(latest.product, product) ||
+              !isDeepStrictEqual(latest.price, priceArchived && price ? { ...price, active: false } : price)) {
+            throw new Error(`Fixture catalog or billing changed; refusing archival for ${tag}`);
+          }
+          // A new or modified sibling may appear after discovery. No remaining
+          // identity from this run authorizes shared-catalog archival.
+          for (let offset = 0; ; offset += 100) {
+            const page = await clerk.users.getUserList({ limit: 100, offset });
+            if (page.data.some(user => user.emailAddresses.some(address =>
+              /^membership-status-[ab]-([0-9a-f]{12})\+clerk_test@example\.com$/
+                .exec(address.emailAddress)?.[1] === tag))) {
+              throw new Error(`Remaining identity in run ${tag}; refusing catalog archival`);
+            }
+            if (!page.data.length || offset + page.data.length >= page.totalCount) break;
+          }
+          for await (const subscription of stripe.subscriptions.list({ status: "all", limit: 100 })) {
+            if (subscription.status !== "canceled" && subscription.items.data.some(item =>
+              item.price.id === price?.id ||
+              (typeof item.price.product === "string" ? item.price.product : item.price.product.id) === product.id)) {
+              throw new Error(`Catalog has other billing for run ${tag}; refusing archival`);
+            }
+          }
+        };
+        if (price?.active) {
+          await verifyCatalogBoundary();
+          await stripe.prices.update(price.id, { active: false });
+          priceArchived = true;
+        }
+        if (product.active) {
+          await verifyCatalogBoundary();
+          await stripe.products.update(product.id, { active: false });
+        }
       } catch (error) {
         failures.push(new Error(
           `Catalog for run ${tag}: ${error instanceof Error ? error.message : String(error)}. ` +

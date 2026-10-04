@@ -132,6 +132,12 @@ export function membershipCleanupMocks() {
   }
   const events: string[] = [];
   let failure: string | undefined;
+  const afterHooks = new Map<string, () => void>();
+  function afterOperation(name: string) {
+    const hook = afterHooks.get(name);
+    afterHooks.delete(name);
+    hook?.();
+  }
   function operation(name: string) {
     events.push(name);
     if (failure === name) { failure = undefined; throw new Error(`Injected ${name} failure`); }
@@ -171,6 +177,7 @@ export function membershipCleanupMocks() {
       }
       rows = state.related[match[1]].filter(row => row[match[2]] === values[0]);
     }
+    afterOperation(sql);
     return { rows: structuredClone(rows), rowCount: rows.length };
   });
   const connection = { query, release: vi.fn(() => events.push("release")) };
@@ -188,21 +195,26 @@ export function membershipCleanupMocks() {
     deleteUser: vi.fn(async (id: string) => {
       operation(`clerk-delete:${id}`);
       state.identities = state.identities.filter(user => user.id !== id);
+      afterOperation(`clerk-delete:${id}`);
     }),
   } };
   async function* iterate<T>(rows: T[]) { yield* structuredClone(rows); }
   const stripe = {
     products: {
-      list: vi.fn(() => iterate(state.products)),
+      list: vi.fn(() => { operation("product-list"); return iterate(state.products); }),
       retrieve: vi.fn(async (id: string) => structuredClone(state.products.find(row => row.id === id))),
       update: vi.fn(async (id: string, patch: { active: boolean }) => {
         operation(`product-archive:${id}`); Object.assign(state.products.find(row => row.id === id)!, patch);
+        afterOperation(`product-archive:${id}`);
       }),
     },
     prices: {
-      list: vi.fn(({ product }: { product: string }) => iterate(state.prices.filter(row => row.product === product))),
+      list: vi.fn(({ product }: { product: string }) => {
+        operation(`price-list:${product}`); return iterate(state.prices.filter(row => row.product === product));
+      }),
       update: vi.fn(async (id: string, patch: { active: boolean }) => {
         operation(`price-archive:${id}`); Object.assign(state.prices.find(row => row.id === id)!, patch);
+        afterOperation(`price-archive:${id}`);
       }),
     },
     customers: {
@@ -212,14 +224,19 @@ export function membershipCleanupMocks() {
       }),
       del: vi.fn(async (id: string) => {
         operation(`customer-delete:${id}`); state.customers = state.customers.filter(row => row.id !== id);
+        afterOperation(`customer-delete:${id}`);
       }),
     },
     subscriptions: {
-      list: vi.fn(({ customer }: { customer: string }) => iterate(state.subscriptions.filter(row => row.customer === customer))),
+      list: vi.fn(({ customer }: { customer?: string }) => {
+        operation(`subscription-list:${customer ?? "all"}`);
+        return iterate(state.subscriptions.filter(row => !customer || row.customer === customer));
+      }),
       cancel: vi.fn(async (id: string) => {
         operation(`cancel:${id}`);
         const subscription = state.subscriptions.find(row => row.id === id)!;
         subscription.status = "canceled"; subscription.cancel_at = null;
+        afterOperation(`cancel:${id}`);
       }),
     },
     invoices: { list: vi.fn(async ({ customer }: { customer: string }) => ({
@@ -246,6 +263,7 @@ export function membershipCleanupMocks() {
     state, identity, clerk, stripe, pool, connection, events, mutations, snapshot, requireDevelopment, addFixture,
     log: dependencies.log,
     failOnce: (name: string) => { failure = name; },
+    afterOnce: (name: string, callback: () => void) => { afterHooks.set(name, callback); },
     run: (args: string[] = ["--delete"]) => cleanupMembershipStatusFixtures(dependencies, args),
   };
 }

@@ -176,7 +176,7 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
     })));
     const before = mock.snapshot().identities.filter(row => row.id !== "user_fixture");
     await mock.run();
-    expect(mock.clerk.users.getUserList.mock.calls).toEqual([
+    expect(mock.clerk.users.getUserList.mock.calls.slice(0, 2)).toEqual([
       [{ limit: 100, offset: 0 }], [{ limit: 100, offset: 100 }],
     ]);
     expect(mock.state.identities).toEqual(before);
@@ -193,6 +193,164 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
       return user;
     });
     await refusesWithoutChanges(mock, /Fixture identity changed/);
+  });
+
+  it.each(["COMMIT", "cancel:sub_fixture", "customer-delete:cus_fixture"])(
+    "preserves an identity modified after %s and stops subsequent remote writes", async boundary => {
+      const mock = membershipCleanupMocks();
+      const unrelated = protectedRecords(mock);
+      mock.afterOnce(boundary, () => { mock.identity.publicMetadata = { role: "owner" }; });
+      await expect(mock.run()).rejects.toThrow(/Fixture identity changed/);
+      expect(mock.events).toContain("COMMIT");
+      expect(mock.state.identities).toContainEqual(mock.identity);
+      expect(mock.identity.publicMetadata).toEqual({ role: "owner" });
+      expect(mock.stripe.subscriptions.cancel).toHaveBeenCalledTimes(boundary === "COMMIT" ? 0 : 1);
+      expect(mock.stripe.customers.del).toHaveBeenCalledTimes(boundary === "customer-delete:cus_fixture" ? 1 : 0);
+      expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+      expect(mock.stripe.prices.update).not.toHaveBeenCalled();
+      expect(mock.stripe.products.update).not.toHaveBeenCalled();
+      expect(protectedRecords(mock)).toEqual(unrelated);
+      const beforeRetry = mock.snapshot();
+      mock.events.length = 0;
+      await mock.run();
+      expect(mock.snapshot()).toEqual(beforeRetry);
+      expect(mock.mutations()).toEqual([]);
+    },
+  );
+
+  it.each(["email", "marker", "age", "createdAt", "id", "name"] as const)(
+    "refuses an identity's %s change after commit before canceling Stripe", async kind => {
+      const mock = membershipCleanupMocks();
+      mock.afterOnce("COMMIT", () => {
+        if (kind === "email") mock.identity.emailAddresses[0].emailAddress = "member@example.com";
+        if (kind === "marker") mock.identity.privateMetadata = {};
+        if (kind === "age") mock.identity.createdAt = Date.now();
+        if (kind === "createdAt") mock.identity.createdAt -= 60_000;
+        if (kind === "id") {
+          mock.clerk.users.getUser.mockResolvedValue({ ...structuredClone(mock.identity), id: "user_member" });
+        }
+        if (kind === "name") mock.identity.firstName = "In use";
+      });
+      await expect(mock.run()).rejects.toThrow(/Fixture identity changed/);
+      expect(mock.state.identities.some(row => row.id === "user_fixture")).toBe(true);
+      expect(mock.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+      expect(mock.stripe.customers.del).not.toHaveBeenCalled();
+      expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+    },
+  );
+
+  const billingChanges = ["paid-invoice", "foreign-invoice", "extra-subscription",
+    "foreign-subscription", "customer-change", "customer-email", "replacement-customer",
+    "replacement-subscription", "charge", "card", "catalog-change", "extra-price"] as const;
+  function changeBilling(mock: Mocks, kind: typeof billingChanges[number]) {
+    if (kind === "paid-invoice") mock.state.invoices[0].total = 2500;
+    if (kind === "foreign-invoice") mock.state.invoices[0].parent.subscription_details.subscription = "sub_member";
+    if (kind === "extra-subscription") mock.state.subscriptions.push({
+      ...structuredClone(mock.state.subscriptions[1]), id: "sub_extra", customer: "cus_fixture",
+    });
+    if (kind === "foreign-subscription") mock.state.subscriptions[0].items.data[0].price = structuredClone(mock.state.prices[1]);
+    if (kind === "customer-change") mock.state.customers[0].balance = 2500;
+    if (kind === "customer-email") mock.state.customers[0].email = "changed@example.com";
+    if (kind === "replacement-customer") {
+      mock.state.customers[0].id = "cus_replacement";
+      mock.state.subscriptions[0].customer = "cus_replacement";
+      mock.state.invoices[0].customer = "cus_replacement";
+    }
+    if (kind === "replacement-subscription") {
+      mock.state.subscriptions[0].id = "sub_replacement";
+      mock.state.invoices[0].parent.subscription_details.subscription = "sub_replacement";
+    }
+    if (kind === "charge") mock.state.charges.push({ customer: "cus_fixture" });
+    if (kind === "card") mock.state.cards.push({ customer: "cus_fixture" });
+    if (kind === "catalog-change") mock.state.prices[0].unit_amount = 2500;
+    if (kind === "extra-price") mock.state.prices.push({ ...mock.state.prices[0], id: "price_other" });
+  }
+
+  it.each(billingChanges.flatMap(kind =>
+    ["COMMIT", "cancel:sub_fixture"].map(boundary => ({ kind, boundary }))))(
+    "preserves $kind billing introduced after $boundary", async ({ kind, boundary }) => {
+      const mock = membershipCleanupMocks();
+      const unrelated = protectedRecords(mock);
+      let billingAfterChange: unknown;
+      mock.afterOnce(boundary, () => {
+        changeBilling(mock, kind);
+        const { identities, members, checkouts, related, ...billing } = mock.snapshot();
+        billingAfterChange = billing;
+      });
+      await expect(mock.run()).rejects.toThrow(/billing changed|Additional billing|Additional Stripe subscriptions|Unowned Stripe|Additional test prices/);
+      const { identities, members, checkouts, related, ...billing } = mock.snapshot();
+      expect(billing).toEqual(billingAfterChange);
+      expect(mock.stripe.subscriptions.cancel).toHaveBeenCalledTimes(boundary === "COMMIT" ? 0 : 1);
+      expect(mock.stripe.customers.del).not.toHaveBeenCalled();
+      expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+      expect(mock.stripe.prices.update).not.toHaveBeenCalled();
+      expect(mock.stripe.products.update).not.toHaveBeenCalled();
+      expect(mock.state.identities.some(row => row.id === "user_fixture")).toBe(true);
+      expect(protectedRecords(mock)).toEqual(unrelated);
+    },
+  );
+
+  it.each(["COMMIT", "cancel:sub_fixture", "customer-delete:cus_fixture"])(
+    "fails explicitly on a remote ownership lookup outage after %s and safely retries", async boundary => {
+      const mock = membershipCleanupMocks();
+      const unrelated = protectedRecords(mock);
+      mock.afterOnce(boundary, () => mock.failOnce("clerk-get:user_fixture"));
+      await expect(mock.run()).rejects.toThrow(/Injected clerk-get:user_fixture failure/);
+      expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+      expect(mock.state.identities.some(row => row.id === "user_fixture")).toBe(true);
+      expect(mock.stripe.prices.update).not.toHaveBeenCalled();
+      await mock.run();
+      expect(mock.state.identities.map(row => row.id)).toEqual(["user_member"]);
+      expect(mock.state.customers.map(row => row.id)).toEqual(["cus_member"]);
+      expect(mock.state.products[0].active).toBe(false);
+      expect(mock.state.prices[0].active).toBe(false);
+      expect(mock.stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      expect(protectedRecords(mock)).toEqual(unrelated);
+    },
+  );
+
+  it.each(["COMMIT", "cancel:sub_fixture", "customer-delete:cus_fixture"])(
+    "stops on a Stripe recheck outage after %s and resumes only after verification recovers", async boundary => {
+      const mock = membershipCleanupMocks();
+      const unrelated = protectedRecords(mock);
+      mock.afterOnce(boundary, () => mock.failOnce("product-list"));
+      await expect(mock.run()).rejects.toThrow(/Injected product-list failure/);
+      expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+      expect(mock.stripe.customers.del).toHaveBeenCalledTimes(boundary === "customer-delete:cus_fixture" ? 1 : 0);
+      expect(mock.stripe.prices.update).not.toHaveBeenCalled();
+      expect(mock.stripe.products.update).not.toHaveBeenCalled();
+      await mock.run();
+      expect(mock.state.identities.map(row => row.id)).toEqual(["user_member"]);
+      expect(mock.state.customers.map(row => row.id)).toEqual(["cus_member"]);
+      expect(mock.stripe.subscriptions.cancel).toHaveBeenCalledTimes(1);
+      expect(protectedRecords(mock)).toEqual(unrelated);
+    },
+  );
+
+  it.each(["subscription", "both"] as const)(
+    "checks the final Clerk boundary even when %s billing is already absent", async absent => {
+      const mock = membershipCleanupMocks();
+      mock.state.subscriptions = mock.state.subscriptions.filter(row => row.id !== "sub_fixture");
+      mock.state.invoices = mock.state.invoices.filter(row => row.customer !== "cus_fixture");
+      if (absent !== "subscription") mock.state.customers = mock.state.customers.filter(row => row.id !== "cus_fixture");
+      mock.state.checkouts = mock.state.checkouts.filter(row => row.clerk_id !== "user_fixture");
+      mock.afterOnce("COMMIT", () => { mock.identity.lastName = "Keep me"; });
+      await expect(mock.run()).rejects.toThrow(/Fixture identity changed/);
+      expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+      expect(mock.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+      expect(mock.stripe.customers.del).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves a new customer created after the old customer is deleted", async () => {
+    const mock = membershipCleanupMocks();
+    const replacement = { ...structuredClone(mock.state.customers[0]), id: "cus_new" };
+    mock.afterOnce("customer-delete:cus_fixture", () => mock.state.customers.push(replacement));
+    await expect(mock.run()).rejects.toThrow(/Fixture billing changed/);
+    expect(mock.state.customers).toContainEqual(replacement);
+    expect(mock.clerk.users.deleteUser).not.toHaveBeenCalled();
+    expect(mock.stripe.customers.del).toHaveBeenCalledExactlyOnceWith("cus_fixture");
+    expect(mock.stripe.prices.update).not.toHaveBeenCalled();
   });
 
   it("refuses a shared run catalog when its second identity is still in use", async () => {
@@ -413,6 +571,68 @@ describe("full membership fixture cleanup using only disposable mocks", () => {
     expect(mock.stripe.prices.update).toHaveBeenCalledExactlyOnceWith("price_fixture", { active: false });
     expect(mock.stripe.products.update).toHaveBeenCalledExactlyOnceWith("prod_fixture", { active: false });
     expect(mock.state.identities.map(row => row.id)).toEqual(["user_member"]);
+  });
+
+  it.each(["clerk-delete:user_fixture", "price-archive:price_fixture"])(
+    "preserves a catalog repurposed after %s", async boundary => {
+      const mock = membershipCleanupMocks();
+      const unrelated = protectedRecords(mock);
+      mock.afterOnce(boundary, () => { Object.assign(mock.state.products[0], { metadata: { owner: "real-member" } }); });
+      await expect(mock.run()).rejects.toThrow(/Catalog for run abcdef123456: Unowned Stripe catalog/);
+      expect(mock.state.products[0].active).toBe(true);
+      expect(mock.state.products[0].metadata).toEqual({ owner: "real-member" });
+      expect(mock.stripe.products.update).not.toHaveBeenCalled();
+      expect(mock.stripe.prices.update).toHaveBeenCalledTimes(boundary.startsWith("price-archive") ? 1 : 0);
+      expect(protectedRecords(mock)).toEqual(unrelated);
+    },
+  );
+
+  it.each(["sibling", "other-billing", "extra-price", "renamed-product", "replacement-price"] as const)(
+    "refuses catalog archival when %s appears after identity deletion", async kind => {
+      const mock = membershipCleanupMocks();
+      const unrelated = protectedRecords(mock);
+      mock.afterOnce("clerk-delete:user_fixture", () => {
+        if (kind === "sibling") mock.state.identities.push({
+          ...structuredClone(mock.identity), id: "user_new", firstName: "Keep me",
+          emailAddresses: [{ emailAddress: "membership-status-b-abcdef123456+clerk_test@example.com" }],
+        });
+        if (kind === "other-billing") mock.state.subscriptions.push({
+          ...structuredClone(mock.state.subscriptions[1]), id: "sub_new",
+          items: { data: [{ quantity: 1, price: structuredClone(mock.state.prices[0]) }] },
+        });
+        if (kind === "extra-price") mock.state.prices.push({ ...mock.state.prices[0], id: "price_new" });
+        if (kind === "renamed-product") mock.state.products[0].name = "Real member catalog";
+        if (kind === "replacement-price") mock.state.prices[0].id = "price_new";
+      });
+      await expect(mock.run()).rejects.toThrow(/Remaining identity|other billing|Additional test prices|catalog or billing changed/);
+      expect(mock.state.products[0].active).toBe(true);
+      expect(mock.state.prices[0].active).toBe(true);
+      expect(mock.stripe.products.update).not.toHaveBeenCalled();
+      expect(mock.stripe.prices.update).not.toHaveBeenCalled();
+      expect(protectedRecords(mock)).toEqual(unrelated);
+    },
+  );
+
+  it("keeps a product active if a new sibling appears during price archival", async () => {
+    const mock = membershipCleanupMocks();
+    mock.afterOnce("price-archive:price_fixture", () => mock.state.identities.push({
+      ...structuredClone(mock.identity), id: "user_new",
+      emailAddresses: [{ emailAddress: "membership-status-b-abcdef123456+clerk_test@example.com" }],
+    }));
+    await expect(mock.run()).rejects.toThrow(/Remaining identity in run/);
+    expect(mock.state.identities.some(row => row.id === "user_new")).toBe(true);
+    expect(mock.state.products[0].active).toBe(true);
+    expect(mock.stripe.products.update).not.toHaveBeenCalled();
+  });
+
+  it("reports a catalog recheck outage without hiding it or archiving another account's catalog", async () => {
+    const mock = membershipCleanupMocks();
+    const independent = mock.addFixture("123456abcdef");
+    mock.afterOnce(`clerk-delete:${independent.id}`, () => mock.failOnce("product-list"));
+    await expect(mock.run()).rejects.toThrow(/Catalog for run abcdef123456: Injected product-list failure/);
+    expect(mock.state.products[0].active).toBe(true);
+    expect(mock.state.prices[0].active).toBe(true);
+    expect(mock.state.products.find(row => row.id === "prod_123456abcdef")?.active).toBe(false);
   });
 
   it.each([{ args: [] }, { args: ["--delete"] }])("reports every blocked run in mode $args and still processes a safe run", async ({ args }) => {

@@ -57,3 +57,4 @@
 - [Guide delivery test isolation](guide-delivery-test-isolation.md) — scoped request fixtures alone do not isolate the store's global expired-counter cleanup.
 - [Guide measurement approval](guide-measurement-approval.md) — anonymous request measurement was approved with disclosure, not identity tracking or marketing consent.
 - [Paused browser query notifications](paused-browser-query-notifications.md) — real HTTP completion and timer-batched React Query rendering need separate settling in clock tests.
+- [Remote fixture cleanup safety](remote-fixture-cleanup-safety.md) — ownership refusals preserve partial progress; fresh boundary checks do not make cross-service deletion atomic.
