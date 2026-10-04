@@ -30,3 +30,14 @@ privacy assertion pass without exercising the cache boundary.
 **How to apply:** Use actual in-app links where available. For direct lesson
 routes, Wouter observes `history.pushState`; use that rather than `page.goto`
 while the response is held, then exercise the visible navigation controls.
+
+For held-write account-switch checks, keep a random document marker in memory
+and assert it survives the entire sign-out/sign-in and in-app navigation.
+
+**Why:** A reload can make a stale-callback test pass by discarding the pending
+JavaScript rather than exercising the protection. An unchanged URL alone does
+not prove the document survived.
+
+**How to apply:** Set the marker before holding the browser fetch return and
+compare it after the new member's protected page is ready, before releasing
+the committed response.

@@ -16,7 +16,7 @@ import { ArrowLeft, CheckCircle, Circle, ChevronLeft, ChevronRight, Menu, Loader
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 function LessonContent({ content }: { content: string }) {
   return (
@@ -49,6 +49,12 @@ export default function LessonPage() {
   const queryClient = useQueryClient();
   const [savedLessonKey, setSavedLessonKey] = useState<string | null>(null);
   const lessonKey = `${courseId}:${lessonId}`;
+  const activePage = useRef({ mounted: true, lessonKey });
+  activePage.current.lessonKey = lessonKey;
+  useEffect(() => {
+    activePage.current.mounted = true;
+    return () => { activePage.current.mounted = false; };
+  }, []);
 
   const { data: course } = useGetCourse(courseId, { 
     query: { queryKey: getGetCourseQueryKey(courseId), enabled: !!courseId } 
@@ -71,7 +77,12 @@ export default function LessonPage() {
 
   const updateProgress = useUpdateProgress({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (_data, variables) => {
+        // Auth changes replace this page/query client, but do not cancel a
+        // committed mutation's callbacks. A departed page must not toast or
+        // navigate the next member (or a different lesson in the same session).
+        if (!activePage.current.mounted ||
+            activePage.current.lessonKey !== `${variables.courseId}:${variables.data.lessonId}`) return;
         setSavedLessonKey(lessonKey);
         queryClient.invalidateQueries({ queryKey: getListEnrollmentsQueryKey() });
         // Do not interpret an unavailable outline as the end of the course.
@@ -91,7 +102,9 @@ export default function LessonPage() {
           setLocation(`/courses/${courseId}`);
         }
       },
-      onError: () => {
+      onError: (_error, variables) => {
+        if (!activePage.current.mounted ||
+            activePage.current.lessonKey !== `${variables.courseId}:${variables.data.lessonId}`) return;
         toast({ title: "Error", description: "Could not save progress.", variant: "destructive" });
       }
     }

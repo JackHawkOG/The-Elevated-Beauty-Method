@@ -17,6 +17,12 @@ test("lesson completion and continuation stay private after a delayed former-mem
   await checkLessonAccountSwitch(page);
 });
 
+test("a committed former-member lesson save cannot navigate or alert the next member", async ({ page }) => {
+  test.setTimeout(120_000);
+  requireAuditDevelopment();
+  await checkLessonAccountSwitch(page, true);
+});
+
 async function signIn(page: Page, email: string) {
   await page.goto("/radiant-audit");
   await clerk.signIn({ page, emailAddress: email });

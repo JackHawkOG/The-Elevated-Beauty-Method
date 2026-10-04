@@ -7,7 +7,7 @@ import {
 } from "./radiant-audit-fixtures";
 
 // Called by the live suite, never by the isolated/mock-Clerk suite.
-export async function checkLessonAccountSwitch(page: Page) {
+export async function checkLessonAccountSwitch(page: Page, delayedCompletion = false) {
   requireAuditDevelopment();
   await clerkSetup();
   const client = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
@@ -75,6 +75,102 @@ export async function checkLessonAccountSwitch(page: Page) {
       await page.evaluate(path => window.history.pushState(null, "", path), path);
       await expect(page).toHaveURL(path);
     };
+
+    if (delayedCompletion) {
+      const savePath = `/api/enrollments/${courseIds[0]}/progress`;
+      const aSavePath = `/courses/${courseIds[0]}/lessons/${aLessons[1].id}`;
+      await page.goto(aSavePath);
+      await expect(page.getByRole("button", { name: "Finish Course", exact: true })).toBeEnabled();
+      const documentId = await page.evaluate(({ savePath }) => {
+        const id = crypto.randomUUID();
+        const state = window as unknown as {
+          lessonSaveDocument: string;
+          lessonSaveCommitted?: number;
+          lessonSaveReturned?: boolean;
+          releaseLessonSave?: () => void;
+        };
+        state.lessonSaveDocument = id;
+        const originalFetch = window.fetch.bind(window);
+        let held = false;
+        window.fetch = async (...args) => {
+          const response = await originalFetch(...args);
+          const input = args[0];
+          const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+          const method = args[1]?.method ?? (input instanceof Request ? input.method : "GET");
+          if (!held && url.pathname === savePath && method.toUpperCase() === "PATCH") {
+            held = true;
+            state.lessonSaveCommitted = response.status;
+            await new Promise<void>(resolve => { state.releaseLessonSave = resolve; });
+            state.lessonSaveReturned = true;
+          }
+          return response;
+        };
+        return id;
+      }, { savePath });
+      await page.getByRole("button", { name: "Finish Course", exact: true }).click();
+      await expect.poll(() => page.evaluate(() =>
+        (window as unknown as { lessonSaveCommitted?: number }).lessonSaveCommitted,
+      )).toBe(200);
+      // Read the real committed row before switching; this is not a replay or
+      // mocked success response. The browser's fetch return alone is delayed.
+      const committed = await db.select().from(lessonCompletionsTable).where(and(
+        eq(lessonCompletionsTable.userId, created[0]),
+        eq(lessonCompletionsTable.lessonId, aLessons[1].id),
+      ));
+      expect(committed).toHaveLength(1);
+      await clerk.signOut({ page });
+      await clerk.signIn({ page, emailAddress: emails[1] });
+      await expect(page.getByRole("heading", { name: "Welcome back." })).toBeVisible();
+      await navigateInApp(bPath);
+      expect(await page.evaluate(() =>
+        (window as unknown as { lessonSaveDocument: string }).lessonSaveDocument,
+      )).toBe(documentId);
+      const checkB = async () => {
+        await expect(page).toHaveURL(bPath);
+        await expect(page.getByRole("button", { name: "Completed · Continue", exact: true })).toBeEnabled();
+        await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
+        await expect(page.locator('[aria-label="Completed"]')).toHaveCount(2);
+        await expect(page.getByRole("button", { name: "Mark Complete", exact: true })).toHaveCount(0);
+        await expect(page.getByRole("alert")).toHaveCount(0);
+        await expect(page.getByRole("status")).toHaveCount(0);
+      };
+      await checkB();
+      // Watch transient alerts/route changes too, rather than only the final UI.
+      await page.evaluate(({ bPath }) => {
+        const state = window as unknown as { lessonSaveChangedB?: boolean; releaseLessonSave?: () => void };
+        const check = () => {
+          if (location.pathname !== bPath ||
+              document.querySelector('[role="alert"], [role="status"]') ||
+              document.querySelectorAll('[aria-label="Completed"]').length !== 2) {
+            state.lessonSaveChangedB = true;
+          }
+        };
+        new MutationObserver(check).observe(document.documentElement, {
+          childList: true, subtree: true, characterData: true, attributes: true,
+        });
+        window.addEventListener("popstate", check);
+        state.releaseLessonSave?.();
+      }, { bPath });
+      await expect.poll(() => page.evaluate(() =>
+        (window as unknown as { lessonSaveReturned?: boolean }).lessonSaveReturned,
+      )).toBe(true);
+      await page.waitForTimeout(250);
+      await checkB();
+      expect(await page.evaluate(() =>
+        (window as unknown as { lessonSaveChangedB?: boolean }).lessonSaveChangedB,
+      )).toBeUndefined();
+      // B's ordinary continuation must still work, without saving A's lesson
+      // for B or moving B to the end of A's course.
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await expect(page).toHaveURL(bNextPath);
+      await expect(page.getByRole("button", { name: "Finish Course", exact: true })).toBeEnabled();
+      await expect(page.locator('[aria-label="Completed"]')).toHaveCount(2);
+      const bCompletions = await db.select().from(lessonCompletionsTable).where(
+        eq(lessonCompletionsTable.userId, created[1]),
+      );
+      expect(bCompletions.map(item => item.lessonId).sort()).toEqual(bLessons.slice(0, 2).map(item => item.id).sort());
+      return;
+    }
 
     // Capture a real browser-authenticated response: route.fetch can lose Clerk
     // authentication. Both fixtures are published, but completion is private.
@@ -199,6 +295,9 @@ export async function checkLessonAccountSwitch(page: Page) {
     expect(await page.evaluate(() => sessionStorage.getItem("lesson-switch-lost-own-progress"))).toBeNull();
   } finally {
     release();
+    await page.evaluate(() =>
+      (window as unknown as { releaseLessonSave?: () => void }).releaseLessonSave?.(),
+    ).catch(() => {});
     // Stop browser effects before deleting rows, including on assertion failure.
     await page.close();
     await delayed;
