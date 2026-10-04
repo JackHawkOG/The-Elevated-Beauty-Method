@@ -1137,19 +1137,36 @@ for (const storageFailure of ["read throws", "write throws", "write ignored"] as
   });
 }
 
-for (const scenario of ["expired", "unknown-age"] as const) {
-  test(`a signed-in ${scenario} retry waits for current Audit review and explicit new save`, async ({ page }) => {
+const agedRetryCases = (["expired", "unknown-age"] as const).flatMap(scenario =>
+  (["working", "absent", "throwing"] as const).map(tracker => ({ scenario, tracker })),
+);
+
+for (const { scenario, tracker } of agedRetryCases) {
+  test(`a signed-in ${scenario} retry waits for current Audit review and explicit new save with ${tracker} analytics`, async ({ page }) => {
     const answers = fixture(scenario);
-    await page.addInitScript(() => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", error => pageErrors.push(error.message));
+    await page.addInitScript(tracker => {
       const events: Array<{ name: string; data?: unknown }> = [];
       (window as unknown as { __auditTracking: typeof events }).__auditTracking = events;
+      if (tracker === "absent") {
+        delete window.umami;
+        return;
+      }
       (window as unknown as { umami: { track: (name: string, data?: unknown) => void } }).umami = {
-        track: (name, data) => { events.push({ name, data }); },
+        track: (name, data) => {
+          // Record attempts before throwing so the test proves each safe-wrapper
+          // call was exercised, not simply skipped during the outage.
+          events.push({ name, data });
+          if (tracker === "throwing") throw new Error("Audit analytics unavailable");
+        },
       };
-    });
+    }, tracker);
     const tracking = () => page.evaluate(() =>
       (window as unknown as { __auditTracking: TrackingEvent[] }).__auditTracking,
     );
+    const expectTracking = async (events: TrackingEvent[]) =>
+      expect(await tracking()).toEqual(tracker === "absent" ? [] : events);
     const oldId = crypto.randomUUID();
     const writes: string[] = [];
     let reads = 0;
@@ -1205,7 +1222,7 @@ for (const scenario of ["expired", "unknown-age"] as const) {
     await expect(page.getByRole("alertdialog").getByRole("alert")).toContainText("couldn't load your current Audit");
     expect(reads).toBeGreaterThan(priorReads);
     expect(writes).toEqual([]);
-    expect(await tracking()).toEqual([]);
+    await expectTracking([]);
     await page.getByRole("button", { name: "Try loading again" }).click();
     const dialog = page.getByRole("alertdialog");
     await expect(dialog).toContainText(current ? "will create a new retake" : "will create a new Audit");
@@ -1214,21 +1231,28 @@ for (const scenario of ["expired", "unknown-age"] as const) {
       name: "radiant_audit_expired_retry_reviewed",
       data: { has_current_audit: current !== null },
     };
-    expect(await tracking()).toEqual([reviewed]);
+    await expectTracking([reviewed]);
     await dialog.getByRole("button", { name: "Keep editing" }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.locator("#mastery-goal")).toHaveValue(`${answers.masteryGoal} edited`);
+    expect(await page.evaluate(key =>
+      JSON.parse(localStorage.getItem(key)!).answers, signedInDraftKey,
+    )).toMatchObject({ ...answers, masteryGoal: `${answers.masteryGoal} edited` });
     expect(writes).toEqual([]);
-    expect(await tracking()).toEqual([reviewed]);
+    await expectTracking([reviewed]);
     await page.getByRole("button", { name: "Save my Audit" }).click();
     await expect(dialog).toContainText(current ? "will create a new retake" : "will create a new Audit");
     expect(writes).toEqual([]);
-    expect(await tracking()).toEqual([reviewed, reviewed]);
+    await expectTracking([reviewed, reviewed]);
     await dialog.getByRole("button", { name: current ? "Save as a new retake" : "Save as a new Audit" }).click();
-    expect(writes).toHaveLength(1);
     await expect(page.getByRole("heading", { name: "Your Radiant Audit" })).toBeVisible();
+    await expect(page.getByText(`${answers.masteryGoal} edited`).first()).toBeVisible();
+    expect(writes).toHaveLength(1);
+    expect(savedCurrent).toMatchObject({ ...answers, masteryGoal: `${answers.masteryGoal} edited` });
     expect(writes[0]).not.toBe(oldId);
     expect(await page.evaluate(key => localStorage.getItem(key), signedInDraftKey)).toBeNull();
     // Exact payloads exclude all answer text, email, account and submission IDs.
-    expect(await tracking()).toEqual([
+    await expectTracking([
       reviewed, reviewed,
       {
         name: "radiant_audit_expired_retry_new_save_selected",
@@ -1236,6 +1260,7 @@ for (const scenario of ["expired", "unknown-age"] as const) {
       },
       { name: "radiant_audit_saved", data: { completion_kind: current ? "retake" : "first_time" } },
     ]);
+    expect(pageErrors).toEqual([]);
   });
 }
 
