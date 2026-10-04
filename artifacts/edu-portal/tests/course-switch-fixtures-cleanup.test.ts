@@ -15,7 +15,8 @@ const env = {
   DATABASE_URL: "postgresql://dev:password@development.db:5432/development?sslmode=require",
 };
 
-it("resumes after a Clerk deletion outage without deleting unrelated identities or database rows", async () => {
+it.each(["unchanged", "ownership marker removed", "identity made young"] as const)(
+  "safely retries after a Clerk deletion outage with the remaining identity %s", async change => {
   requireAuditDevelopment();
   const { db, pool, categoriesTable, coursesTable, lessonsTable, enrollmentsTable, lessonCompletionsTable, usersTable } =
     await import("../../../lib/db/src/index");
@@ -101,6 +102,39 @@ it("resumes after a Clerk deletion outage without deleting unrelated identities 
     failDeletion = false;
     client.getUser.mockClear();
     client.deleteUser.mockClear();
+    if (change !== "unchanged") {
+      // The database cleanup committed, but the remaining external identity
+      // no longer qualifies. Do not let a stale discovery response authorize it.
+      const staleListing = [...listed];
+      const changedIdentity = {
+        ...identities[1],
+        ...(change === "ownership marker removed" ? { privateMetadata: {} } : { createdAt: now }),
+      };
+      listed = [changedIdentity, ...identities.slice(2)];
+      expect(staleCourseSwitchIdentity(changedIdentity, now)).toBeUndefined();
+      client.getUserList.mockResolvedValueOnce({ data: staleListing, totalCount: staleListing.length });
+
+      await expect(cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now }))
+        .rejects.toThrow(`Course-switch fixture identity changed: ${ids[1]}`);
+      expect(client.getUser.mock.calls).toEqual([[ids[1]]]);
+      expect(client.deleteUser).not.toHaveBeenCalled();
+      expect(listed).toEqual([changedIdentity, ...identities.slice(2)]);
+      expect(await snapshot(0)).toEqual(emptySnapshot);
+      expect(await snapshot(1)).toEqual(unrelatedBefore);
+
+      // Fresh discovery must also leave the changed identity alone, without
+      // looking it up or attempting another external deletion.
+      client.getUser.mockClear();
+      client.getUserList.mockClear();
+      await cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now });
+      expect(client.getUserList).toHaveBeenCalled();
+      expect(client.getUser).not.toHaveBeenCalled();
+      expect(client.deleteUser).not.toHaveBeenCalled();
+      expect(listed).toEqual([changedIdentity, ...identities.slice(2)]);
+      expect(await snapshot(0)).toEqual(emptySnapshot);
+      expect(await snapshot(1)).toEqual(unrelatedBefore);
+      return;
+    }
     await cleanupCourseSwitchFixtures({ client, db, deleteRows: true, now });
     expect(client.getUser.mock.calls).toEqual([[ids[1]], [ids[1]]]);
     expect(client.deleteUser.mock.calls).toEqual([[ids[1]]]);
