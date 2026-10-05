@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   activityTable, categoriesTable, coursesTable, db, enrollmentsTable,
-  lessonCompletionsTable, lessonsTable, usersTable,
+  lessonCompletionsTable, lessonsTable, pool, usersTable, type PoolClient,
 } from "@workspace/db";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { activityRun, categoryRun, confirmedRun, eligibleRun, identityRun, staleCandidates, type Candidate } from "./member-progress-leftovers";
 import { inspectProgressLeftovers, progressLeftoverArgs, runProgressLeftovers } from "./member-progress-leftovers-cli";
 import { requireDevelopmentDatabase } from "./test-development-database";
@@ -542,4 +542,177 @@ test.each([
       await db.delete(usersTable).where(eq(usersTable.clerkId, identity.id));
     }
   },
+);
+
+test.each(["course-edit", "lesson-edit", "lesson-insert"] as const)(
+  "database cleanup blocks a concurrent %s after curriculum snapshot rechecks",
+  async change => {
+    requireDevelopmentDatabase();
+    const fixtureRun = randomUUID();
+    const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    let categoryId: number | undefined;
+    let courseId: number | undefined;
+    const lessonIds: number[] = [];
+    const output: string[] = [];
+    let releaseCleanup!: () => void;
+    const gate = new Promise<void>(resolve => { releaseCleanup = resolve; });
+    let reachedDeletion!: () => void;
+    const ready = new Promise<void>(resolve => { reachedDeletion = resolve; });
+    const bounded = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 8000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const transaction = db.transaction.bind(db);
+    let transactionSpy: { mockRestore: () => void } | undefined;
+    let cleanup: Promise<void> | undefined;
+    let writer: PoolClient | undefined;
+    let write: Promise<{ rowCount: number | null; committed: boolean; errorCode?: string }> | undefined;
+    let writeSettled = false;
+    let cleanupPid: number | undefined;
+    let observeBlocking: (() => Promise<boolean>) | undefined;
+    try {
+      const [category] = await db.insert(categoriesTable).values({
+        slug: `browser-progress-${fixtureRun}`, name: `Browser progress ${fixtureRun}`, createdAt,
+      }).returning();
+      categoryId = category.id;
+      const [course] = await db.insert(coursesTable).values({
+        categoryId, title: "The Beauty Mindset Accelerator",
+        description: "Temporary browser progress check", instructorName: "Progress Check",
+        accessTier: "Elevated", createdAt,
+      }).returning();
+      courseId = course.id;
+      const [lesson] = await db.insert(lessonsTable).values({
+        courseId, sortOrder: 1, title: `Browser progress module 1 ${fixtureRun}`,
+        content: `Private lesson for browser check 1 ${fixtureRun}`, createdAt,
+      }).returning();
+      lessonIds.push(lesson.id);
+
+      const connection = await pool.connect();
+      writer = connection;
+      const writerPid = Number((await connection.query("SELECT pg_backend_pid() AS pid")).rows[0].pid);
+      await connection.query("BEGIN");
+      await connection.query("SET LOCAL lock_timeout = '8s'");
+      await connection.query("SET LOCAL statement_timeout = '10s'");
+      transactionSpy = vi.spyOn(db, "transaction").mockImplementationOnce((callback, config) =>
+        transaction(async tx => {
+          await tx.execute(sql`SET LOCAL lock_timeout = '8s'`);
+          await tx.execute(sql`SET LOCAL statement_timeout = '10s'`);
+          cleanupPid = Number((await tx.execute(sql`SELECT pg_backend_pid() AS pid`)).rows[0].pid);
+          expect(cleanupPid).not.toBe(writerPid);
+          // Observe from the paused cleanup connection itself: this race uses
+          // only two connections, not a third administrative polling session.
+          observeBlocking = async () => {
+            const result = await tx.execute(sql`
+              SELECT ${cleanupPid!}::int = ANY(pg_blocking_pids(${writerPid}::int)) AS blocked
+            `);
+            return result.rows[0].blocked === true;
+          };
+          const deleteRow = tx.delete.bind(tx);
+          let paused = false;
+          const deleteSpy = vi.spyOn(tx, "delete").mockImplementation(table => {
+            const query = deleteRow(table);
+            if (table === lessonsTable && !paused) {
+              paused = true;
+              const execute = query.execute.bind(query);
+              vi.spyOn(query, "execute").mockImplementation(async () => {
+                // The real callback reaches this first deletion only AFTER all
+                // category/course/lesson snapshot rechecks and FOR UPDATE reads.
+                // No deletion SQL has run yet, so a DELETE lock cannot mask a
+                // regression in those recheck locks.
+                reachedDeletion();
+                await bounded(gate, "cleanup deletion gate");
+                return execute();
+              });
+            }
+            return query;
+          });
+          try {
+            return await callback(tx);
+          } finally {
+            deleteSpy.mockRestore();
+          }
+        }, config),
+      );
+      cleanup = inspectProgressLeftovers(
+        fixtureRun, [],
+        async () => { throw new Error("Curriculum-only fixtures must not delete Clerk identities"); },
+        message => output.push(message),
+      );
+      await bounded(Promise.race([
+        ready,
+        cleanup.then(() => { throw new Error("Cleanup finished before the deletion gate"); }),
+      ]), "curriculum rechecks");
+      expect(output).toEqual([]);
+
+      write = (async () => {
+        try {
+          const result = change === "course-edit"
+            ? await connection.query("UPDATE courses SET description = $1 WHERE id = $2 RETURNING id",
+              ["Concurrent editorial course content", course.id])
+            : change === "lesson-edit"
+            ? await connection.query("UPDATE lessons SET content = $1 WHERE id = $2 RETURNING id",
+              ["Concurrent editorial lesson content", lesson.id])
+            : await connection.query(
+              "INSERT INTO lessons (course_id, title, content) VALUES ($1, $2, $3) RETURNING id",
+              [course.id, `Concurrent new lesson ${fixtureRun}`, "Real new content"],
+            );
+          if (change === "lesson-insert") lessonIds.push(...result.rows.map(row => Number(row.id)));
+          await connection.query("COMMIT");
+          return { rowCount: result.rowCount, committed: true };
+        } catch (error) {
+          await connection.query("ROLLBACK");
+          return { rowCount: null, committed: false, errorCode: (error as { code?: string }).code };
+        } finally {
+          writeSettled = true;
+        }
+      })();
+      // Poll real PostgreSQL lock ownership, rather than assuming a slow write
+      // is blocked. An early success or unrelated failure must fail this test.
+      await vi.waitFor(async () => {
+        expect(writeSettled, "writer finished while cleanup was paused").toBe(false);
+        expect(await observeBlocking!()).toBe(true);
+      }, { timeout: 4000, interval: 20 });
+      expect(writeSettled).toBe(false);
+      expect(output).toEqual([]);
+      releaseCleanup();
+      await bounded(cleanup, "cleanup commit");
+      const result = await bounded(write, "concurrent writer");
+      // Once cleanup commits, an edit affects no row; a new FK child is
+      // rejected because its parent has gone. Neither can resurrect curriculum.
+      expect(result).toEqual(change === "lesson-insert"
+        ? { rowCount: null, committed: false, errorCode: "23503" }
+        : { rowCount: 0, committed: true });
+      expect(output).toEqual([
+        `Removed confirmed disposable records for ${fixtureRun}. Re-run dry run to check for remaining Clerk users.`,
+      ]);
+      expect(await db.select().from(lessonsTable).where(eq(lessonsTable.courseId, course.id))).toEqual([]);
+      expect(await db.select().from(coursesTable).where(eq(coursesTable.id, course.id))).toEqual([]);
+      expect(await db.select().from(categoriesTable).where(eq(categoriesTable.id, category.id))).toEqual([]);
+    } finally {
+      releaseCleanup();
+      // Release the gate and settle both operations before restoring the spy
+      // or tearing down fixtures, even when setup or a race assertion fails.
+      await Promise.allSettled([cleanup, write].filter(promise => promise !== undefined));
+      transactionSpy?.mockRestore();
+      if (writer) {
+        try {
+          await writer.query("ROLLBACK");
+        } finally {
+          writer.release();
+        }
+      }
+      if (lessonIds.length) await db.delete(lessonsTable).where(inArray(lessonsTable.id, lessonIds));
+      if (courseId !== undefined) await db.delete(coursesTable).where(eq(coursesTable.id, courseId));
+      if (categoryId !== undefined) await db.delete(categoriesTable).where(eq(categoriesTable.id, categoryId));
+    }
+  }, 30000,
 );
