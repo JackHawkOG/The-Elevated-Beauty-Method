@@ -32,3 +32,9 @@ Do not retroactively authorize abandoned profile checks from their email or disp
 **Why:** Older response-order checks were created without private ownership markers, and older UUID prefixes contain hyphens. Their resemblance to newer owned fixtures does not prove they are disposable.
 
 **How to apply:** Fix ownership and tag generation for future runs, keep recognized persisted states narrowly scoped to each scenario, and leave historical unowned accounts for explicit ownership review.
+
+Profile fixture cleanup deliberately refuses any change to the validated Clerk snapshot, even if the edited identity still matches an eligible fixture shape. Make the last exact-ID read immediately precede the deletion attempt, and compensate local deletion when that read changes or fails.
+
+**Why:** An ordinary fixture marker can remain valid while independent ownership metadata or other identity fields change. Clerk's documented [deleteUser](https://clerk.com/docs/reference/backend/user/delete-user) takes only an ID, without an expected revision or documented conditional-delete option. Another read is the strongest available check in this flow, not an atomic guarantee.
+
+**How to apply:** Keep full snapshot equality separate from fixture eligibility; do not replace it with email matching or only a timestamp comparison. Do not claim the remaining remote read/delete gap is eliminated, and keep this policy restricted to development fixtures.

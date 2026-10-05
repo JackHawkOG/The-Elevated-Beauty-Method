@@ -4,6 +4,7 @@
 // pnpm run cleanup:profile-fixtures --recover-run RUN_UUID --id user_ID [--id user_ID ...]
 // Add --delete only after the dry run; never substitute an email match for run ownership.
 import { createClerkClient } from "@clerk/backend";
+import { isDeepStrictEqual } from "node:util";
 import { requireAuditDevelopment } from "./radiant-audit-fixtures";
 import {
   possibleUnmarkedProfileFixture, profileFixtureMember, staleProfileFixture, recoverableProfileFixture,
@@ -159,8 +160,20 @@ async function main() {
             const currentUser = await client.users.getUser(candidate.id);
             const currentFixture = eligible(currentUser);
             const identityChanged = currentUser.id !== candidate.id || !currentFixture || currentFixture.email !== candidate.email ||
-              currentFixture.tag !== candidate.tag || currentFixture.role !== candidate.role;
+              currentFixture.tag !== candidate.tag || currentFixture.role !== candidate.role ||
+              !isDeepStrictEqual(currentUser, user);
             if (identityChanged) {
+              await restore(tx);
+              return refusal;
+            }
+            // Clerk deleteUser accepts only an ID, not an expected revision or
+            // If-Match condition. Recheck the entire validated identity at the
+            // last available boundary, including ownership metadata/updatedAt.
+            // No asynchronous work may intervene before the deletion attempt.
+            // This narrows, but cannot eliminate, the remote read/delete race.
+            requireAuditDevelopment();
+            const deletionUser = await client.users.getUser(candidate.id);
+            if (!eligible(deletionUser) || !isDeepStrictEqual(deletionUser, currentUser)) {
               await restore(tx);
               return refusal;
             }

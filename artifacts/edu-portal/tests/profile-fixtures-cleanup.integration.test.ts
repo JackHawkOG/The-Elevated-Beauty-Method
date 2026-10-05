@@ -51,7 +51,11 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
   async function snapshot() {
     const rows: Record<string, unknown[]> = {};
     for (const table of tables) {
-      rows[table] = (await connection.query(`SELECT * FROM pg_temp."${table}"`)).rows;
+      // Compensation reinserts the same row at a different physical position.
+      // Compare data, not PostgreSQL's unspecified SELECT ordering.
+      rows[table] = (await connection.query(
+        `SELECT * FROM pg_temp."${table}" AS snapshot_row ORDER BY to_jsonb(snapshot_row)::text`,
+      )).rows;
     }
     return { rows, identities: await remoteIds([...owned]) };
   }
@@ -59,6 +63,7 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
   async function execute(ids: string[], deleteRows: boolean, options: {
     afterList?: () => Promise<void>; failDelete?: boolean;
     recoveryRun?: string; afterRecoveryDiscovery?: () => Promise<void>;
+    afterFreshLookup?: () => Promise<void>; failLastLookup?: boolean;
   } = {}) {
     requireAuditDevelopment();
     if (ids.some(id => !owned.has(id))) throw new Error("Non-owned cleanup scope");
@@ -77,6 +82,7 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
     });
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let recoveryDiscovered = false;
+    const lookups = new Map<string, number>();
     vi.resetModules();
     vi.doMock("@clerk/backend", () => ({
       createClerkClient: () => ({
@@ -91,21 +97,33 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
           },
           getUser: async (id: string) => {
             if (!owned.has(id) || !ids.includes(id)) throw new Error("Non-owned Clerk lookup");
+            const lookup = (lookups.get(id) ?? 0) + 1;
+            lookups.set(id, lookup);
+            const freshLookup = options.recoveryRun ? 3 : 2;
+            if (options.failLastLookup && lookup === freshLookup + 1) {
+              throw new Error("Injected last Clerk lookup outage");
+            }
             const user = await clerkCall(() => clerk.users.getUser(id));
             if (options.recoveryRun && !recoveryDiscovered) {
               recoveryDiscovered = true;
               await options.afterRecoveryDiscovery?.();
             }
+            // Hold the real response AFTER the fenced fresh lookup completes.
+            // The CLI receives its unchanged snapshot; only a subsequent read
+            // can see the committed remote edit.
+            if (lookup === freshLookup) await options.afterFreshLookup?.();
             return user;
           },
           deleteUser: async (id: string) => {
             requireAuditDevelopment();
-            if (!owned.has(id)) throw new Error("Non-owned Clerk deletion");
+            if (!owned.has(id) || !ids.includes(id)) throw new Error("Non-owned Clerk deletion");
+            // Count entry to the deletion boundary, not just successful calls
+            // after the test harness's independent ownership protection.
+            deleted.push(id);
             const user = await clerkCall(() => clerk.users.getUser(id));
             if (user.privateMetadata.profileCleanupIntegrationRun !== run) {
               throw new Error("Clerk fixture ownership changed");
             }
-            deleted.push(id);
             if (options.failDelete) throw new Error("Injected development Clerk deletion outage");
             return clerkCall(() => clerk.users.deleteUser(id));
           },
@@ -204,6 +222,63 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
       expect((await remoteIds([changedClerk.id]))).toEqual([changedClerk.id]);
       expect((await connection.query("SELECT clerk_id FROM pg_temp.users WHERE clerk_id = $1", [changedClerk.id])).rowCount).toBe(1);
       await clerkCall(() => clerk.users.updateUser(changedClerk.id, { firstName: "Member A" }));
+    }
+    // Changes after the fenced lookup must not reach deleteUser. Exercise
+    // ordinary marked cleanup and explicit exact-ID recovery independently.
+    // The independent run marker remains intact even when ordinary ownership
+    // is withdrawn, so teardown never has to infer ownership from an email.
+    for (const recoveryRun of [undefined, run]) {
+      for (const change of ["name", "marker", "public-metadata", "private-metadata"] as const) {
+        const before = await snapshot();
+        let edits = 0;
+        try {
+          const result = await execute([changedClerk.id], true, {
+            recoveryRun,
+            afterFreshLookup: async () => {
+              requireAuditDevelopment();
+              const user = await clerkCall(() => clerk.users.getUser(changedClerk.id));
+              if (user.privateMetadata.profileCleanupIntegrationRun !== run) throw new Error("Non-owned late edit");
+              expect((await connection.query("SELECT id FROM pg_temp.users WHERE clerk_id = $1", [changedClerk.id])).rowCount).toBe(0);
+              await clerkCall(() => clerk.users.updateUser(changedClerk.id, {
+                ...(change === "name" ? { firstName: "Late identity edit" } : {}),
+                ...(change === "public-metadata" ? { publicMetadata: { lateEdit: run } } : {}),
+                ...(change === "marker" || change === "private-metadata" ? {
+                  privateMetadata: {
+                    profileCleanupIntegrationRun: run,
+                    ...(change === "marker" ? {} : { ...profileFixturePrivateMetadata, lateEdit: run }),
+                  },
+                } : {}),
+              }));
+              edits++;
+            },
+          });
+          expect(edits, `${recoveryRun ? "Recovery" : "Marked"}: ${change}`).toBe(1);
+          expect(result.errors.map(String).join("\n")).toMatch(/identity changed after database cleanup/);
+          expect(result.deleted).toEqual([]);
+          // Every local column must be restored; unrelated identities/rows stay
+          // unchanged. A real exact-ID read proves the late edit survived.
+          expect(await snapshot()).toEqual(before);
+          const retained = await clerkCall(() => clerk.users.getUser(changedClerk.id));
+          expect(retained.id).toBe(changedClerk.id);
+          if (change === "name") expect(retained.firstName).toBe("Late identity edit");
+          if (change === "marker") expect(retained.privateMetadata.profileLiveFixture).toBeUndefined();
+          if (change === "public-metadata") expect(retained.publicMetadata.lateEdit).toBe(run);
+          if (change === "private-metadata") expect(retained.privateMetadata.lateEdit).toBe(run);
+        } finally {
+          requireAuditDevelopment();
+          const user = await clerkCall(() => clerk.users.getUser(changedClerk.id));
+          if (user.privateMetadata.profileCleanupIntegrationRun !== run) throw new Error("Non-owned late-edit reset");
+          await clerkCall(() => clerk.users.updateUser(changedClerk.id, {
+            firstName: "Member A", publicMetadata: {},
+            privateMetadata: { ...profileFixturePrivateMetadata, profileCleanupIntegrationRun: run },
+          }));
+        }
+      }
+      const before = await snapshot();
+      const unavailable = await execute([changedClerk.id], true, { recoveryRun, failLastLookup: true });
+      expect(unavailable.errors.map(String).join("\n")).toMatch(/Injected last Clerk lookup outage/);
+      expect(unavailable.deleted).toEqual([]);
+      expect(await snapshot()).toEqual(before);
     }
     await connection.query("UPDATE pg_temp.users SET bio = 'Edited non-fixture profile' WHERE clerk_id = $1", [fixture("changed-member").id]);
     await refused([fixture("changed-member").id], /Non-fixture member row/);
@@ -346,6 +421,18 @@ it("runs profile cleanup against isolated development Clerk users and temporary 
     expect(await execute([unmarked.id], true, { recoveryRun: run })).toEqual({ errors: [], deleted: [] });
     expect(await snapshot()).toEqual(recovered);
     expect(await remoteIds([bystander.id])).toEqual([bystander.id]);
+    // A new invocation after the explicit owned reset can clean up normally;
+    // no stale refusal state or compensated row should strand the fixture.
+    expect(await execute([changedClerk.id], true, { recoveryRun: run }))
+      .toEqual({ errors: [], deleted: [changedClerk.id] });
+    expect((await connection.query("SELECT id FROM pg_temp.users WHERE clerk_id = $1", [changedClerk.id])).rowCount).toBe(0);
+    await expect.poll(async () => {
+      try { await clerkCall(() => clerk.users.getUser(changedClerk.id)); return false; }
+      catch (error) {
+        if ((error as { status?: number }).status === 404) return true;
+        throw error;
+      }
+    }, { timeout: 10_000, interval: 1000 }).toBe(true);
   } finally {
     // Each fixture is exact-ID scoped and has an independent run-ownership marker.
     // Attempt EVERY cleanup even if one remote deletion fails.
