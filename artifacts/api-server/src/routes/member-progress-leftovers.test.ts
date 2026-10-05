@@ -256,6 +256,52 @@ test("activity-only confirmed cleanup leaves matching members and curriculum unc
   }
 });
 
+test("activity-only cleanup rolls back every selected feed row if one changes after selection", async () => {
+  requireDevelopmentDatabase();
+  const fixtureRun = randomUUID();
+  const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const changedDescription = "edited after activity-only inspection";
+  const createdIds: number[] = [];
+  const deleteIdentity = vi.fn(async () => {});
+  const beforeDelete = vi.fn(async () => {
+    // Commit the edit after selection, before the activity-only transaction.
+    // The first guarded delete must roll back when the second no longer matches.
+    await db.update(activityTable).set({ description: changedDescription })
+      .where(eq(activityTable.id, createdIds[1]));
+  });
+  const output: string[] = [];
+  try {
+    for (let index = 0; index < 2; index++) {
+      const [row] = await db.insert(activityTable).values({
+        actorName: `Progress Elevated ${fixtureRun}`,
+        entityTitle: "The Beauty Mindset Accelerator",
+        type: "enrollment", description: "enrolled in a course", createdAt,
+      }).returning({ id: activityTable.id });
+      createdIds.push(row.id);
+    }
+    const snapshots = await db.select().from(activityTable)
+      .where(inArray(activityTable.id, createdIds)).orderBy(activityTable.id);
+
+    await expect(inspectProgressLeftovers(
+      fixtureRun, [], deleteIdentity, message => output.push(message),
+      beforeDelete, "activity-only",
+    )).rejects.toThrow(/Activity changed during cleanup; refusing partial deletion/);
+
+    expect(beforeDelete).toHaveBeenCalledTimes(1);
+    expect(deleteIdentity).not.toHaveBeenCalled();
+    expect(output).toEqual([]);
+    expect(await db.select().from(activityTable)
+      .where(inArray(activityTable.id, createdIds)).orderBy(activityTable.id)).toEqual([
+      snapshots[0],
+      { ...snapshots[1], description: changedDescription },
+    ]);
+  } finally {
+    if (createdIds.length) {
+      await db.delete(activityTable).where(inArray(activityTable.id, createdIds));
+    }
+  }
+});
+
 test("database cleanup rolls back every selected feed row if one changes after selection", async () => {
   requireDevelopmentDatabase();
   const fixtureRun = randomUUID();
